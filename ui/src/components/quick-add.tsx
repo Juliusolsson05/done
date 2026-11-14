@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { PlusIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,8 @@ import { Separator } from '@/components/ui/separator'
 import { PriorityDot, ProjectDot } from '@/components/marks'
 import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
-import { describeDay, TODAY } from '@/lib/days'
+import { carryDismissed, dismissOnBackspace, type Dismissed } from '@/lib/date-phrases'
+import { describeDay, spellDay, TODAY } from '@/lib/days'
 import { readLine } from '@/lib/quick-add'
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
@@ -17,12 +18,45 @@ import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
 function QuickAdd() {
   const { data, ui, update, closeAll } = useApp()
   const [text, setText] = useState('')
+  // Date phrases the user said are not dates, by pressing Backspace after them.
+  const [dismissed, setDismissed] = useState<Dismissed[]>([])
   const inputRef = useFocus()
+  const mirrorRef = useRef<HTMLDivElement>(null)
   // What a new task gets when the typed line does not say: the view you are in.
-  const read = readLine(text, data.projects, TODAY, {
-    due: ui.view.kind === 'today' || ui.asGoal ? TODAY : null,
-    projectId: ui.view.kind === 'project' ? ui.view.id : null,
-  })
+  const read = readLine(
+    text,
+    data.projects,
+    TODAY,
+    {
+      due: ui.view.kind === 'today' || ui.asGoal ? TODAY : null,
+      projectId: ui.view.kind === 'project' ? ui.view.id : null,
+    },
+    dismissed,
+  )
+
+  // A long line scrolls inside the field; the highlight behind it has to
+  // scroll with it. Done after every render as well as on scroll, because
+  // typing moves the text before any scroll event arrives.
+  const followScroll = () => {
+    if (mirrorRef.current && inputRef.current) mirrorRef.current.scrollLeft = inputRef.current.scrollLeft
+  }
+  useLayoutEffect(followScroll)
+
+  const type = (next: string) => {
+    setDismissed(carryDismissed(dismissed, text, next))
+    setText(next)
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Only the plain key: Option and Command Backspace delete a word or the
+    // line, and a key pressed while composing belongs to the input method.
+    if (event.key !== 'Backspace' || event.metaKey || event.altKey || event.ctrlKey || event.nativeEvent.isComposing) return
+    const field = event.currentTarget
+    const gone = dismissOnBackspace(text, field.selectionStart, field.selectionEnd, read.date)
+    if (!gone) return
+    event.preventDefault()
+    setDismissed([...dismissed, gone])
+  }
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -36,20 +70,48 @@ function QuickAdd() {
     // Named as today's goal: there is only one, so the box closes after it.
     if (ui.asGoal) return closeAll()
     setText('') // stays open for the next task
+    setDismissed([])
   }
 
   return (
     <Card className="my-1 animate-enter gap-2 p-3 shadow-md">
       <form onSubmit={submit} className="flex flex-col gap-2">
-        <Input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          autoComplete="off"
-          placeholder="What needs doing?"
-          aria-label="New task"
-          className="border-0 px-0 text-base font-medium placeholder:font-normal placeholder:text-faint focus-visible:ring-0 md:text-base"
-        />
+        <div className="relative">
+          {/* A field cannot colour part of its own text, so the date phrase is
+              marked on a copy of the line lying exactly behind the field: same
+              type, same padding, never wrapped, scrolled with it. Only the
+              mark shows; the copy's text is transparent. */}
+          {read.date && (
+            <div
+              ref={mirrorRef}
+              aria-hidden
+              className="pointer-events-none absolute inset-0 flex items-center overflow-hidden text-base font-medium whitespace-pre text-transparent"
+            >
+              {/* The field keeps room for the caret after the last letter; without
+                  the same room here a line scrolled to its end would sit a
+                  couple of pixels off. */}
+              <span className="pr-1">
+                {text.slice(0, read.date.start)}
+                <span data-date-phrase className="rounded-sm bg-primary/15">
+                  {text.slice(read.date.start, read.date.end)}
+                </span>
+                {text.slice(read.date.end)}
+              </span>
+            </div>
+          )}
+          <Input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => type(e.target.value)}
+            onKeyDown={onKeyDown}
+            onScroll={followScroll}
+            onSelect={followScroll}
+            autoComplete="off"
+            placeholder="What needs doing?"
+            aria-label="New task"
+            className="relative border-0 px-0 text-base font-medium placeholder:font-normal placeholder:text-faint focus-visible:ring-0 md:text-base"
+          />
+        </div>
         {/* What was read out of the line, shown as it is typed. */}
         <div className="flex min-h-6 flex-wrap items-center gap-1 text-xs text-faint">
           {!text.trim() ? (
@@ -67,7 +129,8 @@ function QuickAdd() {
                   Today’s goal
                 </Badge>
               )}
-              {read.due && <Badge variant="outline">{describeDay(read.due, TODAY)}</Badge>}
+              {/* A typed date is said back with its weekday: "next friday" alone is easy to misread. */}
+              {read.due && <Badge variant="outline">{read.date ? spellDay(read.due, TODAY) : describeDay(read.due, TODAY)}</Badge>}
               {read.priority < 4 && (
                 <Badge variant="outline">
                   <PriorityDot priority={read.priority} />
