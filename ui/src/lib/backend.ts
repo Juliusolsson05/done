@@ -18,6 +18,7 @@ export interface Info {
 interface Tauri {
   core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> }
   webview: { getCurrentWebview(): { setZoom(factor: number): Promise<void> } }
+  event: { listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> }
 }
 declare global {
   interface Window {
@@ -57,4 +58,30 @@ export const restart = (): void => {
 // and sharpness stay correct at every size.
 export const setWebviewZoom = (factor: number): void => {
   void tauri?.webview.getCurrentWebview().setZoom(factor)
+}
+
+// The focus timer in the menu bar. The window owns the session and hands over
+// its times whenever they change; the menu bar counts down from them by
+// itself, because a hidden window's own timers are slowed or stopped. In a
+// browser there is no menu bar and nothing to tell.
+export interface MenuBarTimes {
+  endsAt: number | null
+  remaining: number | null
+  // When the next reminder comes. The menu bar says 'reminder' then, because
+  // a hidden window would not notice by itself.
+  reminderAt: number | null
+  // A reminder is showing: the menu bar rings and brings the window forward.
+  reminding: boolean
+}
+export const showInMenuBar = (session: MenuBarTimes | null): void => {
+  void tauri?.core.invoke('focus_set', { session })
+}
+
+// The menu bar's own Pause and Stop, and its word that time is up or that a
+// reminder may be due.
+export type MenuBarCommand = 'pause' | 'stop' | 'ended' | 'reminder'
+// Returns how to stop listening.
+export const onMenuBarCommand = (handler: (command: MenuBarCommand) => void): (() => void) => {
+  const listening = tauri?.event.listen<MenuBarCommand>('focus-command', (event) => handler(event.payload))
+  return () => void listening?.then((stop) => stop())
 }

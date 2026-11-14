@@ -2,6 +2,7 @@
 import { createContext, useContext, type CSSProperties, type RefObject } from 'react'
 import type { Info } from '@/lib/backend'
 import type { Day } from '@/lib/days'
+import type { Session } from '@/lib/focus'
 import { colorIndex, type Data, type Project, type View } from '@/lib/tasks'
 
 // What is on screen right now. Not saved: a reload always starts in Today.
@@ -15,6 +16,11 @@ export interface Ui {
   renaming: boolean
   confirmDelete: boolean
   tlStart: Day
+  // What the Focus view offers before a session starts: the task chosen (its
+  // id as text, or 'none'; null until something is chosen, which offers
+  // today's goal) and the length chosen with the buttons.
+  focusPick: string | null
+  focusMinutes: number
 }
 
 export interface App {
@@ -22,6 +28,8 @@ export interface App {
   info: Info
   ui: Ui
   zoom: number
+  // The focus session that is running, paused or just ended, if any.
+  focus: Session | null
   // The task that was just added or moved, marked for a moment.
   noticed: number | null
   // Set while a bar or card is being dragged, so nothing reloads under it.
@@ -37,6 +45,9 @@ export interface App {
   askDelete(): void
   setTlStart(day: Day): void
   setZoom(next: number): void
+  // Open the Focus view with this task chosen.
+  focusOn(id: number): void
+  chooseFocus(choice: { focusPick?: string; focusMinutes?: number }): void
 
   // Change the data, save it, and optionally mark one task as just changed.
   update(fn: (data: Data) => Data, notice?: number): void

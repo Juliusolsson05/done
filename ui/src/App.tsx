@@ -6,13 +6,16 @@ import { Toaster } from '@/components/ui/sonner'
 import { AppMenu, menuTargetOf, type MenuTarget } from '@/components/app-menu'
 import { AppSidebar } from '@/components/app-sidebar'
 import { Board } from '@/components/board'
+import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog } from '@/components/task-editor'
 import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
-import { isDesktop, setWebviewZoom } from '@/lib/backend'
+import { isDesktop, onMenuBarCommand, setWebviewZoom } from '@/lib/backend'
 import { addDays, dayOf, TODAY } from '@/lib/days'
+import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
+import { endFocus, getFocus, handOff, remind, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
 import { deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -30,9 +33,17 @@ function storedZoom(): number {
 
 export default function App() {
   const { data, info } = useSyncExternalStore(subscribe, getSnapshot)
+  const focus = useSyncExternalStore(subscribeFocus, getFocus)
   const [failed, setFailed] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
-  const [ui, setUi] = useState<Ui>({ ...CLOSED, view: { kind: 'today' }, tlStart: addDays(TODAY, -4) })
+  const [ui, setUi] = useState<Ui>(() => ({
+    ...CLOSED,
+    // A reminder that was showing before a reload is still showing after it.
+    view: { kind: getFocus()?.reminding ? 'focus' : 'today' },
+    tlStart: addDays(TODAY, -4),
+    focusPick: null,
+    focusMinutes: DEFAULT_MINUTES,
+  }))
   const [noticed, setNoticed] = useState<number | null>(null)
   const [zoom, setZoomState] = useState(storedZoom)
   const [menuTarget, setMenuTarget] = useState<MenuTarget>({ kind: 'space' })
@@ -67,20 +78,24 @@ export default function App() {
     info,
     ui,
     zoom,
+    focus,
     noticed,
     dragging,
     closeAll,
     say,
     setZoom,
     openView: (view: View) => setUi((u) => ({ ...u, ...CLOSED, view })),
-    // Settings has no list to add to, so adding from there goes to Inbox.
-    add: () => setUi((u) => ({ ...u, ...CLOSED, view: u.view.kind === 'settings' ? { kind: 'inbox' } : u.view, adding: true })),
+    // Settings and Focus have no list to add to, so adding from there goes to Inbox.
+    add: () =>
+      setUi((u) => ({ ...u, ...CLOSED, view: u.view.kind === 'settings' || u.view.kind === 'focus' ? { kind: 'inbox' } : u.view, adding: true })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
     edit: (id) => setUi((u) => ({ ...u, ...CLOSED, editing: id })),
     newProject: () => setUi((u) => ({ ...u, ...CLOSED, newProject: true })),
     rename: () => setUi((u) => ({ ...u, ...CLOSED, renaming: true })),
     askDelete: () => setUi((u) => ({ ...u, ...CLOSED, confirmDelete: true })),
     setTlStart: (tlStart) => setUi((u) => ({ ...u, tlStart })),
+    focusOn: (id) => setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'focus' }, focusPick: String(id) })),
+    chooseFocus: (choice) => setUi((u) => ({ ...u, ...choice })),
     update(fn, id) {
       change(fn)
       if (id !== undefined) notice(id)
@@ -118,6 +133,8 @@ export default function App() {
       () => {
         const zoom = storedZoom()
         if (zoom !== 1) setWebviewZoom(zoom)
+        // A session that was running before a reload: the menu bar is told again.
+        handOff()
         setReady(true)
       },
       (error: unknown) => setFailed(String(error instanceof Error ? error.message : error)),
@@ -128,6 +145,13 @@ export default function App() {
     })
   }, [])
 
+  // Something is under your hands: typing, dragging or a menu open. Nothing
+  // may change the page then. Reads only refs, so set-up-once listeners can call it.
+  const busy = () => {
+    const { ui } = latest.current
+    return ui.adding || ui.editing !== null || ui.newProject || ui.renaming || dragging.current || menuOpen.current
+  }
+
   // Keeping in step. An agent, another window or the web app may change the
   // tasks, and an update may have arrived. Checked when the window comes back
   // and every few seconds while it is in view, but never under your hands:
@@ -135,9 +159,7 @@ export default function App() {
   useEffect(() => {
     const keepInStep = () => {
       if (dayOf(new Date()) !== TODAY) return location.reload()
-      const { ui } = latest.current
-      const busy = ui.adding || ui.editing !== null || ui.newProject || ui.renaming || dragging.current || menuOpen.current
-      if (document.hidden || busy) return
+      if (document.hidden || busy()) return
       refresh()
     }
     window.addEventListener('focus', keepInStep)
@@ -145,6 +167,44 @@ export default function App() {
     return () => {
       window.removeEventListener('focus', keepInStep)
       clearInterval(timer)
+    }
+  }, [])
+
+  // The end of a focus session, and its reminders. This only watches for
+  // them: the digits are redrawn by the small components that show them, not
+  // by the whole app.
+  useEffect(() => {
+    // Show it, unless that would pull the page out from under something being typed.
+    const show = (said: string) => {
+      if (busy()) latest.current.say(said)
+      else latest.current.openView({ kind: 'focus' })
+    }
+    const announce = () => {
+      const title = getFocus()?.title
+      if (timeIsUp()) show('Time is up: ' + title)
+    }
+    const announceReminder = () => {
+      const reminder = remind()
+      if (reminder) show('Reminder: ' + reminder.label)
+    }
+    const timer = setInterval(() => {
+      const session = getFocus()
+      // The end is looked for first: it wins over a reminder due at the same moment.
+      if (session && isDue(session, Date.now())) announce()
+      else announceReminder()
+    }, 250)
+    // From the menu bar: its Pause and Stop, and its word that time is up or
+    // a reminder is due (it keeps time while this window is hidden and its
+    // timers are slowed). Its Pause continues from a reminder, as resuming does.
+    const stopListening = onMenuBarCommand((command) => {
+      if (command === 'ended') announce()
+      if (command === 'reminder') announceReminder()
+      if (command === 'pause') toggleFocus()
+      if (command === 'stop') endFocus()
+    })
+    return () => {
+      clearInterval(timer)
+      stopListening()
     }
   }, [])
 
@@ -179,8 +239,16 @@ export default function App() {
         '3': { kind: 'upcoming' },
         '4': { kind: 'timeline' },
         '5': { kind: 'board' },
+        '6': { kind: 'focus' },
       }
       if (views[event.key]) app.openView(views[event.key])
+      // Space pauses and resumes; during a reminder Space or Enter continues.
+      // Enter on a button is left to the button, which may be Stop.
+      const enter = event.key === 'Enter' && app.focus?.reminding && !(event.target instanceof Element && event.target.closest('button'))
+      if ((event.key === ' ' || enter) && app.ui.view.kind === 'focus' && app.focus) {
+        event.preventDefault()
+        toggleFocus()
+      }
     }
     document.addEventListener('keydown', onZoomKey, true)
     document.addEventListener('keydown', onKey)
@@ -221,11 +289,15 @@ export default function App() {
             <SidebarProvider className="max-md:flex-col md:h-svh" onContextMenu={onContextMenu}>
               <AppSidebar />
               <SidebarInset className={cn('m-2 min-w-0 overflow-y-auto rounded-xl shadow-sm ring-1 ring-foreground/5 max-md:w-auto md:ml-0', wide ? 'p-8' : 'px-12 pt-10 pb-24 max-md:px-4 max-md:pt-6')}>
-                <div key={view.kind === 'project' ? view.id : view.kind} className={cn('animate-enter', view.kind === 'timeline' && 'flex min-h-0 flex-1 flex-col')}>
+                <div
+                  key={view.kind === 'project' ? view.id : view.kind}
+                  className={cn('animate-enter', (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col')}
+                >
                   {view.kind === 'timeline' && <Timeline />}
                   {view.kind === 'board' && <Board />}
+                  {view.kind === 'focus' && <FocusView />}
                   {view.kind === 'settings' && <Settings />}
-                  {!wide && view.kind !== 'settings' && <ListView />}
+                  {!wide && view.kind !== 'focus' && view.kind !== 'settings' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
               </SidebarInset>

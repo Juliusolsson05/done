@@ -1,4 +1,5 @@
-import { CalendarDaysIcon, CalendarIcon, ChartGanttIcon, Columns3Icon, InboxIcon, PlusIcon, SlidersHorizontalIcon, type LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { CalendarDaysIcon, CalendarIcon, ChartGanttIcon, Columns3Icon, InboxIcon, PlusIcon, SlidersHorizontalIcon, TimerIcon, type LucideIcon } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -13,6 +14,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { Countdown } from '@/components/focus-view'
 import { ProjectDot } from '@/components/marks'
 import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
@@ -41,16 +43,17 @@ function NewProject() {
 }
 
 export function AppSidebar() {
-  const { data, info, ui, openView, newProject } = useApp()
+  const { data, info, ui, focus, openView, newProject } = useApp()
   const count = counts(data.tasks, TODAY)
 
-  const nav = (kind: BuiltIn, label: string, Icon: LucideIcon, n = 0, late = false) => (
+  // `badge` is a count, left out at zero, or for Focus the time left.
+  const nav = (kind: BuiltIn, label: string, Icon: LucideIcon, badge: ReactNode = 0, late = false) => (
     <SidebarMenuItem>
       <SidebarMenuButton data-view={kind} isActive={ui.view.kind === kind} onClick={() => openView({ kind })}>
         <Icon className="text-muted-foreground" />
         <span>{label}</span>
       </SidebarMenuButton>
-      {n > 0 && <SidebarMenuBadge className={cn('font-normal', late ? 'text-overdue' : 'text-faint')}>{n}</SidebarMenuBadge>}
+      {badge ? <SidebarMenuBadge className={cn('font-normal', late ? 'text-overdue' : 'text-faint')}>{badge}</SidebarMenuBadge> : null}
     </SidebarMenuItem>
   )
 
@@ -65,6 +68,7 @@ export function AppSidebar() {
             {nav('upcoming', 'Upcoming', CalendarDaysIcon, count.upcoming)}
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
+            {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>
