@@ -125,9 +125,9 @@ function Running({ session }: { session: Session }) {
   return (
     <div className="flex min-h-96 flex-1 flex-col items-center justify-center gap-4 text-center">
       <div className="text-sm text-muted-foreground">{session.ended ? 'Time is up' : paused ? 'Paused' : 'Focusing on'}</div>
-      <div className="max-w-xl text-lg font-semibold wrap-anywhere">{session.title}</div>
+      <div className="max-w-xl text-lg font-medium wrap-anywhere">{session.title}</div>
       <div
-        className={cn('mt-2 mb-4 text-7xl leading-none font-bold tracking-tighter tabular-nums sm:text-8xl lg:text-9xl', paused && 'text-faint')}
+        className={cn('mt-2 mb-4 text-7xl leading-none font-medium tracking-tight tabular-nums sm:text-8xl lg:text-9xl', paused && 'text-faint')}
       >
         <Countdown session={session} />
       </div>
