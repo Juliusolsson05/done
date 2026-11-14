@@ -19,6 +19,7 @@ import { ProjectDot } from '@/components/marks'
 import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { restart } from '@/lib/backend'
+import { play } from '@/lib/sounds'
 import { TODAY } from '@/lib/days'
 import { addProject, counts, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,7 @@ function NewProject() {
     const name = value.trim()
     if (!name) return closeAll()
     const id = data.nextId
+    play('add')
     update((d) => addProject(d, name))
     openView({ kind: 'project', id })
   })

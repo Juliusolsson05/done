@@ -11,6 +11,7 @@ import {
 import { PriorityDot } from '@/components/marks'
 import { colorStyle, useApp } from '@/lib/app-context'
 import { addDays, nextWeekday, TODAY, type Day } from '@/lib/days'
+import { play } from '@/lib/sounds'
 import { COLOR_COUNT, colorIndex, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -38,6 +39,11 @@ const CHOSEN = 'bg-primary text-primary-foreground focus:bg-primary focus:text-p
 
 function TaskMenu({ task }: { task: Task }) {
   const { data, edit, focusOn, complete, reopen, removeTask, update } = useApp()
+  // Every change made from the menu is confirmed with the same quiet tick.
+  const change: typeof update = (fn, notice) => {
+    play('confirm')
+    update(fn, notice)
+  }
   const remove = (
     <ContextMenuItem variant="destructive" onSelect={() => removeTask(task.id)}>
       Delete task
@@ -55,13 +61,13 @@ function TaskMenu({ task }: { task: Task }) {
   const due = (label: string, day: Day) => (
     <ContextMenuCheckboxItem
       checked={task.due === day && !task.start}
-      onSelect={() => update((d) => patchTask(d, task.id, { start: null, due: day }), task.id)}
+      onSelect={() => change((d) => patchTask(d, task.id, { start: null, due: day }), task.id)}
     >
       {label}
     </ContextMenuCheckboxItem>
   )
   const moveTo = (label: string, projectId: number | null) => (
-    <ContextMenuCheckboxItem key={projectId ?? 'inbox'} checked={task.projectId === projectId} onSelect={() => update((d) => patchTask(d, task.id, { projectId }))}>
+    <ContextMenuCheckboxItem key={projectId ?? 'inbox'} checked={task.projectId === projectId} onSelect={() => change((d) => patchTask(d, task.id, { projectId }))}>
       {label}
     </ContextMenuCheckboxItem>
   )
@@ -72,11 +78,11 @@ function TaskMenu({ task }: { task: Task }) {
       <ContextMenuItem onSelect={() => focusOn(task.id)}>Focus on this</ContextMenuItem>
       <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
       {task.goalDay === TODAY ? (
-        <ContextMenuItem onSelect={() => update((d) => patchTask(d, task.id, { goalDay: null }))}>Remove as today’s goal</ContextMenuItem>
+        <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { goalDay: null }))}>Remove as today’s goal</ContextMenuItem>
       ) : (
-        <ContextMenuItem onSelect={() => update((d) => setGoal(d, task.id, TODAY), task.id)}>Make today’s goal</ContextMenuItem>
+        <ContextMenuItem onSelect={() => change((d) => setGoal(d, task.id, TODAY), task.id)}>Make today’s goal</ContextMenuItem>
       )}
-      <ContextMenuItem onSelect={() => update((d) => patchTask(d, task.id, { status: doing ? undefined : 'doing' }))}>
+      <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { status: doing ? undefined : 'doing' }))}>
         {doing ? 'Move back to To do' : 'Mark as in progress'}
       </ContextMenuItem>
       <ContextMenuSeparator />
@@ -84,7 +90,7 @@ function TaskMenu({ task }: { task: Task }) {
       {due('Today', TODAY)}
       {due('Tomorrow', addDays(TODAY, 1))}
       {due('Next Monday', nextWeekday(TODAY, 1))}
-      <ContextMenuCheckboxItem checked={!task.due} onSelect={() => update((d) => patchTask(d, task.id, { start: null, due: null }))}>
+      <ContextMenuCheckboxItem checked={!task.due} onSelect={() => change((d) => patchTask(d, task.id, { start: null, due: null }))}>
         No date
       </ContextMenuCheckboxItem>
       <ContextMenuSeparator />
@@ -95,7 +101,7 @@ function TaskMenu({ task }: { task: Task }) {
             key={p}
             aria-label={p < 4 ? `Priority ${p}` : 'No priority'}
             className={cn(CHOICE, task.priority === p && CHOSEN)}
-            onSelect={() => update((d) => patchTask(d, task.id, { priority: p }))}
+            onSelect={() => change((d) => patchTask(d, task.id, { priority: p }))}
           >
             <PriorityDot priority={p} />
             {p < 4 ? p : 'None'}
@@ -143,7 +149,10 @@ function ProjectMenu({ id }: { id: number }) {
             key={i}
             aria-label={`Colour ${i + 1}`}
             className={cn(CHOICE, current === i && 'ring-2 ring-primary')}
-            onSelect={() => update((d) => patchProject(d, id, { color: i }))}
+            onSelect={() => {
+              play('confirm')
+              update((d) => patchProject(d, id, { color: i }))
+            }}
           >
             <span style={colorStyle(i)} className="size-3 rounded-xs bg-project" />
           </ContextMenuItem>

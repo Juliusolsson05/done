@@ -51,7 +51,11 @@ export interface App {
 
   // Change the data, save it, and optionally mark one task as just changed.
   update(fn: (data: Data) => Data, notice?: number): void
-  complete(id: number): void
+  // The sound of finishing a task, for the rows: they play it when the check
+  // is pressed, a moment before the task is marked done.
+  completeSound(id: number): void
+  // `heard` when completeSound has already played for this.
+  complete(id: number, heard?: boolean): void
   reopen(id: number): void
   removeTask(id: number): void
   removeProject(id: number): void

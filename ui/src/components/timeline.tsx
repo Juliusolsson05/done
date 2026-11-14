@@ -8,6 +8,7 @@ import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
+import { play } from '@/lib/sounds'
 import { dragBar, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -82,7 +83,10 @@ function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | 
         aria-label={`Set ${task.title} to ${fullDay(day)}`}
         style={{ left: i * DAY_WIDTH + 2, width: DAY_WIDTH - 4 }}
         className="absolute top-1.5 h-6 rounded-md p-0 hover:bg-secondary"
-        onClick={() => update((d) => patchTask(d, task.id, { start: null, due: day }), task.id)}
+        onClick={() => {
+          play('confirm')
+          update((d) => patchTask(d, task.id, { start: null, due: day }), task.id)
+        }}
       />
     ))
   }
@@ -152,6 +156,7 @@ export function Timeline() {
       stop()
       // A press without movement is a click: open the task.
       if (moved === 0) return edit(task.id)
+      play('drop')
       update((d) => patchTask(d, task.id, dragBar(task, drag.mode, moved)), task.id)
     },
     cancel: stop,

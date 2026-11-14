@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addProject,
+  clearsToday,
   counts,
   deleteProject,
   deleteTask,
@@ -30,6 +31,18 @@ const task = (id: number, fields: Partial<Task> = {}): Task => ({
 })
 const data = (tasks: Task[], projects: Data['projects'] = []): Data => ({ rev: 1, nextId: 100, projects, tasks })
 const ids = (tasks: Task[]) => tasks.map((t) => t.id)
+
+describe('clearsToday', () => {
+  it('is true only for the last open task that is due today or overdue', () => {
+    const tasks = [task(1, { due: today }), task(2, { due: '2026-11-01', done: true }), task(3, { due: '2026-11-20' }), task(4)]
+    expect(clearsToday(tasks, 1, today)).toBe(true)
+    // Not due today, so finishing it clears nothing.
+    expect(clearsToday(tasks, 3, today)).toBe(false)
+    expect(clearsToday(tasks, 4, today)).toBe(false)
+    // Another one is still open.
+    expect(clearsToday([...tasks, task(5, { due: '2026-11-12' })], 1, today)).toBe(false)
+  })
+})
 
 describe('sections', () => {
   it('keeps overdue apart from today, oldest first, and adds under Today', () => {

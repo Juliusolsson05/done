@@ -115,7 +115,15 @@ export function counts(all: Task[], today: Day): Counts {
   }
 }
 
+// Whether finishing this task leaves nothing open for today: it is the only
+// open task that is due today or overdue.
+export function clearsToday(all: Task[], id: number, today: Day): boolean {
+  const due = openTasks(all).filter((t) => t.due !== null && t.due <= today)
+  return due.length === 1 && due[0].id === id
+}
+
 export type LaneKey = 'todo' | 'doing' | 'done'
+export const laneOf = (task: Task): LaneKey => (task.done ? 'done' : task.status === 'doing' ? 'doing' : 'todo')
 export function lanes(all: Task[], today: Day): Record<LaneKey, Task[]> {
   const order = (a: Task, b: Task) =>
     (a.due ? 0 : 1) - (b.due ? 0 : 1) || (a.due ?? '').localeCompare(b.due ?? '') || byPriority(a, b)

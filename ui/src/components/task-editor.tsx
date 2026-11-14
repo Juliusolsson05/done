@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { PriorityDot } from '@/components/marks'
 import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
+import { play } from '@/lib/sounds'
 import { patchTask, PRIORITY_NAME, tidyDates, type Task } from '@/lib/tasks'
 
 function EditorForm({ task }: { task: Task }) {
@@ -27,6 +28,7 @@ function EditorForm({ task }: { task: Task }) {
     event.preventDefault()
     if (!title.trim()) return titleRef.current?.focus()
     const fields = { title: title.trim(), notes, priority, projectId, ...tidyDates(start || null, due || null) }
+    play('confirm')
     update((d) => patchTask(d, task.id, fields))
     closeAll()
   }
