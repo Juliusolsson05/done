@@ -46,6 +46,12 @@ jobs:
         with:
           node-version: 22
 
+      # The interface first: its own checks, and the web server embeds its build.
+      - name: Interface
+        if: steps.plan.outputs.build == 'true'
+        working-directory: ui
+        run: npm ci && npm run typecheck && npm test && npm run build
+
       - name: Test
         if: steps.plan.outputs.build == 'true'
         run: cargo test -p done-core -p done-mcp -p done-server

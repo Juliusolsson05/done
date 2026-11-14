@@ -12,6 +12,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      # The interface first: its own checks, and the web server embeds its build.
+      - name: Interface
+        working-directory: ui
+        run: npm ci && npm run typecheck && npm test && npm run build
       # The desktop app is left out here: it needs macOS to build, and the
       # release workflow builds it. Everything with rules in it is tested.
       - run: cargo test -p done-core -p done-mcp -p done-server

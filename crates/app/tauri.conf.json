@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "identifier": "dev.done.app",
   "build": {
-    "frontendDist": "../../ui"
+    "frontendDist": "../../ui/dist",
+    "beforeBuildCommand": {
+      "script": "npm ci && npm run build",
+      "cwd": "../../ui"
+    }
   },
   "app": {
     "withGlobalTauri": true,
