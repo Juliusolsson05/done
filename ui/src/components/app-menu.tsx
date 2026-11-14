@@ -37,7 +37,7 @@ const CHOICE = 'flex-1 justify-center bg-muted'
 const CHOSEN = 'bg-primary text-primary-foreground focus:bg-primary focus:text-primary-foreground'
 
 function TaskMenu({ task }: { task: Task }) {
-  const { data, edit, complete, reopen, removeTask, update } = useApp()
+  const { data, edit, focusOn, complete, reopen, removeTask, update } = useApp()
   const remove = (
     <ContextMenuItem variant="destructive" onSelect={() => removeTask(task.id)}>
       Delete task
@@ -69,6 +69,7 @@ function TaskMenu({ task }: { task: Task }) {
   return (
     <>
       <ContextMenuItem onSelect={() => edit(task.id)}>Edit task</ContextMenuItem>
+      <ContextMenuItem onSelect={() => focusOn(task.id)}>Focus on this</ContextMenuItem>
       <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
       {task.goalDay === TODAY ? (
         <ContextMenuItem onSelect={() => update((d) => patchTask(d, task.id, { goalDay: null }))}>Remove as today’s goal</ContextMenuItem>
