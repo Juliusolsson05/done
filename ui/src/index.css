@@ -1,0 +1,169 @@
+/* The whole look of done, defined once. Components use only the tokens named
+   here and Tailwind's standard scale; nothing is given a one-off value.
+
+   Rules this theme holds itself to:
+   - Neutral first. Colour appears only where it carries information:
+     priority, a project, overdue, and one blue for "this is the action" or
+     "this is today".
+   - Motion confirms what you just did, briefly, and never bounces.
+   - Light only, by choice. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Generated components carry `dark:` classes. Tying the variant to a class
+   that is never set keeps them from following the system's dark mode. */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+
+  /* The content sheet and everything that sits on it. */
+  --background: #ffffff;
+  --foreground: #1a1a1e;
+  --card: #ffffff;
+  --card-foreground: #1a1a1e;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1e;
+  --muted: #f5f5f6;
+  --muted-foreground: #63636b;
+  --faint: #9b9ba3;
+  --secondary: #ececee;
+  --secondary-foreground: #1a1a1e;
+  --accent: #f1f1f3;
+  --accent-foreground: #1a1a1e;
+  --border: rgb(0 0 0 / 0.08);
+  --input: rgb(0 0 0 / 0.14);
+  --radius: 0.5rem;
+
+  /* The one accent: the primary action, today, focus and the finished check. */
+  --primary: #2f5fe0;
+  --primary-foreground: #ffffff;
+  --ring: #2f5fe0;
+
+  --destructive: #d63c3c;
+  --priority-1: #d63c3c;
+  --priority-2: #d48a1c;
+  --priority-3: #4a7cf0;
+  --overdue: #d63c3c;
+  --done: #2e9e5b;
+
+  /* The window: the sidebar is part of it, not a panel on it. */
+  --sidebar: #ececef;
+  --sidebar-foreground: #1a1a1e;
+  --sidebar-primary: #2f5fe0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #dfdfe3;
+  --sidebar-accent-foreground: #1a1a1e;
+  --sidebar-border: rgb(0 0 0 / 0.08);
+  --sidebar-ring: #2f5fe0;
+
+  /* The eight colours a project can have. A project stores which one; an
+     element showing a project sets --project to it. Inbox is grey. */
+  --project-0: #3d6fdc;
+  --project-1: #d27a2c;
+  --project-2: #7c63d6;
+  --project-3: #2f9a5c;
+  --project-4: #cf4d7c;
+  --project-5: #2495a3;
+  --project-6: #b08d16;
+  --project-7: #74747d;
+  --project-none: #9a9aa3;
+  --project: var(--project-none);
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-priority-1: var(--priority-1);
+  --color-priority-2: var(--priority-2);
+  --color-priority-3: var(--priority-3);
+  --color-overdue: var(--overdue);
+  --color-done: var(--done);
+
+  /* A project's colour as set on the element, and the two tints a timeline
+     bar is made of. */
+  --color-project: var(--project);
+  --color-project-tint: color-mix(in srgb, var(--project) 15%, white);
+  --color-project-edge: color-mix(in srgb, var(--project) 42%, white);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@theme {
+  /* A view fades up as it opens. */
+  --animate-enter: enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* What you just added or moved is marked for a moment, so the eye finds it. */
+  --animate-noticed: noticed 1s ease-out both;
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @keyframes noticed {
+    from {
+      background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-sidebar text-sm text-foreground antialiased;
+  }
+  ::selection {
+    @apply bg-primary/20;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
