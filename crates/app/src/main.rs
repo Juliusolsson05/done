@@ -161,6 +161,10 @@ fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
             if reminder_due {
                 // A hidden window's timers may be stopped, so it is told when
                 // to look. It answers by handing the session over as reminding.
+                // The window is shown first: a hidden WebKit view may also sit
+                // on the event itself, and a reminder that waits for the
+                // window to be opened by hand has failed at its one job.
+                show_window(&app);
                 let _ = app.emit("focus-command", "reminder");
             }
             if let Some(first) = reminder_ring {
