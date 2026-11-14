@@ -33,7 +33,7 @@ export function HeaderButton({ danger = false, ...props }: { danger?: boolean; o
 // in the app drawn larger than the others, because it is the only one that
 // is more important than the others.
 function GoalBlock() {
-  const { data, ui, addGoal } = useApp()
+  const { data, ui, addGoal, focusOn } = useApp()
   const task = goalTask(data.tasks, TODAY)
   if (!task) {
     return (
@@ -56,7 +56,12 @@ function GoalBlock() {
       {task.done ? (
         <div className="p-2 text-lg font-semibold tracking-tight text-faint line-through">{task.title}</div>
       ) : (
-        <TaskRow task={task} goal />
+        <>
+          <TaskRow task={task} goal />
+          <Button variant="outline" size="sm" className="ml-9.5 self-start" onClick={() => focusOn(task.id)}>
+            Start focus
+          </Button>
+        </>
       )}
     </Card>
   )
