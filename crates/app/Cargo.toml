@@ -1,0 +1,19 @@
+[package]
+name = "done-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "done"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+done-core = { path = "../core" }
+done-mcp = { version = "0.1.0", path = "../mcp" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-updater = "2.14.1"

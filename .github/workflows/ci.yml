@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The desktop app is left out here: it needs macOS to build, and the
+      # release workflow builds it. Everything with rules in it is tested.
+      - run: cargo test -p done-core -p done-mcp -p done-server

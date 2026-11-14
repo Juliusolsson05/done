@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the window may ask of the app: the basics, and changing its own text size.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:webview:allow-set-webview-zoom"]
+}

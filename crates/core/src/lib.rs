@@ -1,0 +1,423 @@
+//! Where done keeps its tasks: one SQLite file, shared by the desktop app and
+//! the web app. Both go through this crate and nothing else touches the file,
+//! so there is one set of rules for what a valid task is.
+
+use rusqlite::{params, Connection, TransactionBehavior};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: i64,
+    pub name: String,
+    /// Index into the interface's colour list. The colours themselves are a
+    /// design matter and live with the interface.
+    #[serde(default)]
+    pub color: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    pub id: i64,
+    pub title: String,
+    #[serde(default)]
+    pub notes: String,
+    /// None is the Inbox.
+    #[serde(default)]
+    pub project_id: Option<i64>,
+    /// Days are calendar days written YYYY-MM-DD, never instants: a task is due
+    /// on a day, and a change of time zone must not move it.
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(default)]
+    pub due: Option<String>,
+    /// 1 is the most urgent, 4 means none.
+    #[serde(default = "no_priority")]
+    pub priority: i64,
+    /// "doing" while in progress; otherwise absent.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub done: bool,
+    /// The day it was finished. Stored instead of a flag, so "done" and "done
+    /// when" cannot disagree.
+    #[serde(default)]
+    pub done_day: Option<String>,
+    /// The day this task is the goal: the one thing that has to happen that
+    /// day. A day rather than a flag, so yesterday's goal stops being one by
+    /// itself. At most one task holds any given day.
+    #[serde(default)]
+    pub goal_day: Option<String>,
+}
+
+fn no_priority() -> i64 {
+    4
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct State {
+    pub rev: i64,
+    pub next_id: i64,
+    pub projects: Vec<Project>,
+    pub tasks: Vec<Task>,
+}
+
+/// What one window changed since it last loaded or saved.
+#[derive(Deserialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Change {
+    /// The revision the window was looking at when it made the change.
+    pub rev: i64,
+    #[serde(default)]
+    pub projects: Vec<Project>,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub delete_projects: Vec<i64>,
+    #[serde(default)]
+    pub delete_tasks: Vec<i64>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Synced {
+    pub rev: i64,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    /// Someone else (another window, or the other app) saved first. The caller
+    /// reloads instead of overwriting what it has not seen.
+    Stale,
+    Invalid(String),
+    Db(rusqlite::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // The interface matches on this exact word.
+            Error::Stale => write!(f, "stale"),
+            Error::Invalid(why) => write!(f, "{why}"),
+            Error::Db(e) => write!(f, "the tasks file could not be read or written: {e}"),
+        }
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Self {
+        Error::Db(e)
+    }
+}
+
+fn is_day(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+fn check_day(what: &str, day: &Option<String>) -> Result<(), Error> {
+    match day {
+        Some(d) if !is_day(d) => Err(Error::Invalid(format!("{what} must be a day written YYYY-MM-DD."))),
+        _ => Ok(()),
+    }
+}
+
+fn check(task: &Task) -> Result<(), Error> {
+    if task.title.trim().is_empty() {
+        return Err(Error::Invalid("A task needs a title.".into()));
+    }
+    if !(1..=4).contains(&task.priority) {
+        return Err(Error::Invalid("Priority is 1, 2, 3 or 4.".into()));
+    }
+    check_day("The start date", &task.start)?;
+    check_day("The due date", &task.due)?;
+    check_day("The finished day", &task.done_day)?;
+    check_day("The goal day", &task.goal_day)?;
+    if task.done && task.done_day.is_none() {
+        return Err(Error::Invalid("A finished task needs the day it was finished.".into()));
+    }
+    Ok(())
+}
+
+/// `~/Library/Application Support/done/done.db`, or `DONE_DB` when set. Outside
+/// any code folder on purpose: updating the app can never touch the tasks.
+pub fn default_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("DONE_DB") {
+        return PathBuf::from(path);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let dir = home.join("Library").join("Application Support").join("done");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("done.db")
+}
+
+pub struct Store {
+    // One connection behind a lock. Every call is a few milliseconds on a
+    // local file, so waiting in line is simpler than a pool and just as fast.
+    conn: Mutex<Connection>,
+}
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 3000;
+             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+             INSERT OR IGNORE INTO meta (key, value) VALUES ('rev', 0);
+             CREATE TABLE IF NOT EXISTS project (
+               id INTEGER PRIMARY KEY,
+               name TEXT NOT NULL,
+               color INTEGER NOT NULL DEFAULT 0
+             );
+             -- ON DELETE SET NULL: a task outlives its project and falls back to
+             -- the Inbox. Losing tasks with a project is never what was meant.
+             CREATE TABLE IF NOT EXISTS task (
+               id INTEGER PRIMARY KEY,
+               title TEXT NOT NULL,
+               notes TEXT NOT NULL DEFAULT '',
+               project_id INTEGER REFERENCES project(id) ON DELETE SET NULL,
+               start TEXT,
+               due TEXT,
+               priority INTEGER NOT NULL DEFAULT 4,
+               status TEXT,
+               done_day TEXT,
+               goal_day TEXT
+             );",
+        )?;
+        // Files made before the daily goal existed lack its column. CREATE
+        // TABLE IF NOT EXISTS leaves them as they are, so add it here.
+        let has_goal: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('task') WHERE name = 'goal_day'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_goal {
+            conn.execute("ALTER TABLE task ADD COLUMN goal_day TEXT", [])?;
+        }
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// Today as the Mac sees it, YYYY-MM-DD. Asked of SQLite so that nothing
+    /// here needs a date library, and so every caller agrees on the day.
+    pub fn today(&self) -> Result<String, Error> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row("SELECT date('now', 'localtime')", [], |r| r.get(0))?)
+    }
+
+    /// Everything a window shows: all projects, every open task, and the tasks
+    /// finished on `today` (the caller's local day), which the board's last
+    /// column lists. Older finished tasks stay in the file but are not sent.
+    pub fn state(&self, today: &str) -> Result<State, Error> {
+        if !is_day(today) {
+            return Err(Error::Invalid("Today must be a day written YYYY-MM-DD.".into()));
+        }
+        let conn = self.conn.lock().unwrap();
+        let rev = conn.query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))?;
+        let mut stmt = conn.prepare("SELECT id, name, color FROM project ORDER BY id")?;
+        let projects = stmt
+            .query_map([], |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)? }))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day
+             FROM task WHERE done_day IS NULL OR done_day = ?1 ORDER BY id",
+        )?;
+        let tasks = stmt
+            .query_map([today], |r| {
+                let done_day: Option<String> = r.get(8)?;
+                Ok(Task {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    notes: r.get(2)?,
+                    project_id: r.get(3)?,
+                    start: r.get(4)?,
+                    due: r.get(5)?,
+                    priority: r.get(6)?,
+                    status: r.get(7)?,
+                    done: done_day.is_some(),
+                    done_day,
+                    goal_day: r.get(9)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        // Ids are handed out by the window, so it needs one that no row has,
+        // including the finished tasks it was not sent.
+        let highest: Option<i64> = conn.query_row(
+            "SELECT MAX(m) FROM (SELECT MAX(id) AS m FROM task UNION ALL SELECT MAX(id) FROM project)",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(State { rev, next_id: highest.unwrap_or(0) + 1, projects, tasks })
+    }
+
+    /// Applies one window's changes, all or nothing. Refused as `Stale` when
+    /// the file has moved on since that window last looked: two windows open
+    /// at once must not silently undo each other.
+    pub fn sync(&self, change: Change) -> Result<Synced, Error> {
+        for project in &change.projects {
+            if project.name.trim().is_empty() {
+                return Err(Error::Invalid("A project needs a name.".into()));
+            }
+        }
+        for task in &change.tasks {
+            check(task)?;
+        }
+        let mut conn = self.conn.lock().unwrap();
+        // Immediate: take the write lock before reading the revision, so the
+        // desktop app and the web app cannot both pass the check.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rev: i64 = tx.query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))?;
+        if rev != change.rev {
+            return Err(Error::Stale);
+        }
+        // Projects first: the tasks below may point at a project made in this
+        // same change.
+        for p in &change.projects {
+            tx.execute(
+                "INSERT INTO project (id, name, color) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color",
+                params![p.id, p.name.trim(), p.color],
+            )?;
+        }
+        for t in &change.tasks {
+            let done_day = if t.done { t.done_day.as_deref() } else { None };
+            // One goal per day, whoever is writing: naming a new goal for a
+            // day takes the title from whichever task held it.
+            if let Some(day) = &t.goal_day {
+                tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2", params![day, t.id])?;
+            }
+            tx.execute(
+                "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(id) DO UPDATE SET title = excluded.title, notes = excluded.notes,
+                   project_id = excluded.project_id, start = excluded.start, due = excluded.due,
+                   priority = excluded.priority, status = excluded.status, done_day = excluded.done_day,
+                   goal_day = excluded.goal_day",
+                params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day],
+            )?;
+        }
+        for id in &change.delete_tasks {
+            tx.execute("DELETE FROM task WHERE id = ?1", [id])?;
+        }
+        for id in &change.delete_projects {
+            tx.execute("DELETE FROM project WHERE id = ?1", [id])?;
+        }
+        tx.execute("UPDATE meta SET value = ?1 WHERE key = 'rev'", [rev + 1])?;
+        tx.commit()?;
+        Ok(Synced { rev: rev + 1 })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store() -> Store {
+        Store::open(Path::new(":memory:")).unwrap()
+    }
+
+    fn task(id: i64, title: &str) -> Task {
+        Task {
+            id,
+            title: title.into(),
+            notes: String::new(),
+            project_id: None,
+            start: None,
+            due: None,
+            priority: 4,
+            status: None,
+            done: false,
+            done_day: None,
+            goal_day: None,
+        }
+    }
+
+    #[test]
+    fn what_is_saved_comes_back() {
+        let s = store();
+        let project = Project { id: 1, name: "Work".into(), color: 2 };
+        let mut t = task(2, "  Send the invoice  ");
+        t.project_id = Some(1);
+        t.due = Some("2026-11-20".into());
+        let synced = s
+            .sync(Change { rev: 0, projects: vec![project.clone()], tasks: vec![t], ..Default::default() })
+            .unwrap();
+        assert_eq!(synced.rev, 1);
+        let state = s.state("2026-11-13").unwrap();
+        assert_eq!(state.projects, vec![project]);
+        assert_eq!(state.tasks[0].title, "Send the invoice");
+        assert_eq!(state.tasks[0].project_id, Some(1));
+        assert_eq!(state.next_id, 3);
+    }
+
+    #[test]
+    fn a_window_that_has_not_seen_the_latest_cannot_overwrite_it() {
+        let s = store();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "First")], ..Default::default() }).unwrap();
+        // A second window still at revision 0 tries to save.
+        let late = s.sync(Change { rev: 0, tasks: vec![task(1, "Overwritten")], delete_tasks: vec![1], ..Default::default() });
+        assert!(matches!(late, Err(Error::Stale)));
+        let state = s.state("2026-11-13").unwrap();
+        assert_eq!(state.tasks[0].title, "First");
+        assert_eq!(state.rev, 1);
+    }
+
+    #[test]
+    fn finished_tasks_show_on_their_day_only_but_keep_their_id() {
+        let s = store();
+        let mut t = task(1, "Done yesterday");
+        t.done = true;
+        t.done_day = Some("2026-11-12".into());
+        s.sync(Change { rev: 0, tasks: vec![t], ..Default::default() }).unwrap();
+        assert_eq!(s.state("2026-11-12").unwrap().tasks.len(), 1);
+        let next_day = s.state("2026-11-13").unwrap();
+        assert!(next_day.tasks.is_empty());
+        // The hidden task still owns id 1.
+        assert_eq!(next_day.next_id, 2);
+    }
+
+    #[test]
+    fn deleting_a_project_leaves_its_tasks_in_the_inbox() {
+        let s = store();
+        let mut t = task(2, "Keep me");
+        t.project_id = Some(1);
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Home".into(), color: 0 }], tasks: vec![t], ..Default::default() })
+            .unwrap();
+        s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
+        let state = s.state("2026-11-13").unwrap();
+        assert!(state.projects.is_empty());
+        assert_eq!(state.tasks[0].project_id, None);
+    }
+
+    #[test]
+    fn a_day_has_one_goal_and_the_newest_wins() {
+        let s = store();
+        let mut first = task(1, "Ship the release");
+        first.goal_day = Some("2026-11-13".into());
+        s.sync(Change { rev: 0, tasks: vec![first, task(2, "Write the talk")], ..Default::default() }).unwrap();
+        // Someone names the second task as the goal without touching the first.
+        let mut second = task(2, "Write the talk");
+        second.goal_day = Some("2026-11-13".into());
+        s.sync(Change { rev: 1, tasks: vec![second], ..Default::default() }).unwrap();
+        let goals: Vec<i64> = s.state("2026-11-13").unwrap().tasks.iter().filter(|t| t.goal_day.is_some()).map(|t| t.id).collect();
+        assert_eq!(goals, vec![2]);
+    }
+
+    #[test]
+    fn a_bad_task_stops_the_whole_change() {
+        let s = store();
+        let mut bad = task(2, "Fine title");
+        bad.due = Some("next friday".into());
+        let result = s.sync(Change { rev: 0, tasks: vec![task(1, "Good"), bad], ..Default::default() });
+        assert!(matches!(result, Err(Error::Invalid(_))));
+        assert!(s.state("2026-11-13").unwrap().tasks.is_empty());
+    }
+}

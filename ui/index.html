@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light" />
+<title>done</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23fff'/%3E%3Cpath d='M9 17l5 5 9-10.5' fill='none' stroke='%230a6cff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<style>
+  /* The whole interface of done, in one file with no build step.
+
+     Rules this stylesheet holds itself to, because breaking them is what makes
+     an interface look generated rather than made:
+     - Neutral first. Colour appears only where it carries information:
+       priority, a project, overdue, and one accent for "this is the action"
+       or "this is today".
+     - One scale each for type (12 / 13 / 14 / 15 / 24), spacing (multiples of
+       4) and corners (6 controls, 8 rows, 12 panels). Nothing off the scale.
+     - Spacing separates things. A line is drawn only where spacing cannot.
+     - Motion confirms what you just did, briefly, and never bounces.
+     - Glass only where something floats above content (menu, sheet, undo).
+     Light only, by choice. */
+  :root {
+    --window: #ececef;
+    --surface: #fff;
+    --text: #1a1a1e;
+    --text-2: #63636b;
+    --text-3: #9b9ba3;
+    --line: rgba(0,0,0,.07);
+    --line-2: rgba(0,0,0,.14);
+    --hover: rgba(0,0,0,.04);
+    --press: rgba(0,0,0,.075);
+    --accent: #2f5fe0;
+    --accent-press: #2450c6;
+    --ok: #2e9e5b;
+    --p1: #d63c3c;
+    --p2: #d48a1c;
+    --p3: #4a7cf0;
+    --p4: #b3b3bb;
+    --r-control: 6px;
+    --r-row: 8px;
+    --r-panel: 12px;
+    --shadow-1: 0 0 0 1px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.05);
+    --shadow-2: 0 0 0 1px rgba(0,0,0,.07), 0 2px 6px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.14);
+    --out: cubic-bezier(.16,1,.3,1);
+    /* Names the script still uses inline. */
+    --muted: var(--text-2); --faint: var(--text-3); --ink: var(--text);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--window); color: var(--text); overflow: hidden;
+    font: 450 14px/20px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--r-control); }
+  ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  svg { display: block; }
+
+  .app { display: grid; grid-template-columns: 244px minmax(0, 1fr); height: 100vh; padding: 8px 8px 8px 0; }
+
+  /* Sidebar: part of the window, not a panel on it. */
+  .side { padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; user-select: none; -webkit-user-select: none; }
+  .brand { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; padding: 4px 10px 16px; }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-control); text-align: left; }
+  .nav:hover { background: var(--hover); }
+  .nav:active { background: var(--press); }
+  .nav[aria-current="true"] { background: var(--press); font-weight: 550; }
+  .lab { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lab svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: var(--text-2); }
+  .nav[aria-current="true"] .lab svg { color: var(--text); }
+  .nav .n { font-size: 12px; font-weight: 450; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .nav .n.late { color: var(--p1); }
+  .pdot { width: 8px; height: 8px; border-radius: 3px; background: var(--c); flex: none; display: inline-block; }
+  .lab .pdot { margin: 0 4px; }
+  .side h2 { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 550; color: var(--text-3); margin: 20px 0 4px; padding: 0 4px 0 10px; height: 24px; }
+  .icon { width: 24px; height: 24px; border-radius: var(--r-control); color: var(--text-2); display: grid; place-items: center; font-size: 16px; line-height: 1; }
+  .icon:hover { background: var(--hover); color: var(--text); }
+  .side input { width: 100%; height: 30px; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r-control); padding: 0 10px; outline: none; margin-top: 2px; }
+  .side input:focus, .field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  kbd { font: inherit; font-size: 11px; line-height: 16px; border: 1px solid var(--line-2); border-radius: 4px; padding: 0 5px; color: var(--text-3); background: var(--surface); }
+
+  /* Content: one white sheet. Everything in it shares a left edge. */
+  main { background: var(--surface); border-radius: var(--r-panel); box-shadow: var(--shadow-1); overflow: auto; padding: 40px 48px 96px; min-width: 0; }
+  main.wide { padding: 32px 32px 64px; }
+  .col { max-width: 720px; }
+  main.wide .col { max-width: none; }
+  header.view { display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; min-height: 32px; }
+  h1 { font-size: 24px; line-height: 32px; font-weight: 680; letter-spacing: -0.022em; margin: 0; display: flex; align-items: center; gap: 10px; }
+  h1 .pdot { width: 12px; height: 12px; border-radius: 4px; }
+  h1 input { font: inherit; letter-spacing: inherit; background: none; border: 0; border-bottom: 1px solid var(--line-2); outline: none; padding: 0; width: 320px; max-width: 100%; }
+  .sub { color: var(--text-2); font-size: 13px; }
+  .view .actions { margin-left: auto; display: flex; gap: 4px; font-size: 13px; align-self: center; }
+  .view .actions button { color: var(--text-2); height: 28px; padding: 0 10px; border-radius: var(--r-control); }
+  .view .actions button:hover { background: var(--hover); color: var(--text); }
+  .view .actions .danger { color: var(--p1); }
+
+  .section { margin-top: 28px; }
+  .section:first-of-type { margin-top: 0; }
+  .section h3 { margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--text-2); display: flex; gap: 8px; align-items: baseline; }
+  .section h3 span { color: var(--text-3); font-weight: 450; }
+  .section h3.late { color: var(--p1); }
+
+  /* A row's padding is pulled back out with a negative margin, so the ring
+     lines up with the page title and the hover still has room around it. */
+  .task, .add { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: start; padding: 8px; margin: 0 -8px; border-radius: var(--r-row); }
+  .task:hover { background: var(--hover); }
+  .check { width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--p4); display: grid; place-items: center; background: var(--surface); transition: border-color .12s, background-color .12s; }
+  .check svg { width: 10px; height: 10px; opacity: 0; color: var(--text-3); transition: opacity .12s; }
+  .check svg path { stroke: currentColor; stroke-dasharray: 12; }
+  .check:hover { border-color: var(--text-2); }
+  .check:hover svg { opacity: 1; }
+  .check.p1 { border-color: var(--p1); background: color-mix(in srgb, var(--p1) 9%, #fff); }
+  .check.p2 { border-color: var(--p2); background: color-mix(in srgb, var(--p2) 9%, #fff); }
+  .check.p3 { border-color: var(--p3); background: color-mix(in srgb, var(--p3) 9%, #fff); }
+  .body { min-width: 0; text-align: left; }
+  .title { display: block; overflow-wrap: anywhere; }
+  .notes { display: block; color: var(--text-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { display: flex; gap: 12px; align-items: center; padding-left: 16px; font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .meta .late { color: var(--p1); }
+  .meta .proj { display: inline-flex; align-items: center; gap: 6px; }
+
+  .add { width: calc(100% + 16px); color: var(--text-3); text-align: left; align-items: center; }
+  .add:hover { color: var(--text-2); background: var(--hover); }
+  .add .plus { width: 18px; height: 18px; display: grid; place-items: center; font-size: 17px; line-height: 1; }
+  .add kbd { justify-self: end; }
+
+  .quick, .editor { border: 1px solid var(--line-2); border-radius: var(--r-panel); background: var(--surface); padding: 12px; margin: 4px -8px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.07); }
+  .quick input.q, .editor input.t { width: 100%; background: none; border: 0; outline: none; font-size: 15px; font-weight: 550; padding: 0; }
+  .quick input::placeholder, .editor ::placeholder { color: var(--text-3); font-weight: 450; }
+  .editor textarea { width: 100%; background: none; border: 0; outline: none; resize: vertical; min-height: 40px; margin-top: 4px; color: var(--text-2); font-size: 13px; padding: 0; }
+  .read { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 24px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; border: 1px solid var(--line-2); border-radius: var(--r-control); padding: 0 8px; color: var(--text); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--p4); flex: none; }
+  .dot.p1 { background: var(--p1); } .dot.p2 { background: var(--p2); } .dot.p3 { background: var(--p3); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .bar .spacer { flex: 1; }
+  .btn { height: 28px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--line-2); background: var(--surface); font-size: 13px; font-weight: 500; transition: background-color .1s; }
+  .btn:hover { background: #f5f5f6; }
+  .btn:active { background: #ececee; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn.primary:hover { background: var(--accent-press); }
+  .btn.primary:disabled { background: #e8e8eb; color: var(--text-3); }
+  .btn.quiet { border-color: transparent; background: none; color: var(--text-2); }
+  .btn.quiet:hover { background: var(--hover); color: var(--text); }
+  .btn.quiet.danger:hover { color: var(--p1); }
+  .field { height: 28px; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r-control); padding: 0 8px; font-size: 13px; outline: none; }
+  .lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+  .seg { display: inline-flex; height: 28px; border: 1px solid var(--line-2); border-radius: var(--r-control); overflow: hidden; }
+  .seg button { padding: 0 10px; font-size: 13px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: var(--hover); }
+  .seg button[aria-pressed="true"] { background: var(--press); color: var(--text); font-weight: 550; }
+
+  .empty { color: var(--text-2); padding: 16px 0 24px; }
+  .empty b { color: var(--text); font-weight: 600; display: block; }
+
+  /* Today's goal: the one thing that has to happen today. It is the only
+     task in the app drawn larger than the others, because it is the only one
+     that is more important than the others. */
+  .goal { border: 1px solid var(--line-2); border-radius: var(--r-panel); padding: 12px 16px; margin: 0 -8px 28px; }
+  .goal .label { font-size: 12px; line-height: 16px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+  .goal .task { margin: 0 -8px; }
+  .goal .title { font-size: 17px; line-height: 24px; font-weight: 600; letter-spacing: -0.014em; }
+  .goal .check { width: 20px; height: 20px; margin-top: 2px; }
+  .goal .meta { line-height: 24px; }
+  .goal.won .label { color: var(--text-3); }
+  .goal.won .title { color: var(--text-3); text-decoration: line-through; padding: 8px 0; }
+  button.goal { display: block; width: calc(100% + 16px); text-align: left; border-style: dashed; color: var(--text); font-weight: 550; }
+  button.goal span { display: block; color: var(--text-3); font-weight: 450; font-size: 13px; }
+  button.goal:hover { border-color: var(--accent); border-style: solid; }
+  .tag-goal { color: var(--accent); font-weight: 550; }
+
+  /* Settings */
+  .side .end { margin-top: auto; padding-top: 12px; display: grid; gap: 1px; }
+  .nav.update { color: var(--accent); font-weight: 550; }
+  .pane { margin-top: 32px; max-width: 640px; }
+  .pane:first-of-type { margin-top: 0; }
+  .pane h3 { margin: 0 0 4px; font-size: 14px; line-height: 20px; font-weight: 600; }
+  .pane p { margin: 0 0 12px; color: var(--text-2); }
+  .pane label { display: block; font-size: 12px; line-height: 16px; font-weight: 550; color: var(--text-2); margin: 12px 0 4px; }
+  .code { display: flex; gap: 8px; align-items: flex-start; }
+  .code pre { flex: 1; min-width: 0; margin: 0; font: 12px/20px ui-monospace, "SF Mono", Menlo, monospace; background: #f5f5f6; border-radius: var(--r-control); padding: 8px 12px; overflow-x: auto; white-space: pre; }
+  .stepper { display: inline-flex; align-items: center; gap: 8px; }
+  .stepper output { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
+
+  /* Board */
+  .board { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 12px; align-items: start; }
+  .lane { background: #f5f5f6; border-radius: var(--r-panel); padding: 8px; min-height: 160px; outline: 2px solid transparent; outline-offset: -2px; transition: outline-color .12s, background-color .12s; }
+  .lane.over { outline-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, #f5f5f6); }
+  .lane h3 { margin: 4px 4px 8px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+  .lane h3 span { color: var(--text-3); font-weight: 450; }
+  .card { background: var(--surface); border-radius: var(--r-row); padding: 8px 12px 8px 8px; display: grid; grid-template-columns: 28px minmax(0, 1fr); margin-bottom: 4px; box-shadow: var(--shadow-1); }
+  .card:hover { box-shadow: 0 0 0 1px rgba(0,0,0,.09), 0 2px 6px rgba(0,0,0,.08); }
+  .card.dragging { opacity: .35; }
+  .card .meta { grid-column: 2; padding: 2px 0 0; }
+  .card.done .title { text-decoration: line-through; color: var(--text-3); }
+  .lane .hint { color: var(--text-3); font-size: 12px; padding: 16px 8px; text-align: center; }
+
+  /* Timeline */
+  .tl { border: 1px solid var(--line); border-radius: var(--r-panel); overflow: auto; max-height: calc(100vh - 220px); }
+  .tl-inner { position: relative; min-width: max-content; }
+  .tl-back { position: absolute; top: 0; bottom: 0; left: 250px; pointer-events: none; }
+  .tl-back i { position: absolute; top: 0; bottom: 0; border-left: 1px solid rgba(0,0,0,.045); }
+  .tl-back i.we { background: rgba(0,0,0,.022); }
+  .tl-back i.now { background: color-mix(in srgb, var(--accent) 6%, transparent); border-left-color: var(--accent); }
+  .tl-row { display: flex; height: 36px; position: relative; }
+  .tl-label { position: sticky; left: 0; z-index: 3; width: 250px; flex: none; background: var(--surface); border-right: 1px solid var(--line); display: flex; align-items: center; gap: 10px; padding: 0 12px; min-width: 0; }
+  .tl-label .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-label .check { margin: 0; flex: none; }
+  .tl-track { position: relative; flex: none; overflow: hidden; }
+  .tl-head { position: sticky; top: 0; z-index: 4; background: var(--surface); height: 48px; border-bottom: 1px solid var(--line); }
+  .tl-head .tl-label { z-index: 5; color: var(--text-3); font-size: 12px; font-weight: 550; }
+  .tl-day { position: absolute; top: 0; bottom: 0; display: grid; align-content: center; justify-items: center; font-size: 11px; line-height: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .tl-day b { font-size: 13px; line-height: 22px; font-weight: 500; color: var(--text); width: 22px; height: 22px; text-align: center; border-radius: 50%; }
+  .tl-day.now b { background: var(--accent); color: #fff; font-weight: 600; }
+  .tl-day.first { color: var(--text-2); font-weight: 600; }
+  .tl-group { height: 32px; margin-top: 4px; }
+  .tl-group .tl-label { font-weight: 600; font-size: 12px; color: var(--text-2); gap: 8px; }
+  .tl-group .tl-label span { color: var(--text-3); font-weight: 450; }
+  /* A bar wears its project's colour, which is the point of the view: seeing
+     which project the coming days belong to. */
+  .tbar { position: absolute; top: 7px; height: 22px; border-radius: var(--r-control); background: color-mix(in srgb, var(--c) 15%, #fff); border: 1px solid color-mix(in srgb, var(--c) 42%, #fff); display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; z-index: 1; }
+  .tbar span { pointer-events: none; }
+  .tbar .dot { pointer-events: none; }
+  .tbar.late { border-color: var(--p1); }
+  .tbar.dragging { cursor: grabbing; box-shadow: var(--shadow-2); z-index: 2; }
+  .tbar .grip { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+  .tbar .grip.l { left: 0; } .tbar .grip.r { right: 0; }
+  /* A bar too short for its title shows the title beside it, in full. */
+  .tbar.out span { position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%); font-weight: 450; }
+  .cell { position: absolute; top: 0; bottom: 0; }
+  .cell:hover::after { content: ''; position: absolute; inset: 7px 2px; border-radius: var(--r-control); background: var(--press); }
+  .tl-hint { color: var(--text-3); font-size: 12px; margin: 8px 0 0; }
+
+  /* Floating things: the only glass. They sit over content, so seeing a
+     little of it through them says where they came from. */
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.18); display: grid; justify-items: center; align-content: start; padding-top: 16vh; z-index: 10; }
+  .sheet .editor { width: min(600px, calc(100vw - 32px)); margin: 0; box-shadow: var(--shadow-2); border-color: transparent; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); min-height: 36px; background: rgba(28,28,32,.9); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); color: #fff; border-radius: 10px; padding: 4px 4px 4px 12px; display: flex; gap: 12px; align-items: center; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-2); z-index: 20; }
+  .toast:not(:has(button)) { padding-right: 12px; }
+  .toast button { color: #fff; background: rgba(255,255,255,.16); border-radius: var(--r-control); height: 28px; padding: 0 10px; font-weight: 550; }
+  .toast button:hover { background: rgba(255,255,255,.26); }
+  .menu { position: fixed; z-index: 30; min-width: 220px; max-height: calc(100vh - 16px); overflow: auto; padding: 4px; border-radius: 10px; font-size: 13px; user-select: none; -webkit-user-select: none;
+    background: rgba(248,248,250,.8); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); box-shadow: var(--shadow-2); }
+  .menu .item { display: flex; width: 100%; height: 28px; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-control); text-align: left; }
+  .menu .item:hover, .menu .item:focus-visible { background: var(--accent); color: #fff; outline: none; }
+  .menu .item.danger { color: var(--p1); }
+  .menu .item.danger:hover, .menu .item.danger:focus-visible { background: var(--p1); color: #fff; }
+  .menu .tick { margin-left: auto; }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 8px; }
+  .menu .label { padding: 4px 8px 0; font-size: 11px; line-height: 16px; font-weight: 550; color: var(--text-3); }
+  .menu .set { display: flex; gap: 4px; padding: 4px; }
+  .menu .set button { flex: 1; height: 26px; border-radius: var(--r-control); display: flex; justify-content: center; align-items: center; gap: 6px; background: rgba(0,0,0,.05); }
+  .menu .set button:hover { background: rgba(0,0,0,.1); }
+  .menu .set button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .menu .set button[aria-pressed="true"]:has(.sw) { background: rgba(0,0,0,.05); box-shadow: 0 0 0 2px var(--accent); }
+  .sw { width: 12px; height: 12px; border-radius: 4px; display: block; }
+
+  /* Motion. The page is redrawn on every change, so nothing animates by
+     default; an action names what just happened and only that plays, once.
+     Everything is short and eases out. Nothing overshoots. */
+  @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+  @keyframes menu-in { from { opacity: 0; transform: scale(.98); } }
+  @keyframes noticed { from { background-color: color-mix(in srgb, var(--accent) 14%, transparent); } }
+  @keyframes draw { from { stroke-dashoffset: 12; } }
+  .fx-enter main .col { animation: fade-up .2s var(--out) both; }
+  .fx-open .quick, .fx-open .editor { animation: fade-up .16s var(--out) both; }
+  .fx-open .sheet { animation: fade .14s both; }
+  .fx-toast .toast { animation: toast-in .2s var(--out) both; }
+  .menu { transform-origin: top left; animation: menu-in .1s var(--out) both; }
+  /* What you just added or moved is marked for a moment, so the eye finds it. */
+  .task.fx-new, .task.fx-settle, .card.fx-new, .card.fx-settle { animation: noticed 1s ease-out both; }
+  /* Finishing: the ring fills, the check draws itself, the title is struck
+     through, and the row folds away rather than vanishing. */
+  .leaving .check, .card.done .check { background: var(--accent); border-color: var(--accent); }
+  .leaving .check svg, .card.done .check svg { opacity: 1; color: #fff; }
+  .leaving .check svg path { animation: draw .14s ease-out both; }
+  .leaving .title { text-decoration: line-through; color: var(--text-3); transition: color .2s; }
+  .task.collapse { height: 0 !important; padding-top: 0; padding-bottom: 0; opacity: 0; overflow: hidden; transition: height .2s var(--out), padding .2s var(--out), opacity .12s; }
+  .card.leaving, .tl-row.leaving { opacity: 0; transition: opacity .14s .12s; }
+
+  @media (max-width: 760px) {
+    body { overflow: auto; }
+    .app { grid-template-columns: 1fr; height: auto; padding: 8px; }
+    .side { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 4px 4px 8px; }
+    .brand { padding: 4px 10px; }
+    .side h2 { margin: 0; }
+    .nav { width: auto; }
+    main, main.wide { padding: 24px 16px 96px; }
+    .board { grid-template-columns: 1fr; }
+    .meta .proj { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ---------- Days: local calendar days written YYYY-MM-DD, which sort as text ----------
+const two = n => String(n).padStart(2, '0');
+const dayOf = d => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+const toDate = day => { const [y, m, d] = day.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (day, n) => { const d = toDate(day); d.setDate(d.getDate() + n); return dayOf(d); };
+const daysBetween = (a, b) => Math.round((Date.UTC(...ymd(b)) - Date.UTC(...ymd(a))) / 864e5);
+const ymd = day => { const [y, m, d] = day.split('-').map(Number); return [y, m - 1, d]; };
+const TODAY = dayOf(new Date());
+function describeDay(day) {
+  const diff = daysBetween(TODAY, day);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  const date = toDate(day);
+  if (diff > 1 && diff < 7) return date.toLocaleDateString('en-GB', { weekday: 'long' });
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+const fullDay = day => toDate(day).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+// ---------- Reading a typed line: "call the bank tomorrow p1 #home" ----------
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+// "sat", "sun" and "tom" are left out on purpose: they are ordinary words and names.
+const SHORT = { mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, thurs: 4, fri: 5 };
+function dayWord(w) {
+  if (w === 'today' || w === 'tod') return TODAY;
+  if (w === 'tomorrow' || w === 'tmr') return addDays(TODAY, 1);
+  const target = WEEKDAYS.includes(w) ? WEEKDAYS.indexOf(w) : SHORT[w];
+  if (target === undefined) return null;
+  return addDays(TODAY, (target - toDate(TODAY).getDay() + 7) % 7 || 7);
+}
+const tagOf = name => name.toLowerCase().replace(/\s+/g, '-');
+function parseQuickAdd(text) {
+  const kept = []; let due = null, priority = null, projectId = null;
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const w = word.toLowerCase();
+    const day = due === null ? dayWord(w) : null;
+    if (day) { due = day; if (['on', 'by'].includes((kept.at(-1) || '').toLowerCase())) kept.pop(); continue; }
+    const p = priority === null ? /^p([1-4])$/.exec(w) : null;
+    if (p) { priority = Number(p[1]); continue; }
+    if (projectId === null && w.length > 1 && w[0] === '#') {
+      const tag = w.slice(1);
+      const match = S.projects.find(x => tagOf(x.name) === tag) || S.projects.find(x => tagOf(x.name).startsWith(tag));
+      if (match) { projectId = match.id; continue; }
+    }
+    kept.push(word);
+  }
+  return { title: kept.join(' '), due, priority, projectId };
+}
+
+// ---------- State ----------
+// The tasks live in one SQLite file, reached through the desktop app's
+// commands or the web app's /api. Which of the two is decided here and
+// nowhere else; the rest of the interface cannot tell them apart.
+async function answer(response) {
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'failed');
+  return data;
+}
+const tauri = window.__TAURI__;
+const backend = tauri
+  ? { state: today => tauri.core.invoke('state', { today }), sync: change => tauri.core.invoke('sync', { change }) }
+  : { state: async today => answer(await fetch('/api/state?today=' + today)),
+      sync: async change => answer(await fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change) })) };
+
+// What the desktop app knows about itself: its version, where its program is
+// (for connecting an agent), and whether an update is waiting for a restart.
+// In a browser there is no app to ask, so the usual install path stands in.
+let INFO = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null };
+const readInfo = async () => { if (tauri) INFO = await tauri.core.invoke('info'); };
+
+// Text size. Only the desktop app needs this: a browser has its own zoom on
+// the same keys. It is the web view's real zoom, not a CSS scale, so layout
+// and sharpness stay correct at every size.
+let zoom = 1;
+try { zoom = Number(localStorage.getItem('done-zoom')) || 1; } catch {}
+function setZoom(next) {
+  zoom = Math.min(2, Math.max(0.7, Math.round(next * 10) / 10));
+  try { localStorage.setItem('done-zoom', String(zoom)); } catch {}
+  if (tauri) tauri.webview.getCurrentWebview().setZoom(zoom);
+}
+
+const S = { projects: [], tasks: [], nextId: 1, rev: 0 };
+// What the file held when this window last loaded or saved, one JSON string
+// per project and task. Saving sends only what differs from it.
+let saved = new Map(), pending = Promise.resolve();
+const picture = () => new Map([...S.projects.map(p => ['p' + p.id, JSON.stringify(p)]), ...S.tasks.map(t => ['t' + t.id, JSON.stringify(t)])]);
+async function reload() {
+  const data = await backend.state(TODAY);
+  Object.assign(S, { projects: data.projects, tasks: data.tasks, nextId: data.nextId, rev: data.rev });
+  saved = picture();
+}
+// The interface changes S first and saves after, so nothing waits on the disk.
+// Saves run one at a time, in order.
+function save() { pending = pending.then(push); }
+async function push() {
+  const now = picture(), change = { rev: S.rev, projects: [], tasks: [], deleteProjects: [], deleteTasks: [] };
+  for (const [key, json] of now) if (saved.get(key) !== json) (key[0] === 'p' ? change.projects : change.tasks).push(JSON.parse(json));
+  for (const key of saved.keys()) if (!now.has(key)) (key[0] === 'p' ? change.deleteProjects : change.deleteTasks).push(Number(key.slice(1)));
+  if (!change.projects.length && !change.tasks.length && !change.deleteProjects.length && !change.deleteTasks.length) return;
+  try {
+    S.rev = (await backend.sync(change)).rev;
+    // `now`, not a fresh picture: changes made while this save was in flight
+    // are not saved yet and must still count as different.
+    saved = now;
+  } catch (error) {
+    // Another window saved first ("stale"), or the save was refused. Either
+    // way what is on screen is no longer true, so show what the file holds.
+    const stale = String(error && error.message || error) === 'stale';
+    try { await reload(); } catch {}
+    closeAll(); toast(stale ? 'Changed in another window. Showing the latest.' : 'That could not be saved. Showing what is stored.'); render();
+  }
+}
+// What is on screen right now. Not saved: a reload always starts in Today.
+const UI = { tlStart: addDays(TODAY, -4), view: { kind: 'today' }, adding: false, editing: null, newProject: false, renaming: false, confirmDelete: false, toast: null };
+
+// Today's goal: one task, named for today. Naming another moves the title.
+const goalTask = () => S.tasks.find(t => t.goalDay === TODAY);
+function setGoal(task) {
+  for (const t of S.tasks) if (t.goalDay === TODAY) t.goalDay = null;
+  task.goalDay = TODAY;
+  // A goal for today with no date would be missing from the timeline.
+  if (!task.due) task.due = TODAY;
+}
+function goalBlock() {
+  const t = goalTask();
+  if (!t) return `<button class="goal" data-do="add-goal">Set today’s goal<span>The one thing that has to happen today</span></button>`;
+  if (UI.editing === t.id) return editor(t);
+  if (t.done) return `<div class="goal won"><div class="label">Today’s goal, done</div><div class="title">${esc(t.title)}</div></div>`;
+  return `<div class="goal"><div class="label">Today’s goal</div>${taskRow(t)}</div>`;
+}
+const byPriority = (a, b) => a.priority - b.priority || a.id - b.id;
+const open = () => S.tasks.filter(t => !t.done);
+// Each project has a colour, used wherever its tasks show up. Tasks with no
+// project (Inbox) are grey.
+const COLORS = ['#3d6fdc', '#d27a2c', '#7c63d6', '#2f9a5c', '#cf4d7c', '#2495a3', '#b08d16', '#74747d'];
+const projectColor = id => { const p = S.projects.find(x => x.id === id); return p ? COLORS[(p.color ?? S.projects.indexOf(p)) % COLORS.length] : '#9a9aa3'; };
+// A new project takes the first colour no other project is using.
+const nextColor = () => { const used = new Set(S.projects.map(p => p.color)), free = COLORS.findIndex((_, i) => !used.has(i)); return free < 0 ? S.projects.length % COLORS.length : free; };
+const icon = paths => `<svg viewBox="0 0 16 16">${paths}</svg>`;
+function settings() {
+  const path = INFO.mcpCommand;
+  const claude = `claude mcp add done -- "${path}" mcp`;
+  const config = JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2);
+  const code = text => `<div class="code"><pre>${esc(text)}</pre><button class="btn" data-do="copy" data-text="${esc(text)}">Copy</button></div>`;
+  return `<div class="pane"><h3>Connect an AI agent</h3>
+      <p>done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up here within a few seconds.</p>
+      <label>Claude Code: run this once in a terminal</label>${code(claude)}
+      <label>Other apps: add this to their MCP settings</label>${code(config)}</div>
+    ${tauri ? `<div class="pane"><h3>Text size</h3>
+      <div class="stepper"><button class="btn" data-do="zoom" data-to="-0.1" aria-label="Smaller">−</button><output>${Math.round(zoom * 100)}%</output><button class="btn" data-do="zoom" data-to="0.1" aria-label="Larger">+</button><button class="btn quiet" data-do="zoom" data-to="reset">Reset</button></div>
+      <p style="margin-top:12px">Also on <kbd>⌘</kbd> <kbd>+</kbd>, <kbd>⌘</kbd> <kbd>−</kbd> and <kbd>⌘</kbd> <kbd>0</kbd>.</p></div>
+    <div class="pane"><h3>Version ${esc(INFO.version)}</h3>
+      <p>${INFO.updateReady ? `Version ${esc(INFO.updateReady)} is installed and starts the next time done opens.` : 'done updates itself. New versions are fetched in the background and start the next time it opens.'}</p>
+      ${INFO.updateReady ? '<button class="btn primary" data-do="restart">Restart now</button>' : ''}</div>` : ''}`;
+}
+const ICON = {
+  settings: icon('<path d="M2.5 5h5M11.5 5h2M2.5 11h2M8.5 11h5"/><circle cx="9.5" cy="5" r="1.8"/><circle cx="6.5" cy="11" r="1.8"/>'),
+  inbox: icon('<path d="M2.5 9.5l2-6h7l2 6v3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/><path d="M2.5 9.5h3.2a2.3 2.3 0 0 0 4.6 0h3.2"/>'),
+  today: icon('<rect x="2.5" y="3" width="11" height="10.5" rx="2"/><path d="M2.5 6.5h11M5.5 1.8v2.4M10.5 1.8v2.4"/><circle cx="8" cy="10" r="1.2" fill="currentColor" stroke="none"/>'),
+  upcoming: icon('<rect x="2.5" y="3" width="11" height="10.5" rx="2"/><path d="M2.5 6.5h11M5.5 1.8v2.4M10.5 1.8v2.4M7 8.6l1.8 1.5L7 11.6"/>'),
+  timeline: icon('<path d="M2.5 4h6M5.5 8h8M3.5 12h5" stroke-width="2.2"/>'),
+  board: icon('<rect x="2.5" y="2.5" width="4.5" height="11" rx="1.3"/><rect x="9" y="2.5" width="4.5" height="7" rx="1.3"/>'),
+};
+const projectName = id => (S.projects.find(p => p.id === id) || {}).name || '';
+
+function sections() {
+  const v = UI.view, tasks = open();
+  if (v.kind === 'timeline' || v.kind === 'board' || v.kind === 'settings') return [];
+  if (v.kind === 'inbox') return [{ tasks: tasks.filter(t => t.projectId === null).sort(byPriority) }];
+  if (v.kind === 'project') return [{ tasks: tasks.filter(t => t.projectId === v.id).sort(byPriority) }];
+  if (v.kind === 'today') {
+    const late = tasks.filter(t => t.goalDay !== TODAY).filter(t => t.due && t.due < TODAY).sort((a, b) => a.due.localeCompare(b.due) || byPriority(a, b));
+    const now = tasks.filter(t => t.goalDay !== TODAY).filter(t => t.due === TODAY).sort(byPriority);
+    return late.length ? [{ heading: 'Overdue', late: true, tasks: late }, { heading: 'Today', tasks: now, addHere: true }] : [{ tasks: now }];
+  }
+  const days = {};
+  for (const t of tasks) if (t.due && t.due > TODAY) (days[t.due] = days[t.due] || []).push(t);
+  return Object.keys(days).sort().map(day => ({ heading: describeDay(day), detail: fullDay(day), day, tasks: days[day].sort(byPriority) }));
+}
+
+// ---------- Rendering ----------
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const CHECK = '<svg viewBox="0 0 10 10" fill="none"><path d="M1.5 5.2l2.3 2.3 4.7-5" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const PRIORITY_NAME = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' };
+
+function sidebar() {
+  const tasks = open(), v = UI.view;
+  const late = tasks.some(t => t.due && t.due < TODAY);
+  const nav = (kind, label, n, extra = '') =>
+    `<button class="nav" data-do="view" data-kind="${kind}" aria-current="${v.kind === kind}"><span class="lab">${ICON[kind]}${label}</span><span class="n ${extra}">${n || ''}</span></button>`;
+  return `<aside class="side">
+    <div class="brand">done</div>
+    ${nav('inbox', 'Inbox', tasks.filter(t => t.projectId === null).length)}
+    ${nav('today', 'Today', tasks.filter(t => t.due && t.due <= TODAY).length, late ? 'late' : '')}
+    ${nav('upcoming', 'Upcoming', tasks.filter(t => t.due && t.due > TODAY).length)}
+    ${nav('timeline', 'Timeline', 0)}
+    ${nav('board', 'Board', 0)}
+    <h2>Projects <button class="icon" data-do="new-project" aria-label="New project" title="New project">+</button></h2>
+    ${S.projects.map(p => `<button class="nav" data-do="view" data-kind="project" data-id="${p.id}" aria-current="${v.kind === 'project' && v.id === p.id}"><span class="lab"><i class="pdot" style="--c:${projectColor(p.id)}"></i>${esc(p.name)}</span><span class="n">${tasks.filter(t => t.projectId === p.id).length || ''}</span></button>`).join('')}
+    ${UI.newProject ? `<input id="new-project" placeholder="Project name" aria-label="Project name" />` : ''}
+    <div class="end">${INFO.updateReady ? '<button class="nav update" data-do="restart">Restart to update</button>' : ''}${nav('settings', 'Settings', 0)}</div>
+  </aside>`;
+}
+
+function taskRow(t, section) {
+  if (UI.editing === t.id) return editor(t);
+  const v = UI.view;
+  const meta = [];
+  if (t.goalDay === TODAY && v.kind !== 'today') meta.push('<span class="tag-goal">Today’s goal</span>');
+  if (t.status === 'doing') meta.push('<span>In progress</span>');
+  // The date is left out where the section heading already says it.
+  if (t.due && !(v.kind === 'upcoming') && !(v.kind === 'today' && t.due === TODAY))
+    meta.push(`<span class="${t.due < TODAY ? 'late' : ''}">${describeDay(t.due)}</span>`);
+  if (t.projectId && v.kind !== 'project') meta.push(`<span class="proj"><i class="pdot" style="--c:${projectColor(t.projectId)}"></i>${esc(projectName(t.projectId))}</span>`);
+  return `<div class="task" data-task="${t.id}">
+    <button class="check p${t.priority}" data-do="complete" data-id="${t.id}" aria-label="Complete: ${esc(t.title)}">${CHECK}</button>
+    <div class="body" data-do="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span>${t.notes ? `<span class="notes">${esc(t.notes)}</span>` : ''}</div>
+    <div class="meta">${meta.join('')}</div>
+  </div>`;
+}
+
+function prioritySeg(value) {
+  return `<span class="seg" role="group" aria-label="Priority">${[1, 2, 3, 4].map(p =>
+    `<button type="button" data-do="set-priority" data-p="${p}" aria-pressed="${value === p}" title="${PRIORITY_NAME[p]}">${p < 4 ? `<i class="dot p${p}"></i>${p}` : 'None'}</button>`).join('')}</span>`;
+}
+
+function editor(t) {
+  return `<form class="editor" data-form="edit" data-id="${t.id}">
+    <input class="t" name="title" value="${esc(t.title)}" aria-label="Task" />
+    <textarea name="notes" placeholder="Notes" aria-label="Notes">${esc(t.notes)}</textarea>
+    <div class="bar">
+      <label class="lbl">Starts <input class="field" type="date" name="start" value="${t.start || ''}" /></label>
+      <label class="lbl">Due <input class="field" type="date" name="due" value="${t.due || ''}" /></label>
+      ${prioritySeg(t.priority)}<input type="hidden" name="priority" value="${t.priority}" />
+      <select class="field" name="project" aria-label="Project"><option value="">Inbox</option>${S.projects.map(p => `<option value="${p.id}" ${p.id === t.projectId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+      <span class="spacer"></span>
+      <button type="button" class="btn quiet danger" data-do="delete-task" data-id="${t.id}">Delete task</button>
+      <button type="button" class="btn quiet" data-do="cancel">Cancel</button>
+      <button class="btn primary">Save</button>
+    </div>
+  </form>`;
+}
+
+function quickAdd() {
+  return `<form class="quick" data-form="add">
+    <input class="q" id="quick" autocomplete="off" placeholder="What needs doing?" aria-label="New task" />
+    <div class="read" id="read"></div>
+    <div class="bar"><span class="sub">Enter adds the task and keeps this open</span><span class="spacer"></span>
+      <button type="button" class="btn quiet" data-do="cancel">Close</button><button class="btn primary" id="add-btn" disabled>Add task</button></div>
+  </form>`;
+}
+const addRow = () => UI.adding ? quickAdd() : `<button class="add" data-do="add"><span class="plus">+</span>Add task<kbd>Q</kbd></button>`;
+
+// What a new task gets when the typed line does not say: the view you are in.
+function defaults() {
+  const v = UI.view;
+  return { due: v.kind === 'today' || UI.asGoal ? TODAY : null, projectId: v.kind === 'project' ? v.id : null };
+}
+function readLine(text) {
+  const p = parseQuickAdd(text), d = defaults();
+  return { title: p.title, due: p.due || d.due, priority: p.priority || 4, projectId: p.projectId || d.projectId };
+}
+function showRead() {
+  const input = document.getElementById('quick'), box = document.getElementById('read');
+  if (!input || !box) return;
+  const r = readLine(input.value);
+  document.getElementById('add-btn').disabled = !r.title;
+  if (!input.value.trim()) { box.innerHTML = UI.asGoal ? 'The one thing that has to happen today' : 'Try: <span style="color:var(--muted)">call the bank tomorrow p1 #home</span>'; return; }
+  const chips = [];
+  if (UI.asGoal) chips.push('<span class="chip tag-goal">Today’s goal</span>');
+  if (r.due) chips.push(`<span class="chip">${describeDay(r.due)}</span>`);
+  if (r.priority < 4) chips.push(`<span class="chip"><i class="dot p${r.priority}"></i>${PRIORITY_NAME[r.priority]}</span>`);
+  chips.push(`<span class="chip"><i class="pdot" style="--c:${projectColor(r.projectId)}"></i>${r.projectId ? esc(projectName(r.projectId)) : 'Inbox'}</span>`);
+  box.innerHTML = chips.join('') + (r.title ? '' : '<span>Add a title</span>');
+}
+
+// ---------- Board ----------
+function board() {
+  const order = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || (a.due || '').localeCompare(b.due || '') || byPriority(a, b);
+  const lanes = [
+    { key: 'todo', c: 'var(--p4)', name: 'To do', hint: 'Nothing waiting', tasks: open().filter(t => t.status !== 'doing').sort(order) },
+    { key: 'doing', c: 'var(--accent)', name: 'In progress', hint: 'Drag a task here when you start it', tasks: open().filter(t => t.status === 'doing').sort(order) },
+    // Only today's, so the column is a record of the day and empties overnight.
+    { key: 'done', c: 'var(--ok)', name: 'Done today', hint: 'Drag a task here to finish it', tasks: S.tasks.filter(t => t.done && t.doneDay === TODAY) },
+  ];
+  const card = t => {
+    const meta = [];
+    if (t.goalDay === TODAY) meta.push('<span class="tag-goal">Today’s goal</span>');
+    if (t.due) meta.push(`<span class="${!t.done && t.due < TODAY ? 'late' : ''}">${describeDay(t.due)}</span>`);
+    if (t.projectId) meta.push(`<span class="proj"><i class="pdot" style="--c:${projectColor(t.projectId)}"></i>${esc(projectName(t.projectId))}</span>`);
+    return `<div class="card ${t.done ? 'done' : ''}" draggable="true" data-card="${t.id}">
+      <button class="check p${t.priority}" data-do="${t.done ? 'reopen' : 'complete'}" data-id="${t.id}" aria-label="${t.done ? 'Reopen' : 'Complete'}: ${esc(t.title)}">${CHECK}</button>
+      <div class="body" data-do="edit" data-id="${t.id}"><span class="title">${esc(t.title)}</span></div>
+      ${meta.length ? `<div class="meta" style="padding-left:0">${meta.join('')}</div>` : ''}
+    </div>`;
+  };
+  return `<div class="board">${lanes.map(l => `<div class="lane" data-lane="${l.key}"><h3><i class="pdot" style="--c:${l.c}"></i>${l.name}<span>${l.tasks.length}</span></h3>${l.tasks.map(card).join('') || `<div class="hint">${l.hint}</div>`}</div>`).join('')}</div>`;
+}
+
+// ---------- Timeline ----------
+const DAYW = 38, TL_DAYS = 35;
+const ruler = document.createElement('canvas').getContext('2d');
+const textWidth = s => { ruler.font = '12.5px -apple-system, system-ui, sans-serif'; return ruler.measureText(s).width; };
+function timeline() {
+  const days = Array.from({ length: TL_DAYS }, (_, i) => addDays(UI.tlStart, i));
+  const x = day => daysBetween(UI.tlStart, day) * DAYW, width = TL_DAYS * DAYW;
+  const head = days.map((d, i) => { const date = toDate(d), first = date.getDate() === 1 || i === 0;
+    return `<div class="tl-day ${d === TODAY ? 'now' : ''} ${first ? 'first' : ''}" style="left:${i * DAYW}px;width:${DAYW}px">${first ? date.toLocaleDateString('en-GB', { month: 'short' }) : date.toLocaleDateString('en-GB', { weekday: 'narrow' })}<b>${date.getDate()}</b></div>`; }).join('');
+  const back = days.map((d, i) => { const wd = toDate(d).getDay();
+    return `<i class="${d === TODAY ? 'now' : wd === 0 || wd === 6 ? 'we' : ''}" style="left:${i * DAYW}px;width:${DAYW}px"></i>`; }).join('');
+  const groups = [{ id: null, name: 'Inbox' }, ...S.projects].map(g => ({ ...g, tasks: open().filter(t => t.projectId === g.id) })).filter(g => g.tasks.length);
+  // Dated tasks first, in date order, so each group reads left to right; the
+  // undated ones sit underneath, waiting for a click on a day.
+  const order = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || (a.start || a.due || '').localeCompare(b.start || b.due || '') || byPriority(a, b);
+  const row = t => {
+    const s = t.start || t.due, w = t.due ? (daysBetween(s, t.due) + 1) * DAYW - 4 : 0;
+    const fits = textWidth(t.title) + (t.priority < 4 ? 13 : 0) + 22 <= w;
+    const track = t.due
+      ? `<div class="tbar ${t.due < TODAY ? 'late' : ''} ${fits ? '' : 'out'}" data-id="${t.id}" style="--c:${projectColor(t.projectId)};left:${x(s) + 2}px;width:${w}px" title="${esc(t.title)}"><i class="grip l"></i>${t.priority < 4 ? `<i class="dot p${t.priority}"></i>` : ''}<span>${esc(t.title)}</span><i class="grip r"></i></div>`
+      : days.map((d, i) => `<button class="cell" data-do="tl-set" data-id="${t.id}" data-day="${d}" style="left:${i * DAYW}px;width:${DAYW}px" aria-label="Set ${esc(t.title)} to ${fullDay(d)}"></button>`).join('');
+    return `<div class="tl-row"><div class="tl-label"><button class="check p${t.priority}" data-do="complete" data-id="${t.id}" aria-label="Complete: ${esc(t.title)}">${CHECK}</button><span class="title" data-do="edit" data-id="${t.id}">${esc(t.title)}</span></div><div class="tl-track" style="width:${width}px">${track}</div></div>`;
+  };
+  return `<div class="tl"><div class="tl-inner">
+      <div class="tl-back" style="width:${width}px">${back}</div>
+      <div class="tl-row tl-head"><div class="tl-label">Task</div><div class="tl-track" style="width:${width}px">${head}</div></div>
+      ${groups.map(g => `<div class="tl-row tl-group"><div class="tl-label"><i class="pdot" style="--c:${projectColor(g.id)}"></i>${esc(g.name)}<span>${g.tasks.length}</span></div><div class="tl-track" style="width:${width}px"></div></div>${g.tasks.sort(order).map(row).join('')}`).join('')}
+    </div></div>
+    <p class="tl-hint">Drag a bar to move it. Drag either end to make it longer or shorter. Click a day in an empty row to give that task a date.</p>`;
+}
+
+function main() {
+  const v = UI.view, list = sections();
+  // Timeline and Board use the full width and open tasks in a sheet on top.
+  const wide = v.kind === 'timeline' || v.kind === 'board';
+  // Views that are not a list of tasks: no empty state, no task rows.
+  const special = wide || v.kind === 'settings';
+  const count = list.reduce((n, s) => n + s.tasks.length, 0);
+  let title, sub = '', actions = '';
+  if (v.kind === 'inbox') title = 'Inbox';
+  if (v.kind === 'today') { title = 'Today'; sub = fullDay(TODAY); }
+  if (v.kind === 'upcoming') title = 'Upcoming';
+  if (v.kind === 'settings') title = 'Settings';
+  if (v.kind === 'board') { title = 'Board'; sub = 'Drag a card between columns'; }
+  if (v.kind === 'timeline') {
+    const end = addDays(UI.tlStart, TL_DAYS - 1), short = d => toDate(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    title = 'Timeline'; sub = `${short(UI.tlStart)} to ${short(end)}`;
+    actions = `<button data-do="tl-prev">Earlier</button><button data-do="tl-today">Today</button><button data-do="tl-next">Later</button>`;
+  }
+  if (v.kind === 'project') {
+    const name = projectName(v.id);
+    title = UI.renaming ? `<input id="rename" value="${esc(name)}" aria-label="Project name" />` : `<i class="pdot" style="--c:${projectColor(v.id)}"></i>${esc(name)}`;
+    actions = UI.confirmDelete
+      ? `<button class="danger" data-do="delete-project">Delete it${count ? ` and move ${count} ${count === 1 ? 'task' : 'tasks'} to Inbox` : ''}</button><button data-do="cancel">Keep it</button>`
+      : `<button data-do="rename">Rename</button><button data-do="ask-delete">Delete project</button>`;
+  }
+  const empty = special ? ['', ''] : { inbox: ['Inbox is empty', 'Anything you add without a project lands here.'], today: ['Nothing due today', 'Tasks with today’s date show up here, along with anything overdue.'], upcoming: ['Nothing scheduled', 'Give a task a date and it appears here, grouped by day.'], project: ['No tasks in this project yet', 'Add one below, or type #' + (v.kind === 'project' ? esc(tagOf(projectName(v.id))) : '') + ' when adding a task anywhere.'] }[v.kind];
+  const canAdd = v.kind !== 'upcoming';
+  const editing = wide && UI.editing ? S.tasks.find(t => t.id === UI.editing) : null;
+  const body = list.map((s, i) => `<div class="section">
+      ${s.heading ? `<h3 class="${s.late ? 'late' : ''}">${s.heading}${s.detail && s.detail.indexOf(s.heading) !== 0 ? `<span>${s.detail}</span>` : ''}</h3>` : ''}
+      ${s.tasks.map(t => taskRow(t, s)).join('')}
+      ${canAdd && (s.addHere || (i === list.length - 1 && !list.some(x => x.addHere))) ? addRow() : ''}
+    </div>`).join('');
+  return `<main class="${wide ? 'wide' : ''}"><div class="col">
+    <header class="view"><h1>${title}</h1>${sub ? `<span class="sub">${sub}</span>` : ''}<div class="actions">${actions}</div></header>
+    ${v.kind === 'today' ? goalBlock() : ''}
+    ${v.kind === 'settings' ? settings() : ''}
+    ${count === 0 && !UI.adding && !special && !(v.kind === 'today' && goalTask()) ? `<div class="empty"><b>${empty[0]}</b>${empty[1]}</div>` : ''}
+    ${body}
+    ${v.kind === 'timeline' ? timeline() : ''}${v.kind === 'board' ? board() : ''}
+    ${v.kind === 'upcoming' || wide ? `<div class="section">${addRow()}</div>` : ''}
+    ${editing ? `<div class="sheet" data-do="sheet">${editor(editing)}</div>` : ''}
+  </div></main>`;
+}
+
+// Names what just happened so render() can play that one animation, once.
+function fx(what) { UI.fx = { ...UI.fx, ...what }; }
+
+function render(focus) {
+  const now = UI.fx || {}; UI.fx = null;
+  document.getElementById('app').className = ['enter', 'open', 'toast'].filter(k => now[k]).map(k => 'fx-' + k).join(' ');
+  // The whole page is redrawn on every change; without this the timeline
+  // would jump back to its left edge after each drag.
+  const old = document.querySelector('.tl'), scroll = old ? [old.scrollLeft, old.scrollTop] : null;
+  document.getElementById('app').innerHTML = `<div class="app">${sidebar()}${main()}</div>
+    ${UI.toast ? `<div class="toast" role="status">${esc(UI.toast.text)}${UI.toast.undo ? '<button data-do="undo">Undo</button>' : ''}</div>` : ''}`;
+  showRead();
+  // Stagger: each row, card or bar starts a moment after the one before it.
+  if (now.enter) for (const group of ['.task, .add, .section h3', '.card', '.tbar'])
+    document.querySelectorAll(group).forEach((el, i) => el.style.setProperty('--i', Math.min(i, 16)));
+  const mark = (id, cls) => id && document.querySelectorAll(`[data-task="${id}"], [data-card="${id}"], .tbar[data-id="${id}"]`).forEach(el => el.classList.add(cls));
+  mark(now.added, 'fx-new'); mark(now.moved, 'fx-settle');
+  const tl = document.querySelector('.tl');
+  if (tl && scroll) { tl.scrollLeft = scroll[0]; tl.scrollTop = scroll[1]; }
+  const el = focus && document.querySelector(focus);
+  if (el) { el.focus(); if (el.select && focus !== '#quick') el.select(); }
+}
+
+// ---------- Actions ----------
+let toastTimer;
+function toast(text, undo) { fx({ toast: true }); clearTimeout(toastTimer); UI.toast = { text, undo }; toastTimer = setTimeout(() => { UI.toast = null; render(); }, 5000); }
+function closeAll() { UI.asGoal = false; UI.adding = false; UI.editing = null; UI.newProject = false; UI.renaming = false; UI.confirmDelete = false; }
+
+// Finishing and reopening go through these two, whichever view it happens in.
+// doneDay is what puts a task in the board's "Done today" column.
+function markDone(task) {
+  if (task.done) return;
+  task.done = true; task.doneDay = TODAY; save();
+  toast('Task completed', () => markOpen(task));
+}
+function markOpen(task) {
+  if (!task.done) return;
+  task.done = false; delete task.doneDay; save();
+}
+
+// A project's tasks move to Inbox rather than being deleted with it, and the
+// whole thing can be undone, so deleting needs no "are you sure".
+function deleteProject(id) {
+  const index = S.projects.findIndex(p => p.id === id), project = S.projects[index];
+  const moved = S.tasks.filter(t => t.projectId === id);
+  moved.forEach(t => { t.projectId = null; });
+  S.projects.splice(index, 1);
+  if (UI.view.kind === 'project' && UI.view.id === id) UI.view = { kind: 'inbox' };
+  closeAll(); save();
+  toast(`${project.name} deleted` + (moved.length ? `, ${moved.length} ${moved.length === 1 ? 'task' : 'tasks'} moved to Inbox` : ''),
+    () => { S.projects.splice(index, 0, project); moved.forEach(t => { t.projectId = id; }); });
+  fx({ enter: true }); render();
+}
+
+const actions = {
+  view(el) { closeAll(); fx({ enter: true }); UI.view = el.dataset.kind === 'project' ? { kind: 'project', id: Number(el.dataset.id) } : { kind: el.dataset.kind }; render(); },
+  add() { closeAll(); if (UI.view.kind === 'settings') UI.view = { kind: 'inbox' }; fx({ open: true }); UI.adding = true; render('#quick'); },
+  'add-goal'() { closeAll(); fx({ open: true }); UI.adding = true; UI.asGoal = true; render('#quick'); },
+  copy(el) { navigator.clipboard.writeText(el.dataset.text).then(() => { toast('Copied'); render(); }); },
+  zoom(el) { setZoom(el.dataset.to === 'reset' ? 1 : zoom + Number(el.dataset.to)); render(); },
+  restart() { tauri.core.invoke('restart'); },
+  edit(el) { closeAll(); fx({ open: true }); UI.editing = Number(el.dataset.id); render('.editor .t'); },
+  cancel() { closeAll(); render(); },
+  complete(el) {
+    const id = Number(el.dataset.id), task = S.tasks.find(t => t.id === id), row = el.closest('.task, .card, .tl-row');
+    const finish = () => { markDone(task); render(); };
+    // Let the completion be seen before the row goes, unless motion is unwanted.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || !row) return finish();
+    row.classList.add('leaving');
+    if (!row.classList.contains('task')) return setTimeout(finish, 280);
+    // Fix the height first: a row can only fold away from a known height.
+    row.style.height = row.offsetHeight + 'px';
+    setTimeout(() => row.classList.add('collapse'), 150); setTimeout(finish, 360);
+  },
+  undo() { UI.toast.undo(); UI.toast = null; clearTimeout(toastTimer); save(); render(); },
+  'delete-task'(el) {
+    const id = Number(el.dataset.id), index = S.tasks.findIndex(t => t.id === id), [task] = S.tasks.splice(index, 1);
+    closeAll(); save(); toast('Task deleted', () => { S.tasks.splice(index, 0, task); }); render();
+  },
+  'set-priority'(el) {
+    const form = el.closest('form'); form.elements.priority.value = el.dataset.p;
+    form.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
+  },
+  'new-project'() { closeAll(); UI.newProject = true; render('#new-project'); },
+  rename() { closeAll(); UI.renaming = true; render('#rename'); },
+  'ask-delete'() { closeAll(); UI.confirmDelete = true; render(); },
+  'delete-project'() { deleteProject(UI.view.id); },
+  reopen(el) { markOpen(S.tasks.find(t => t.id === Number(el.dataset.id))); UI.toast = null; render(); },
+  sheet(el, e) { if (e.target === el) { closeAll(); render(); } },
+  'tl-prev'() { UI.tlStart = addDays(UI.tlStart, -7); render(); },
+  'tl-next'() { UI.tlStart = addDays(UI.tlStart, 7); render(); },
+  'tl-today'() { UI.tlStart = addDays(TODAY, -4); render(); const tl = document.querySelector('.tl'); if (tl) tl.scrollLeft = 0; },
+  'tl-set'(el) { const t = S.tasks.find(x => x.id === Number(el.dataset.id)); t.start = null; t.due = el.dataset.day; fx({ added: t.id }); save(); render(); },
+};
+
+// ---------- Right-click menu ----------
+// One menu for the whole app. What it offers depends on what was under the
+// pointer: a task, a project, one of the built-in views, or empty space.
+let menuRun = [];
+function closeMenu() { const m = document.getElementById('menu'); if (m) m.remove(); }
+function openMenu(x, y, items) {
+  closeMenu(); menuRun = [];
+  const run = fn => menuRun.push(fn) - 1;
+  const el = document.createElement('div');
+  el.className = 'menu'; el.id = 'menu'; el.setAttribute('role', 'menu');
+  el.innerHTML = items.map(it => {
+    if (it === '-') return '<hr>';
+    if (it.label) return `<div class="label">${it.label}</div>`;
+    if (it.set) return `<div class="set">${it.set.map(o => `<button data-m="${run(o.run)}" aria-pressed="${!!o.on}">${o.html}</button>`).join('')}</div>`;
+    return `<button class="item ${it.danger ? 'danger' : ''}" role="menuitem" data-m="${run(it.run)}">${esc(it.text)}${it.on ? '<span class="tick">\u2713</span>' : ''}</button>`;
+  }).join('');
+  document.body.append(el);
+  // Keep it on screen: flip back in from the right and bottom edges.
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+}
+function taskMenu(t) {
+  const change = fn => () => { fn(); save(); render(); };
+  const del = { text: 'Delete task', danger: true, run: () => actions['delete-task']({ dataset: { id: t.id } }) };
+  if (t.done) return [{ text: 'Reopen', run: () => { markOpen(t); UI.toast = null; render(); } }, '-', del];
+  const due = (text, day) => ({ text, on: t.due === day && !t.start, run: change(() => { t.start = null; t.due = day; fx({ moved: t.id }); }) });
+  const monday = addDays(TODAY, (1 - toDate(TODAY).getDay() + 7) % 7 || 7);
+  const moveTo = (text, id) => ({ text, on: t.projectId === id, run: change(() => { t.projectId = id; }) });
+  return [
+    { text: 'Edit task', run: () => actions.edit({ dataset: { id: t.id } }) },
+    { text: 'Complete', run: () => { markDone(t); render(); } },
+    t.goalDay === TODAY
+      ? { text: 'Remove as today’s goal', run: change(() => { t.goalDay = null; }) }
+      : { text: 'Make today’s goal', run: change(() => { setGoal(t); fx({ moved: t.id }); }) },
+    { text: t.status === 'doing' ? 'Move back to To do' : 'Mark as in progress', run: change(() => { t.status = t.status === 'doing' ? undefined : 'doing'; }) },
+    '-', { label: 'Due' }, due('Today', TODAY), due('Tomorrow', addDays(TODAY, 1)), due('Next Monday', monday),
+    { text: 'No date', on: !t.due, run: change(() => { t.start = null; t.due = null; }) },
+    '-', { label: 'Priority' },
+    { set: [1, 2, 3, 4].map(p => ({ html: p < 4 ? `<i class="dot p${p}"></i>${p}` : 'None', on: t.priority === p, run: change(() => { t.priority = p; }) })) },
+    '-', { label: 'Project' }, moveTo('Inbox', null), ...S.projects.map(p => moveTo(p.name, p.id)),
+    '-', del,
+  ];
+}
+function projectMenu(id) {
+  const open = () => actions.view({ dataset: { kind: 'project', id } });
+  return [
+    { text: 'Open', run: open },
+    { text: 'Add task here', run: () => { open(); actions.add(); } },
+    { text: 'Rename', run: () => { open(); actions.rename(); } },
+    '-', { label: 'Colour' },
+    { set: COLORS.map((c, i) => ({ html: `<i class="sw" style="background:${c}"></i>`, on: projectColor(id) === c, run: () => { S.projects.find(p => p.id === id).color = i; save(); render(); } })) },
+    '-', { text: 'Delete project', danger: true, run: () => deleteProject(id) },
+  ];
+}
+document.addEventListener('contextmenu', e => {
+  if (!(e.target instanceof Element)) return;
+  // In a text field the browser's own menu (paste, spelling) is the useful one.
+  if (e.target.closest('input, textarea, select')) return;
+  e.preventDefault();
+  if (e.target.closest('#menu')) return;
+  const hit = e.target.closest('[data-task], [data-card], .tl-row');
+  const idHolder = hit && !hit.dataset.task && !hit.dataset.card ? hit.querySelector('[data-id]') : null;
+  const id = hit ? Number(hit.dataset.task || hit.dataset.card || (idHolder && idHolder.dataset.id)) : 0;
+  const task = id ? S.tasks.find(t => t.id === id) : null;
+  const nav = e.target.closest('.nav');
+  let items;
+  if (task) items = taskMenu(task);
+  else if (nav && nav.dataset.kind === 'project') items = projectMenu(Number(nav.dataset.id));
+  else if (nav) { const kind = nav.dataset.kind, go = () => actions.view({ dataset: { kind } });
+    items = [{ text: 'Open', run: go }, { text: 'Add task here', run: () => { go(); actions.add(); } }]; }
+  else items = [{ text: 'Add task', run: () => actions.add() }, { text: 'New project', run: () => actions['new-project']() }];
+  openMenu(e.clientX, e.clientY, items);
+});
+// Any click closes the menu; a click on one of its items also runs it.
+document.addEventListener('click', e => {
+  if (!document.getElementById('menu')) return;
+  const item = e.target.closest('#menu [data-m]'), fn = item && menuRun[item.dataset.m];
+  closeMenu(); if (fn) fn();
+}, true);
+addEventListener('blur', closeMenu); addEventListener('resize', closeMenu);
+document.addEventListener('scroll', closeMenu, true);
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-do]');
+  if (el && actions[el.dataset.do]) actions[el.dataset.do](el, e);
+});
+
+// Dragging a card between the board's columns.
+let cardId = null;
+document.addEventListener('dragstart', e => {
+  const card = e.target.closest && e.target.closest('.card');
+  if (!card) return;
+  cardId = Number(card.dataset.card); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(cardId));
+  card.classList.add('dragging');
+});
+document.addEventListener('dragend', () => { cardId = null; document.querySelectorAll('.dragging, .over').forEach(el => el.classList.remove('dragging', 'over')); });
+document.addEventListener('dragover', e => {
+  const lane = e.target.closest && e.target.closest('.lane');
+  if (!lane || cardId === null) return;
+  e.preventDefault();
+  document.querySelectorAll('.lane.over').forEach(el => el !== lane && el.classList.remove('over'));
+  lane.classList.add('over');
+});
+document.addEventListener('drop', e => {
+  const lane = e.target.closest && e.target.closest('.lane');
+  if (!lane || cardId === null) return;
+  e.preventDefault();
+  const task = S.tasks.find(t => t.id === cardId), key = lane.dataset.lane;
+  if (key === 'done') markDone(task);
+  else { markOpen(task); task.status = key === 'doing' ? 'doing' : undefined; save(); }
+  fx({ moved: task.id }); cardId = null; render();
+});
+
+// Dragging a bar. The bar is moved directly while the pointer is down and the
+// task is only changed on release, so a drag is one change (and one redraw).
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  const bar = e.target.closest && e.target.closest('.tbar');
+  if (!bar || e.button !== 0) return;
+  const t = S.tasks.find(x => x.id === Number(bar.dataset.id)), grip = e.target.classList.contains('grip');
+  drag = { bar, t, mode: grip ? (e.target.classList.contains('l') ? 'start' : 'end') : 'move', x: e.clientX, d: 0,
+    left: parseFloat(bar.style.left), width: parseFloat(bar.style.width), len: daysBetween(t.start || t.due, t.due) + 1 };
+  bar.setPointerCapture(e.pointerId); e.preventDefault();
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  let d = Math.round((e.clientX - drag.x) / DAYW);
+  // An end can be dragged up to the other end, never past it.
+  if (drag.mode === 'end') d = Math.max(d, 1 - drag.len);
+  if (drag.mode === 'start') d = Math.min(d, drag.len - 1);
+  drag.d = d;
+  if (d !== 0) drag.bar.classList.add('dragging');
+  if (drag.mode !== 'end') drag.bar.style.left = drag.left + d * DAYW + 'px';
+  if (drag.mode === 'end') drag.bar.style.width = drag.width + d * DAYW + 'px';
+  if (drag.mode === 'start') drag.bar.style.width = drag.width - d * DAYW + 'px';
+});
+document.addEventListener('pointerup', () => {
+  if (!drag) return;
+  const { t, mode, d } = drag; drag = null;
+  // A press without movement is a click: open the task.
+  if (d === 0) return actions.edit({ dataset: { id: t.id } });
+  const s = t.start || t.due;
+  if (mode === 'move') { t.start = t.start ? addDays(t.start, d) : null; t.due = addDays(t.due, d); }
+  if (mode === 'end') { t.start = s; t.due = addDays(t.due, d); }
+  if (mode === 'start') t.start = addDays(s, d);
+  if (t.start === t.due) t.start = null;
+  fx({ moved: t.id }); save(); render();
+});
+
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  const form = e.target;
+  if (form.dataset.form === 'add') {
+    const input = document.getElementById('quick'), r = readLine(input.value);
+    if (!r.title) return;
+    S.tasks.push({ id: S.nextId++, title: r.title, notes: '', start: null, due: r.due, priority: r.priority, projectId: r.projectId });
+    // Named as today's goal: there is only one, so the box closes after it.
+    if (UI.asGoal) { setGoal(S.tasks.at(-1)); closeAll(); fx({ added: S.nextId - 1 }); save(); return render(); }
+    fx({ added: S.nextId - 1 }); save(); render('#quick'); // stays open for the next task
+  }
+  if (form.dataset.form === 'edit') {
+    const task = S.tasks.find(t => t.id === Number(form.dataset.id)), f = form.elements;
+    if (!f.title.value.trim()) return f.title.focus();
+    // A task with only a start date is simply due that day; a start on or
+    // after the due date means a one-day task.
+    let start = f.start.value || null, due = f.due.value || null;
+    if (start && !due) { due = start; start = null; }
+    if (start && start > due) [start, due] = [due, start];
+    if (start === due) start = null;
+    Object.assign(task, { title: f.title.value.trim(), notes: f.notes.value, start, due, priority: Number(f.priority.value), projectId: f.project.value ? Number(f.project.value) : null });
+    closeAll(); save(); render();
+  }
+});
+
+document.addEventListener('input', e => { if (e.target.id === 'quick') showRead(); });
+
+function commitName(el) {
+  const name = el.value.trim();
+  if (el.id === 'new-project' && name) { const p = { id: S.nextId++, name, color: nextColor() }; S.projects.push(p); UI.view = { kind: 'project', id: p.id }; }
+  if (el.id === 'rename' && name) S.projects.find(p => p.id === UI.view.id).name = name;
+  closeAll(); save(); render();
+}
+document.addEventListener('focusout', e => { if (e.target.id === 'new-project' || e.target.id === 'rename') setTimeout(() => { if (document.body.contains(e.target)) commitName(e.target); }, 0); });
+
+// Text size keys, in the desktop app only (see setZoom).
+document.addEventListener('keydown', e => {
+  if (!tauri || !e.metaKey || e.altKey) return;
+  const step = { '=': 0.1, '+': 0.1, '-': -0.1, '_': -0.1 }[e.key];
+  if (step === undefined && e.key !== '0') return;
+  e.preventDefault();
+  setZoom(step === undefined ? 1 : zoom + step);
+  if (UI.view.kind === 'settings') render();
+}, true);
+
+document.addEventListener('keydown', e => {
+  // The target can be the document itself, which has no matches().
+  const typing = e.target instanceof Element && e.target.matches('input, textarea, select');
+  if (e.key === 'Escape' && document.getElementById('menu')) return closeMenu();
+  if (e.key === 'Escape') { if (UI.adding || UI.editing || UI.newProject || UI.renaming || UI.confirmDelete) { closeAll(); render(); } return; }
+  if (typing) {
+    if (e.key === 'Enter' && (e.target.id === 'new-project' || e.target.id === 'rename')) { e.preventDefault(); commitName(e.target); }
+    // In the editor, Enter in the title saves; in notes it is a new line.
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'q' || e.key === 'n') { e.preventDefault(); actions.add(); }
+  if (e.key === '1') actions.view({ dataset: { kind: 'inbox' } });
+  if (e.key === '2') actions.view({ dataset: { kind: 'today' } });
+  if (e.key === '3') actions.view({ dataset: { kind: 'upcoming' } });
+  if (e.key === '4') actions.view({ dataset: { kind: 'timeline' } });
+  if (e.key === '5') actions.view({ dataset: { kind: 'board' } });
+});
+
+// Keeping in step. An agent, another window or the web app may change the
+// tasks, and an update may have arrived. Checked when the window comes back
+// and every few seconds while it is in view, but never under your hands:
+// not while typing, dragging or with a menu open.
+const busy = () => UI.adding || UI.editing || UI.newProject || UI.renaming || drag || cardId !== null || document.getElementById('menu');
+async function refresh() {
+  try {
+    const rev = S.rev, update = INFO.updateReady;
+    await reload(); await readInfo();
+    if (S.rev !== rev || INFO.updateReady !== update) render();
+  } catch {}
+}
+function keepInStep() {
+  if (dayOf(new Date()) !== TODAY) return location.reload();
+  if (document.hidden || busy()) return;
+  pending = pending.then(refresh);
+}
+addEventListener('focus', keepInStep);
+setInterval(keepInStep, 4000);
+
+(async () => {
+  try { await reload(); await readInfo(); if (zoom !== 1) setZoom(zoom); }
+  catch (error) {
+    document.getElementById('app').innerHTML = `<p style="padding:40px">done could not open its tasks: ${esc(String(error && error.message || error))}</p>`;
+    return;
+  }
+  fx({ enter: true }); render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+name: Release
+
+# Builds the Mac app from main and publishes it as a GitHub release, which is
+# also where installed copies of done look for updates.
+on:
+  schedule:
+    # 08:00 UTC is midnight in California in winter (01:00 in summer).
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The version is 0.1.<number of commits on main>. It goes up with every
+      # commit and never repeats, which is all the updater needs, and it means
+      # "is there anything new?" is the same question as "does this version's
+      # release exist yet?".
+      - name: Decide whether there is anything to release
+        id: plan
+        run: |
+          version="0.1.$(git rev-list --count HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Nothing new since v$version."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.plan.outputs.build == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.plan.outputs.build == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.plan.outputs.build == 'true'
+        with:
+          node-version: 22
+
+      - name: Test
+        if: steps.plan.outputs.build == 'true'
+        run: cargo test -p done-core -p done-mcp -p done-server
+
+      # The update archive is signed with the updater key. An installed app
+      # refuses any update that was not, so a release cannot be swapped for
+      # something else on the way to a Mac.
+      - name: Build the app
+        if: steps.plan.outputs.build == 'true'
+        working-directory: crates/app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: npx --yes @tauri-apps/cli@2 build --config "{\"version\":\"$VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}"
+
+      - name: Publish the release
+        if: steps.plan.outputs.build == 'true'
+        working-directory: target/release/bundle/macos
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          # For people: a zip of the app. For installed apps: the signed
+          # archive, and latest.json telling them which version it is.
+          ditto -c -k --keepParent done.app done-mac-arm64.zip
+          jq -n \
+            --arg version "$VERSION" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg signature "$(cat done.app.tar.gz.sig)" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/done.app.tar.gz" \
+            '{version: $version, pub_date: $date, platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' \
+            > latest.json
+          gh release create "v$VERSION" --title "done $VERSION" --generate-notes \
+            done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig latest.json

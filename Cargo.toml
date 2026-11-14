@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/mcp", "crates/server", "crates/app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+# No debug info and no incremental cache in development builds: the Tauri
+# dependency tree is large and this keeps the build folder to a fraction of
+# its usual size, on a laptop where disk is the scarce thing.
+[profile.dev]
+debug = 0
+incremental = false
