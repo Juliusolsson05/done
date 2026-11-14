@@ -13,9 +13,10 @@ use done_core::{Change, Error, Store};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+// The built interface, as one file (the build inlines its scripts and styles).
 // Built into the binary: one file to run, and it cannot drift from the
-// interface the desktop app ships.
-const UI: &str = include_str!("../../../ui/index.html");
+// interface the desktop app ships. Build it first: cd ui && npm ci && npm run build
+const UI: &str = include_str!("../../../ui/dist/index.html");
 
 /// Only answer requests addressed to this machine. Without this a website
 /// could point its own name at 127.0.0.1 and read the tasks (DNS rebinding).

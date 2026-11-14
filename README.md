@@ -40,14 +40,15 @@ claude mcp add done -- "/Applications/done.app/Contents/MacOS/done" mcp
 You need Rust and Node.
 
 ```bash
-cargo test -p done-core -p done-mcp          # the rules and the MCP server
-cargo run -p done-server                      # the web app, at http://127.0.0.1:4400
-cd crates/app && npx @tauri-apps/cli@2 build  # the Mac app, in target/release/bundle/macos
+cd ui && npm ci && npm test && npm run build && cd ..   # the interface
+cargo test -p done-core -p done-mcp                     # the rules and the MCP server
+cargo run -p done-server                                # the web app, at http://127.0.0.1:4400
+cd crates/app && npx @tauri-apps/cli@2 build            # the Mac app, in target/release/bundle/macos
 ```
 
 ## How it is put together
 
-- `ui/index.html` is the whole interface: one file, no build step. The desktop app and the web app both show it.
+- `ui/` is the interface: React, Tailwind and shadcn/ui components, with the whole look defined as theme tokens in `ui/src/index.css`. The desktop app and the web app both show the same build of it.
 - `crates/core` owns the SQLite file and the rules for a valid task.
 - `crates/app` is the desktop app (Tauri). Started as `done mcp`, the same program is the MCP server.
 - `crates/mcp` is the MCP server itself.
