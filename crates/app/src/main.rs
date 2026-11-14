@@ -8,16 +8,119 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use done_core::{Change, State, Store, Synced};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use std::time::Duration;
-use tauri::Manager;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 /// The version of an update that has been downloaded and installed and now
 /// only needs a restart. Empty until that happens.
 #[derive(Default)]
 struct UpdateReady(Mutex<Option<String>>);
+
+/// The focus session the window is running, as far as the menu bar needs to
+/// know it. The window owns the session; it hands over these times whenever
+/// they change, and the menu bar counts down from them by itself. That way
+/// the countdown stays right while the window is hidden, where a web page's
+/// own timers are slowed or stopped.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Session {
+    /// When the countdown reaches zero, in milliseconds since 1970. Absent
+    /// while paused.
+    ends_at: Option<f64>,
+    /// What is left, in milliseconds, while paused.
+    remaining: Option<f64>,
+    /// Set once the end has been announced, so it is announced only once.
+    #[serde(skip)]
+    rang: bool,
+}
+
+#[derive(Default)]
+struct Focus(Mutex<Option<Session>>);
+
+#[tauri::command]
+fn focus_set(focus: tauri::State<Focus>, session: Option<Session>) {
+    *focus.0.lock().unwrap() = session;
+}
+
+/// 24:59, or 1:04:59 from an hour up.
+fn clock(milliseconds: f64) -> String {
+    let seconds = (milliseconds / 1000.0).ceil() as u64;
+    let (h, m, s) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Puts done in the menu bar and keeps the countdown there up to date. With no
+/// session it is just the mark; during one, the time left stands beside it.
+fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let pause = MenuItem::with_id(app, "pause", "Pause or resume", true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop", "Stop", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open done", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&pause, &stop, &open])?;
+    TrayIconBuilder::with_id("focus")
+        .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+        // A template image is drawn by macOS in the menu bar's own colour.
+        .icon_as_template(true)
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_window(app),
+            // The window owns the session, so pausing and stopping are passed to it.
+            command => {
+                let _ = app.emit("focus-command", command);
+            }
+        })
+        .build(app)?;
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut shown = String::new();
+        loop {
+            std::thread::sleep(Duration::from_millis(250));
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0);
+            let mut ended = false;
+            let text = match app.state::<Focus>().0.lock().unwrap().as_mut() {
+                None => String::new(),
+                Some(session) => match (session.ends_at, session.remaining) {
+                    (Some(end), _) => {
+                        if end <= now && !session.rang {
+                            session.rang = true;
+                            ended = true;
+                        }
+                        clock((end - now).max(0.0))
+                    }
+                    (None, Some(left)) => format!("Paused {}", clock(left)),
+                    (None, None) => String::new(),
+                },
+            };
+            if text != shown {
+                if let Some(tray) = app.tray_by_id("focus") {
+                    let _ = tray.set_title(if text.is_empty() { None } else { Some(text.as_str()) });
+                }
+                shown = text;
+            }
+            if ended {
+                // Time is up: say so out loud and bring the window forward,
+                // because the point of the timer is to be interrupted by it.
+                let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").spawn();
+                show_window(&app);
+                let _ = app.emit("focus-command", "ended");
+            }
+        }
+    });
+    Ok(())
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,14 +200,30 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(store)
         .manage(UpdateReady::default())
-        .invoke_handler(tauri::generate_handler![state, sync, info, restart])
+        .manage(Focus::default())
+        .invoke_handler(tauri::generate_handler![state, sync, info, restart, focus_set])
+        // Closing the window hides it and leaves done running, as Mac apps
+        // do: a countdown in the menu bar must outlive its window. Cmd+Q quits.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
+            run_menu_bar(app.handle())?;
             // Development builds are not releases and must not replace themselves.
             if !cfg!(debug_assertions) {
                 keep_updated(app.handle().clone());
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("run done");
+        .build(tauri::generate_context!())
+        .expect("build done")
+        .run(|app, event| {
+            // Clicking the Dock icon brings the hidden window back.
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_window(app);
+            }
+        });
 }
