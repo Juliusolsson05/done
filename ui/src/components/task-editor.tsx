@@ -88,16 +88,17 @@ function EditorForm({ task }: { task: Task }) {
             ))}
           </SelectContent>
         </Select>
-        <span className="flex-1" />
-        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => removeTask(task.id)}>
-          Delete task
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={closeAll}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm">
-          Save
-        </Button>
+        <div className="ml-auto flex gap-2">
+          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => removeTask(task.id)}>
+            Delete task
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={closeAll}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm">
+            Save
+          </Button>
+        </div>
       </div>
     </form>
   )

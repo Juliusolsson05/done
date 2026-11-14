@@ -220,7 +220,7 @@ export default function App() {
           <div>
             <SidebarProvider className="max-md:flex-col md:h-svh" onContextMenu={onContextMenu}>
               <AppSidebar />
-              <SidebarInset className={cn('m-2 min-w-0 overflow-y-auto rounded-xl shadow-sm ring-1 ring-foreground/5 md:ml-0', wide ? 'p-8' : 'px-12 pt-10 pb-24 max-md:px-4 max-md:pt-6')}>
+              <SidebarInset className={cn('m-2 min-w-0 overflow-y-auto rounded-xl shadow-sm ring-1 ring-foreground/5 max-md:w-auto md:ml-0', wide ? 'p-8' : 'px-12 pt-10 pb-24 max-md:px-4 max-md:pt-6')}>
                 <div key={view.kind === 'project' ? view.id : view.kind} className={cn('animate-enter', view.kind === 'timeline' && 'flex min-h-0 flex-1 flex-col')}>
                   {view.kind === 'timeline' && <Timeline />}
                   {view.kind === 'board' && <Board />}
