@@ -13,8 +13,9 @@ import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
 import { isDesktop, setWebviewZoom } from '@/lib/backend'
 import { addDays, dayOf, TODAY } from '@/lib/days'
+import { play } from '@/lib/sounds'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
-import { deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
+import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false }
@@ -43,8 +44,14 @@ export default function App() {
 
   // One message at a time, like one thing said at a time: a new one takes
   // the place of the last, and takes its Undo with it.
-  const say = (text: string, undo?: (data: Data) => Data) =>
-    toast(text, { id: 'said', duration: 5000, action: undo ? { label: 'Undo', onClick: () => change(undo) } : undefined })
+  const say = (text: string, undo?: (data: Data) => Data) => {
+    const onUndo = () => {
+      if (!undo) return
+      play('undo')
+      change(undo)
+    }
+    toast(text, { id: 'said', duration: 5000, action: undo ? { label: 'Undo', onClick: onUndo } : undefined })
+  }
 
   const notice = (id: number) => {
     setNoticed(id)
@@ -85,23 +92,34 @@ export default function App() {
       change(fn)
       if (id !== undefined) notice(id)
     },
-    complete(id) {
+    completeSound(id) {
+      const task = data.tasks.find((t) => t.id === id)
+      if (!task || task.done) return
+      // Today's goal, or the last thing left in Today, gets the fuller sound.
+      const big = task.goalDay === TODAY || (ui.view.kind === 'today' && clearsToday(data.tasks, id, TODAY))
+      play(big ? 'completeBig' : 'complete')
+    },
+    complete(id, heard = false) {
       if (data.tasks.find((t) => t.id === id)?.done) return
+      if (!heard) app.completeSound(id)
       change((d) => markDone(d, id, TODAY))
       say('Task completed', (d) => markOpen(d, id))
     },
     reopen(id) {
+      play('reopen')
       change((d) => markOpen(d, id))
       toast.dismiss('said')
     },
     removeTask(id) {
       const removed = deleteTask(data, id)
+      play('delete')
       closeAll()
       change(() => removed.data)
       say('Task deleted', removed.undo)
     },
     removeProject(id) {
       const removed = deleteProject(data, id)
+      play('delete')
       setUi((u) => ({ ...u, ...CLOSED, view: u.view.kind === 'project' && u.view.id === id ? { kind: 'inbox' } : u.view }))
       change(() => removed.data)
       say(removed.said, removed.undo)
@@ -123,6 +141,9 @@ export default function App() {
       (error: unknown) => setFailed(String(error instanceof Error ? error.message : error)),
     )
     onLost((stale) => {
+      // Only ever follows a save this window made, so it is the answer to
+      // something the user did, not a background refresh.
+      play('error')
       latest.current.closeAll()
       latest.current.say(stale ? 'Changed in another window. Showing the latest.' : 'That could not be saved. Showing what is stored.')
     })

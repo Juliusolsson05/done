@@ -11,15 +11,17 @@ import { cn } from '@/lib/utils'
 // Finishing is shown before the row goes: the check fills and the title is
 // struck through, then the task is marked done. `leaving` is true in between.
 export function useFinish(id: number): [leaving: boolean, finish: () => void] {
-  const { complete } = useApp()
+  const { complete, completeSound } = useApp()
   const [leaving, setLeaving] = useState(false)
   const finish = () => {
     if (leaving) return
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return complete(id)
+    // Heard with the press, not when the row has finished fading.
+    completeSound(id)
     setLeaving(true)
     setTimeout(() => {
       setLeaving(false)
-      complete(id)
+      complete(id, true)
     }, 280)
   }
   return [leaving, finish]

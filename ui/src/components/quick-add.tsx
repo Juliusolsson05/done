@@ -11,6 +11,7 @@ import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
 import { readLine } from '@/lib/quick-add'
+import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
 
 function QuickAdd() {
@@ -27,6 +28,7 @@ function QuickAdd() {
     event.preventDefault()
     if (!read.title) return
     const id = data.nextId
+    play('add')
     update((d) => {
       const added = addTask(d, read)
       return ui.asGoal ? setGoal(added, id, TODAY) : added

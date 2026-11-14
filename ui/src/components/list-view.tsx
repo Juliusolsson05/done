@@ -11,6 +11,7 @@ import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { fullDay, TODAY } from '@/lib/days'
 import { tagOf } from '@/lib/quick-add'
+import { play } from '@/lib/sounds'
 import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -65,7 +66,11 @@ function RenameField({ id, name }: { id: number; name: string }) {
   const { update, closeAll } = useApp()
   const inputRef = useFocus(true)
   const field = useNameField((value) => {
-    if (value.trim()) update((d) => patchProject(d, id, { name: value.trim() }))
+    if (value.trim()) {
+      // Leaving the field without changing the name is not a change to confirm.
+      if (value.trim() !== name) play('confirm')
+      update((d) => patchProject(d, id, { name: value.trim() }))
+    }
     closeAll()
   })
   return <Input ref={inputRef} defaultValue={name} aria-label="Project name" className="h-9 w-80 max-w-full text-2xl font-bold md:text-2xl" {...field} />

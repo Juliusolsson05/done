@@ -9,7 +9,8 @@ import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
-import { lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
+import { play } from '@/lib/sounds'
+import { laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 const LANES: { key: LaneKey; name: string; hint: string; dot: string }[] = [
@@ -84,6 +85,9 @@ export function Board() {
     if (card === null) return
     event.preventDefault()
     // Dropping in Done finishes the task; anywhere else reopens it if needed.
+    // Set down where it was picked up: nothing happened, so nothing is heard.
+    const from = data.tasks.find((t) => t.id === card)
+    if (from && laneOf(from) !== lane && lane !== 'done') play(from.done ? 'reopen' : 'drop')
     if (lane === 'done') complete(card)
     else update((d) => patchTask(markOpen(d, card), card, { status: lane === 'doing' ? 'doing' : undefined }), card)
     onDrag(null)

@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { isDesktop, restart } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
+import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
 function Pane({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -30,6 +32,26 @@ function Snippet({ label, text }: { label: string; text: string }) {
   )
 }
 
+function Sounds() {
+  const [on, setOn] = useState(soundsOn)
+  const change = (next: boolean) => {
+    setSoundsOn(next)
+    setOn(next)
+    // Turning them on answers with one, so it is clear what was switched on.
+    if (next) play('confirm')
+  }
+  return (
+    <Pane title="Sounds">
+      <div className="flex items-center gap-3">
+        <Switch id="sounds" checked={on} onCheckedChange={change} />
+        <Label htmlFor="sounds" className="font-normal">
+          Play a quiet sound when you finish, add or change a task
+        </Label>
+      </div>
+    </Pane>
+  )
+}
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const path = info.mcpCommand
@@ -48,6 +70,8 @@ export function Settings() {
             text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
           />
         </Pane>
+
+        <Sounds />
 
         {/* A browser has its own zoom and nothing to update, so these two
             are for the desktop app only. */}
