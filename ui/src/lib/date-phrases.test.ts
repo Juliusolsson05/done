@@ -128,6 +128,16 @@ const DATES: [string, string, string][] = [
   [LEAP, 'feb 29', '2028-02-29'],
   [LEAP, 'feb 28', '2029-02-28'],
 
+  // a year written after it: that exact day, passed or not
+  [FRI, 'jan 5 2027', '2027-01-05'],
+  [FRI, 'january 5, 2027', '2027-01-05'],
+  [FRI, '5 jan 2027', '2027-01-05'],
+  [FRI, '5th of january 2027', '2027-01-05'],
+  [FRI, 'the 5th of january, 2028', '2028-01-05'],
+  [FRI, 'jan 5th 2026', '2026-01-05'],
+  [FRI, 'dec 24 2100', '2100-12-24'],
+  [LEAP, 'feb 29 2032', '2032-02-29'],
+
   // a day alone: the next such day of a month, today included
   [FRI, '5th', '2026-12-05'],
   [FRI, 'the 21st', '2026-11-21'],
@@ -188,6 +198,8 @@ const NOT_DATES = [
   '13/13',
   '2026-13-01',
   '2027-02-29',
+  'feb 29 2027',
+  '31 april 2027',
   '32nd',
   '0th',
   // numbers that are something else
@@ -213,6 +225,21 @@ describe('findDate', () => {
   it('says where in the line the phrase is', () => {
     expect(findDate('call the bank tomorrow about the loan', FRI)).toEqual({ start: 14, end: 22, day: '2026-11-14' })
     expect(findDate('gym next friday', FRI)).toEqual({ start: 4, end: 15, day: '2026-11-20' })
+  })
+
+  it('leaves a number after a month and day in the title unless it is a year from 1900 to 2100', () => {
+    expect(findDate('jan 5 300 units', FRI)).toEqual({ start: 0, end: 5, day: '2027-01-05' })
+    expect(findDate('jan 5 3000 units', FRI)).toEqual({ start: 0, end: 5, day: '2027-01-05' })
+    expect(findDate('5 jan 1899', FRI)).toEqual({ start: 0, end: 5, day: '2027-01-05' })
+    expect(findDate('order jan 5 2027 units', FRI)).toEqual({ start: 6, end: 16, day: '2027-01-05' })
+  })
+
+  it('reads a phrase inside brackets or quotes', () => {
+    expect(findDate('call Anna [tomorrow]', FRI)).toEqual({ start: 11, end: 19, day: '2026-11-14' })
+    expect(findDate('call Anna "tomorrow"', FRI)).toEqual({ start: 11, end: 19, day: '2026-11-14' })
+    expect(findDate("call Anna 'next friday'", FRI)).toEqual({ start: 11, end: 22, day: '2026-11-20' })
+    // A possessive is not a date in quotes.
+    expect(findDate("today's news", FRI)).toBeNull()
   })
 
   it('reads any case, and punctuation after the phrase', () => {

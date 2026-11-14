@@ -14,14 +14,26 @@ export interface Parsed {
   projectId: number | null
 }
 
+const CLOSES: Record<string, string> = { '(': ')', '[': ']', '"': '"', "'": "'" }
+
 // The line without its date phrase. Punctuation that leaned on the phrase
 // stays with the words before it ("call Anna today." is "call Anna.") and
-// goes when there are none ("today, call Anna" is "call Anna").
+// goes when there are none ("today, call Anna" is "call Anna"). Brackets or
+// quotes that held only the phrase go with it ("call Anna (tomorrow)" is
+// "call Anna"); a pair that still holds something is left alone.
 function without(text: string, phrase: Phrase): string {
-  const before = text.slice(0, phrase.start).trimEnd()
-  const after = text.slice(phrase.end)
+  let before = text.slice(0, phrase.start)
+  let after = text.slice(phrase.end)
+  const opened = before.at(-1) ?? ''
+  if (after !== '' && after[0] === CLOSES[opened]) {
+    before = before.slice(0, -1)
+    after = after.slice(1)
+  }
+  before = before.trimEnd()
   if (!before) return after.replace(/^[.,;:!?]+/, '')
-  return before + (/^[.,;:!?]/.test(after) ? '' : ' ') + after
+  // No gap after an opening bracket: "(tomorrow morning)" is "(morning)".
+  if (/[([]$/.test(before)) return before + after.trimStart()
+  return before + (/^[.,;:!?)\]]/.test(after) ? '' : ' ') + after
 }
 
 // The date is the last date phrase in the line that was not dismissed (see

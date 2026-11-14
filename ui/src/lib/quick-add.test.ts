@@ -73,6 +73,23 @@ describe('parseQuickAdd', () => {
     expect(parse('today, call Anna')).toMatchObject({ title: 'call Anna', due: today })
   })
 
+  it('takes a year written after a month and day out with it', () => {
+    expect(parse('renew passport jan 5 2027 p2')).toMatchObject({ title: 'renew passport', due: '2027-01-05', priority: 2 })
+    expect(parse('renew passport 5th of january, 2028')).toMatchObject({ title: 'renew passport', due: '2028-01-05' })
+    expect(parse('order jan 5 300 units')).toMatchObject({ title: 'order 300 units', due: '2027-01-05' })
+  })
+
+  it('removes brackets or quotes left empty by the date, and no others', () => {
+    expect(parse('call Anna (tomorrow)')).toMatchObject({ title: 'call Anna', due: '2026-11-14' })
+    expect(parse('call Anna [by friday] p1')).toMatchObject({ title: 'call Anna', due: '2026-11-20', priority: 1 })
+    expect(parse('call Anna "tomorrow" about it')).toMatchObject({ title: 'call Anna about it', due: '2026-11-14' })
+    expect(parse('(tomorrow) call Anna')).toMatchObject({ title: 'call Anna', due: '2026-11-14' })
+    expect(parse('call Anna (tomorrow morning)')).toMatchObject({ title: 'call Anna (morning)', due: '2026-11-14' })
+    expect(parse('call Anna (early tomorrow)')).toMatchObject({ title: 'call Anna (early)', due: '2026-11-14' })
+    expect(parse('say "hi" tomorrow to Anna')).toMatchObject({ title: 'say "hi" to Anna', due: '2026-11-14' })
+    expect(parse('call Anna () tomorrow')).toMatchObject({ title: 'call Anna ()', due: '2026-11-14' })
+  })
+
   it('has no title when the line is only a date, so nothing is added', () => {
     expect(parse('tomorrow')).toMatchObject({ title: '', due: '2026-11-14' })
     expect(parse('by next friday p1')).toMatchObject({ title: '', due: '2026-11-20', priority: 1 })

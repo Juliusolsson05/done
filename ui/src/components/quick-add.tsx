@@ -92,7 +92,9 @@ function QuickAdd() {
                   couple of pixels off. */}
               <span className="pr-1">
                 {text.slice(0, read.date.start)}
-                <span data-date-phrase className="rounded-sm bg-primary/15">
+                {/* The ring is the mark's breathing room. It is a shadow, so
+                    unlike padding it cannot move the text off the field's. */}
+                <span data-date-phrase className="rounded-sm bg-primary/15 ring-2 ring-primary/15">
                   {text.slice(read.date.start, read.date.end)}
                 </span>
                 {text.slice(read.date.end)}

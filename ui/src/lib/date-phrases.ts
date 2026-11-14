@@ -66,6 +66,9 @@ const WD = any(WEEKDAY)
 const WD_ALL = any(WEEKDAY_AFTER_A_WORD)
 const MON = any(MONTH)
 const NTH = '(?:st|nd|rd|th)'
+// A year after a month and day is part of the date only if it can be one:
+// four digits, 1900 to 2100. In "jan 5 300 units" the 300 stays in the title.
+const YEAR = String.raw`(?:,?\s+(19\d\d|20\d\d|2100))?`
 const COUNT = String.raw`(\d{1,3}|an?|one)\s+(day|week|month|year)s?`
 
 const weekdayOf = (day: Day): number => toDate(day).getDay()
@@ -84,6 +87,10 @@ function comingMonthDay(today: Day, month: number, dayOfMonth: number): Day | nu
   }
   return null
 }
+
+// With its year a day is taken as written; without, it is the coming one.
+const monthDay = (today: Day, month: number, dayOfMonth: number, year: string | undefined): Day | null =>
+  year === undefined ? comingMonthDay(today, month, dayOfMonth) : realDay(Number(year), month, dayOfMonth)
 
 // "the 31st" is the next month that has one.
 function comingDayOfMonth(today: Day, dayOfMonth: number): Day | null {
@@ -106,7 +113,7 @@ function counted(today: Day, count: string, unit: string): Day {
 // "26" is 2026: nobody plans a task for 1926.
 const fullYear = (written: string): number => (written.length === 2 ? 2000 + Number(written) : Number(written))
 const dayFirst = (today: Day, d: string, m: string, y: string | undefined): Day | null =>
-  y === undefined ? comingMonthDay(today, Number(m), Number(d)) : realDay(fullYear(y), Number(m), Number(d))
+  monthDay(today, Number(m), Number(d), y === undefined ? y : String(fullYear(y)))
 
 type Rule = [pattern: string, day: (m: RegExpExecArray, today: Day) => Day | null]
 
@@ -133,10 +140,10 @@ const RULES: Rule[] = [
   [String.raw`in\s+${COUNT}`, (m, today) => counted(today, m[1], m[2])],
   [String.raw`${COUNT}\s+from\s+now`, (m, today) => counted(today, m[1], m[2])],
 
-  [String.raw`(${MON})\s+(\d{1,2})${NTH}?`, (m, today) => comingMonthDay(today, MONTH[m[1].toLowerCase()], Number(m[2]))],
+  [String.raw`(${MON})\s+(\d{1,2})${NTH}?${YEAR}`, (m, today) => monthDay(today, MONTH[m[1].toLowerCase()], Number(m[2]), m[3])],
   [
-    String.raw`(?:the\s+)?(\d{1,2})${NTH}?\s+(?:of\s+)?(${MON})`,
-    (m, today) => comingMonthDay(today, MONTH[m[2].toLowerCase()], Number(m[1])),
+    String.raw`(?:the\s+)?(\d{1,2})${NTH}?\s+(?:of\s+)?(${MON})${YEAR}`,
+    (m, today) => monthDay(today, MONTH[m[2].toLowerCase()], Number(m[1]), m[3]),
   ],
   // A number alone is never a date; "5th" is.
   [String.raw`(?:the\s+)?(\d{1,2})${NTH}`, (m, today) => comingDayOfMonth(today, Number(m[1]))],
@@ -153,11 +160,13 @@ const RULES: Rule[] = [
 // title with it: "pay rent by friday" is "pay rent".
 const LEAD = String.raw`(?:(?:on|by|due)\s+)?`
 // Whole words only. A phrase ends at the end of the line, at a space, or at
-// punctuation followed by one of those: "today," but not "monday.com".
-const END = String.raw`(?=[.,;:!?)]*(?:\s|$))`
+// punctuation, a closing bracket or a quote followed by one of those:
+// "today," and "(today)" but not "monday.com" or "today's".
+const END = String.raw`(?=[.,;:!?)\]"']*(?:\s|$))`
 const COMPILED = RULES.map(([pattern, day]) => ({ re: new RegExp(`${LEAD}(?:${pattern})${END}`, 'iy'), day }))
-// ...and starts at the start of the line, after a space or an opening bracket.
-const startsWord = (text: string, i: number): boolean => i === 0 || /[\s(]/.test(text[i - 1])
+// ...and starts at the start of the line, after a space, an opening bracket
+// or a quote.
+const startsWord = (text: string, i: number): boolean => i === 0 || /[\s(["']/.test(text[i - 1])
 
 export interface Phrase {
   start: number

@@ -17,9 +17,11 @@ While a task is typed in the add box, a date written in words ("tomorrow", "next
 - **Whole words only.** A phrase starts at the start of the line or after a space or an opening bracket, and ends at the end of the line, a space, or punctuation that is itself followed by one of those. So "today," is a date and "monday.com", "todayish" and "v1.2" are not.
 - **The last phrase in the line is the date,** as in Todoist. This changes the old behaviour, where the first date word won, and one old test with it.
 - **What is highlighted is what is removed.** An "on", "by" or "due" directly before the phrase belongs to it: "pay rent by friday" highlights "by friday" and leaves "pay rent".
+- **Brackets or quotes that held only the date go with it:** "call Anna (tomorrow)" is "call Anna". A pair that still holds something is left alone ("(tomorrow morning)" is "(morning)").
 - **No guessing at meaning.** "friday night lights" is due Friday. Backspace is the answer to that.
 - **A bare weekday is the next such day strictly after today:** "monday" typed on a Monday is next week's. `this friday` counts today. `next friday` is the Friday of the following week (weeks start on Monday), not the nearest one.
 - **A month and day without a year that has passed means next year.** Today itself has not passed. "feb 29" is the next 29 February there is. A bare "5th" or "the 21st" is the next such day of a month, today included; "31st" skips months without one.
+- **A year written after a month and day is part of the date** when it is four digits from 1900 to 2100: "jan 5 2027", "january 5, 2027", "5th of january 2027". The day is then taken as written, and an impossible one ("feb 29 2027") is no date at all. Any other number stays in the title ("jan 5 300 units").
 - **Numbers are day first** (the owner is Swedish): "24/12", "24/12/2026", "24.12.26". Both parts must make a real date. A date written with its year is taken as written, even in the past. With dots and no year both parts need two digits ("24.12", "05.01"), so "1.5 kg" and "v1.2" are never dates. ISO "2026-12-24" is read as written.
 - **Impossible days are not dates:** "feb 30", "31 april", "31/4" stay as text.
 - **Months and years are added by the calendar,** and a day the month does not have becomes its last one: a month after 31 January is the last day of February.
@@ -30,7 +32,7 @@ While a task is typed in the add box, a date written in words ("tomorrow", "next
 - **A dismissed phrase sets no date,** so the view's day applies again (Today gives today).
 - **A typed date wins over the view's day,** as before. A task added as today's goal with "tomorrow" in it is still the goal and due tomorrow, as before.
 - **A line that is only a date is not added.** The title would be empty, the button stays off and the hint says "Add a title", as it already did. To get a task called "tomorrow", press Backspace after it.
-- **The highlight is a mirror behind the field.** The field stays the shadcn `Input`. Behind it a layer shows the same text in the same type with the phrase on a soft `primary` tint, and follows the field's sideways scroll.
+- **The highlight is a mirror behind the field.** The field stays the shadcn `Input`. Behind it a layer shows the same text in the same type with the phrase on a soft `primary` tint, and follows the field's sideways scroll. The tint's breathing room is a ring (a shadow), not padding, so it cannot move the text.
 - **The date is said in words in the chip that was already there:** "Today", "Tomorrow", otherwise weekday and date ("Fri 20 Nov"), with the year when it is not this one.
 - **The task editor is left alone.** Its title was never read for dates.
 
@@ -53,9 +55,10 @@ Backspace covers all of these.
 
 ## Checked
 
-- Typecheck, tests (a table of 131 phrases with the day each must give across five different todays, 36 lines that must not be dates, and tests for the title clean-up, dismissal and precedence) and the build.
+- Typecheck, tests (a table of 139 phrases with the day each must give across five different todays, 38 lines that must not be dates, and tests for the title clean-up, dismissal and precedence) and the build.
 - In headless WebKit (Playwright), with `/api` answered by a stub because no server binary was at hand: "call the bank tomorrow" highlights "tomorrow" and is added as "call the bank", due the next day; Backspace after it removes the highlight and keeps all the letters, the next Backspace deletes one, and typing the letter back highlights it again; added while dismissed it keeps "tomorrow" in the title with no date; a line with "monday.com", "5 people" and "v1.2" shows no highlight; in Today "next friday" shows "Fri 20 Nov" and is added with that day, and dismissed it shows "Today"; a line that is only a date leaves the button off; Escape still closes the box. The highlight's box was compared with where the field's own text metrics put the phrase: 0 px apart, also on a line long enough to scroll, with the caret at the end, at the start and in the middle.
 - The first run of that comparison found the highlight 2 px off on a line scrolled to its end, because the field keeps room for the caret after the last letter. The mirror now has the same room.
+- After the ring was added the comparison was run again: still 0 px apart in every case above and with the phrase as the first word. With a bracket directly against the phrase ("(jan 5 2027)") the left edge is exact and the width differs by under half a pixel, because the letter pair across the edge of the mark is spaced as one in the field.
 - Not checked: the desktop app itself (only the web page was run), typing with an input method, and a real server.
 
 ## Not in this version
@@ -63,5 +66,5 @@ Backspace covers all of these.
 - Times of day ("at 3pm", "tonight at 8").
 - Repeating dates ("every monday").
 - Other languages.
-- "later this week", "overmorrow", "+3d", and a year after a month and day ("jan 5 2027" is 5 January with "2027" left in the title; "5/1/2027" is read whole).
+- "later this week", "overmorrow", "+3d".
 - Recognition in the task editor.
