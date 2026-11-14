@@ -27,14 +27,14 @@ Nobody has listened to it yet. Every number below (pitch, length, gain) was chos
 
 | Sound | When | Notes |
 | --- | --- | --- |
-| `complete` | a task is finished | two rising notes, moved up by the momentum |
+| `complete` | a task is finished, by its check, the menu or dropping its card in Done | two rising notes, moved up by the momentum |
 | `completeBig` | today's goal, or the last open task in Today | rising arpeggio G5 C6 E6 G6 |
 | `add` | a task or project is added | short upward slide C5 to G5 |
-| `reopen` | a finished task is reopened | two falling notes C6 to G5 |
+| `reopen` | a finished task is reopened, by its check, the menu or dragging its card out of Done | two falling notes C6 to G5 |
 | `delete` | a task or project is deleted | downward slide A4 to E4 |
 | `undo` | Undo in the message | upward slide E4 to A4 |
-| `drop` | a card or timeline bar is set down somewhere new | short triangle tick G4 to E4 |
-| `confirm` | goal set or cleared, an edit saved, a change from the menu | one very short C6 |
+| `drop` | a card or timeline bar is set down somewhere new (set down where it was: nothing) | short triangle tick G4 to E4 |
+| `confirm` | goal set or cleared, an edit saved, a change from the menu (date, priority, project, in progress, colour), a date clicked on the timeline, a project renamed, sounds switched on | one very short C6 |
 | `error` | a save was lost | one soft E4 |
 
 ## Steps
@@ -44,6 +44,11 @@ Nobody has listened to it yet. Every number below (pitch, length, gain) was chos
 3. The Switch in Settings.
 4. `play(...)` at each call site.
 5. Check in a headless browser what each action schedules; typecheck, tests, build.
+
+## Checked
+
+- In headless WebKit (Playwright), against a throwaway database, with `AudioContext` wrapped to record every oscillator: each action above schedules exactly the notes in the table; six quick completions climb four steps and then hold; a 4.3 second pause starts again from the bottom; the goal and the last task in Today get the arpeggio; nothing is scheduled during a drag, on a view switch, on hover or typing, on a background refresh that brings in another client's tasks, or with the switch off; the switch survives a reload; one context is made, it reaches `running`, and all 69 oscillators ended and were disconnected.
+- Not checked: how any of it sounds, and the desktop app itself (only the web page was run).
 
 ## Not in this version
 
