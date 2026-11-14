@@ -46,15 +46,22 @@ Backspace covers all of these.
 ## Steps
 
 1. This plan.
-2. `date-phrases.ts` with its table of cases, failing first.
+2. `date-phrases.ts` with its table of cases, written before the code.
 3. `quick-add.ts` reads the date through it; title clean-up, dismissal and precedence tests.
 4. The mirror, the Backspace key and the chip in `quick-add.tsx`.
 5. Check in WebKit; typecheck, tests, build.
+
+## Checked
+
+- Typecheck, tests (a table of 131 phrases with the day each must give across five different todays, 36 lines that must not be dates, and tests for the title clean-up, dismissal and precedence) and the build.
+- In headless WebKit (Playwright), with `/api` answered by a stub because no server binary was at hand: "call the bank tomorrow" highlights "tomorrow" and is added as "call the bank", due the next day; Backspace after it removes the highlight and keeps all the letters, the next Backspace deletes one, and typing the letter back highlights it again; added while dismissed it keeps "tomorrow" in the title with no date; a line with "monday.com", "5 people" and "v1.2" shows no highlight; in Today "next friday" shows "Fri 20 Nov" and is added with that day, and dismissed it shows "Today"; a line that is only a date leaves the button off; Escape still closes the box. The highlight's box was compared with where the field's own text metrics put the phrase: 0 px apart, also on a line long enough to scroll, with the caret at the end, at the start and in the middle.
+- The first run of that comparison found the highlight 2 px off on a line scrolled to its end, because the field keeps room for the caret after the last letter. The mirror now has the same room.
+- Not checked: the desktop app itself (only the web page was run), typing with an input method, and a real server.
 
 ## Not in this version
 
 - Times of day ("at 3pm", "tonight at 8").
 - Repeating dates ("every monday").
 - Other languages.
-- "later this week", "overmorrow", "+3d".
+- "later this week", "overmorrow", "+3d", and a year after a month and day ("jan 5 2027" is 5 January with "2027" left in the title; "5/1/2027" is read whole).
 - Recognition in the task editor.
