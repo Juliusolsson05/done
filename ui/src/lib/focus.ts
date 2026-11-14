@@ -6,6 +6,13 @@
 import type { Day } from '@/lib/days'
 import { byPriority, openTasks, type Task } from '@/lib/tasks'
 
+// Something to be told every so many minutes of focus: "Stand up and stretch".
+export interface Reminder {
+  id: string
+  label: string
+  intervalMinutes: number
+}
+
 export interface Session {
   // Null when focusing on nothing in particular.
   taskId: number | null
@@ -16,6 +23,20 @@ export interface Session {
   remaining: number | null
   // Time is up and it has been said, so it is said only once.
   ended: boolean
+  // How long the session is in all, in milliseconds. Time focused so far is
+  // this minus what is left. One number that never changes while the clock
+  // runs, so it needs no upkeep through pause, reload or sleep (what is left
+  // already survives those); only "more minutes" adds to it, which is what
+  // keeps the time focused from starting over, and old reminders with it.
+  total: number
+  // The reminders as they were when the session started.
+  reminders: Reminder[]
+  // Which intervals have been said, as "id:nth". Remembering these, rather
+  // than testing for the exact moment an interval is reached, is what lets a
+  // late look at the clock say a missed one once, and never one twice.
+  fired: string[]
+  // The reminder being shown. The session is paused until it is dismissed.
+  reminding: Reminder | null
 }
 
 // The lengths offered as buttons, in minutes.
@@ -44,20 +65,77 @@ export function clockText(milliseconds: number): string {
   return (hours ? `${hours}:${two(minutes)}` : String(minutes)) + ':' + two(seconds % 60)
 }
 
-export const start = (task: Pick<Task, 'id' | 'title'> | null, minutes: number, now: number): Session => ({
+export const start = (task: Pick<Task, 'id' | 'title'> | null, minutes: number, now: number, reminders: Reminder[] = []): Session => ({
   taskId: task ? task.id : null,
   title: task ? task.title : 'Focus',
   endsAt: now + minutes * MINUTE,
   remaining: null,
   ended: false,
+  total: minutes * MINUTE,
+  reminders,
+  fired: [],
+  reminding: null,
 })
 
 // Pause a running session, or resume a paused one. Pausing keeps what is
-// left rather than the end time, which goes stale while paused.
+// left rather than the end time, which goes stale while paused. Resuming
+// also dismisses a reminder: it is a pause that says why.
 export function toggle(session: Session, now: number): Session {
   if (session.ended) return session
   if (session.endsAt !== null) return { ...session, endsAt: null, remaining: timeLeft(session, now) }
-  return { ...session, endsAt: now + (session.remaining ?? 0), remaining: null }
+  return { ...session, endsAt: now + (session.remaining ?? 0), remaining: null, reminding: null }
+}
+
+// The intervals each reminder has reached by now, as the keys kept in `fired`.
+function reached(session: Session, now: number): { reminder: Reminder; key: string }[] {
+  const focused = session.total - timeLeft(session, now)
+  return session.reminders
+    .map((reminder) => ({ reminder, nth: Math.floor(focused / (reminder.intervalMinutes * MINUTE)) }))
+    .filter(({ nth }) => nth >= 1)
+    .map(({ reminder, nth }) => ({ reminder, key: `${reminder.id}:${nth}` }))
+}
+
+// The reminder to show now, if any: the first whose latest interval has not
+// been said. Only while the clock runs, and not at zero: the end wins.
+export function dueReminder(session: Session, now: number): Reminder | null {
+  if (session.endsAt === null || session.ended || timeLeft(session, now) === 0) return null
+  return reached(session, now).find(({ key }) => !session.fired.includes(key))?.reminder ?? null
+}
+
+// Show a reminder: the session pauses, and the interval is marked as said.
+export function fire(session: Session, reminder: Reminder, now: number): Session {
+  const key = reached(session, now).find((r) => r.reminder === reminder)?.key
+  return {
+    ...session,
+    endsAt: null,
+    remaining: timeLeft(session, now),
+    fired: key ? [...session.fired, key] : session.fired,
+    reminding: reminder,
+  }
+}
+
+// Continue after a reminder. The break has cost no focus time.
+export const dismiss = (session: Session, now: number): Session => (session.reminding ? toggle(session, now) : session)
+
+// When the next reminder comes, for the menu bar to wake a hidden window
+// at. Null when none comes before the end, or the clock is not running.
+export function nextReminderAt(session: Session, now: number): number | null {
+  if (session.endsAt === null || session.ended) return null
+  if (dueReminder(session, now)) return now
+  const startedAt = session.endsAt - session.total
+  const focused = now - startedAt
+  const times = session.reminders
+    .map((reminder) => reminder.intervalMinutes * MINUTE)
+    .map((interval) => (Math.floor(focused / interval) + 1) * interval)
+    .filter((at) => at < session.total)
+  return times.length ? startedAt + Math.min(...times) : null
+}
+
+// A reminder for the list, or null when it has no label or no interval.
+export function newReminder(id: string, label: string, minutes: number): Reminder | null {
+  const intervalMinutes = Math.min(Math.round(minutes), MAX_MINUTES)
+  if (!label.trim() || !(intervalMinutes >= 1)) return null
+  return { id, label: label.trim(), intervalMinutes }
 }
 
 // A running session whose time has passed and has not been announced yet.
@@ -70,11 +148,17 @@ export const finish = (session: Session): Session => ({ ...session, remaining: n
 
 // "10 more minutes" counts from the moment it is asked for, not from when the
 // time ran out, which may have been a while ago.
+// The time focused carries on from where it was, and the intervals reached so
+// far count as said: one that fell on the end, where the end won, would
+// otherwise be said the moment the extra minutes start.
 export const extend = (session: Session, minutes: number, now: number): Session => ({
   ...session,
   endsAt: now + minutes * MINUTE,
   remaining: null,
   ended: false,
+  total: session.total - timeLeft(session, now) + minutes * MINUTE,
+  fired: [...new Set([...session.fired, ...reached(session, now).map((r) => r.key)])],
+  reminding: null,
 })
 
 // The minutes field wins over the buttons when something is typed in it.

@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { chosenMinutes, clockText, extend, finish, focusTasks, isDue, start, timeLeft, toggle } from '@/lib/focus'
+import {
+  chosenMinutes,
+  clockText,
+  dismiss,
+  dueReminder,
+  extend,
+  finish,
+  fire,
+  focusTasks,
+  isDue,
+  newReminder,
+  nextReminderAt,
+  start,
+  timeLeft,
+  toggle,
+  type Reminder,
+  type Session,
+} from '@/lib/focus'
 import type { Task } from '@/lib/tasks'
 
 const MINUTE = 60000
@@ -92,6 +109,133 @@ describe('a session', () => {
     expect(more).toMatchObject({ taskId: 7, endsAt: later + 10 * MINUTE, ended: false })
     expect(clockText(timeLeft(more, later))).toBe('10:00')
     expect(isDue(more, later)).toBe(false)
+  })
+})
+
+describe('reminders', () => {
+  const stretch: Reminder = { id: 'a', label: 'Stand up and stretch', intervalMinutes: 10 }
+  const water: Reminder = { id: 'b', label: 'Drink water', intervalMinutes: 5 }
+  // What the app does on every look at the clock: fire the reminder that is due, if any.
+  const look = (session: Session, now: number): Session => {
+    const due = dueReminder(session, now)
+    return due ? fire(session, due, now) : session
+  }
+
+  it('fires once when its interval is crossed, and pauses the session', () => {
+    const session = start(null, 25, t0, [stretch])
+    expect(dueReminder(session, t0 + 10 * MINUTE - 1)).toBeNull()
+    expect(dueReminder(session, t0 + 10 * MINUTE)).toBe(stretch)
+
+    const reminding = look(session, t0 + 10 * MINUTE)
+    expect(reminding).toMatchObject({ reminding: stretch, endsAt: null, remaining: 15 * MINUTE })
+    // Held until dismissed: nothing else becomes due, however long it takes.
+    expect(dueReminder(reminding, t0 + 60 * MINUTE)).toBeNull()
+
+    const resumed = dismiss(reminding, t0 + 12 * MINUTE)
+    expect(resumed.reminding).toBeNull()
+    // The same interval does not fire again, a tick or minutes later.
+    expect(dueReminder(resumed, t0 + 12 * MINUTE + 250)).toBeNull()
+    expect(dueReminder(resumed, t0 + 20 * MINUTE)).toBeNull()
+    // The next one comes after ten more minutes of focus: 2 were spent in the reminder.
+    expect(dueReminder(resumed, t0 + 22 * MINUTE - 1)).toBeNull()
+    expect(dueReminder(resumed, t0 + 22 * MINUTE)).toBe(stretch)
+  })
+
+  it('fires a missed one exactly once when the look at the clock comes late', () => {
+    const session = start(null, 60, t0, [stretch])
+    // As after sleep: the first look comes at 27 minutes, past two intervals.
+    const late = t0 + 27 * MINUTE
+    const reminding = look(session, late)
+    expect(reminding.reminding).toBe(stretch)
+    const resumed = dismiss(reminding, late)
+    // One reminder for the two missed, not two in a row.
+    expect(dueReminder(resumed, late + 250)).toBeNull()
+    expect(dueReminder(resumed, late + 3 * MINUTE)).toBe(stretch)
+  })
+
+  it('does not fire again after a pause and resume', () => {
+    const fired = dismiss(look(start(null, 25, t0, [stretch]), t0 + 10 * MINUTE), t0 + 10 * MINUTE)
+    const paused = toggle(fired, t0 + 11 * MINUTE)
+    expect(dueReminder(paused, t0 + 40 * MINUTE)).toBeNull()
+    const resumed = toggle(paused, t0 + 40 * MINUTE)
+    expect(dueReminder(resumed, t0 + 40 * MINUTE)).toBeNull()
+    // 11 minutes of focus so far; the second interval is 9 minutes of focus away.
+    expect(dueReminder(resumed, t0 + 49 * MINUTE - 1)).toBeNull()
+    expect(dueReminder(resumed, t0 + 49 * MINUTE)).toBe(stretch)
+  })
+
+  it('does not count the time spent in a reminder as focus time', () => {
+    const at = t0 + 10 * MINUTE
+    const reminding = look(start(null, 25, t0, [stretch]), at)
+    expect(timeLeft(reminding, at)).toBe(15 * MINUTE)
+    // Seven minutes of stretching later, the same is left, before and after continuing.
+    expect(timeLeft(reminding, at + 7 * MINUTE)).toBe(15 * MINUTE)
+    const resumed = dismiss(reminding, at + 7 * MINUTE)
+    expect(timeLeft(resumed, at + 7 * MINUTE)).toBe(15 * MINUTE)
+    expect(resumed.endsAt).toBe(at + 22 * MINUTE)
+  })
+
+  it('handles two that are due at once one after the other, losing neither', () => {
+    const at = t0 + 10 * MINUTE
+    const first = look(start(null, 25, t0, [stretch, water]), at)
+    expect(first.reminding).toBe(stretch)
+    // Continuing brings up the other at once, and then nothing.
+    const second = look(dismiss(first, at + MINUTE), at + MINUTE)
+    expect(second.reminding).toBe(water)
+    const resumed = dismiss(second, at + 2 * MINUTE)
+    expect(dueReminder(resumed, at + 2 * MINUTE)).toBeNull()
+    expect(timeLeft(resumed, at + 2 * MINUTE)).toBe(15 * MINUTE)
+  })
+
+  it('lets the end of the session win over a reminder due at the same moment', () => {
+    const session = start(null, 10, t0, [stretch])
+    expect(dueReminder(session, t0 + 10 * MINUTE)).toBeNull()
+    expect(isDue(session, t0 + 10 * MINUTE)).toBe(true)
+    // Nor once it has ended, however late that is noticed.
+    expect(dueReminder(finish(session), t0 + 30 * MINUTE)).toBeNull()
+  })
+
+  it('does not bring old reminders back with ten more minutes', () => {
+    // 20 minutes: the reminder fired at 10 and would be due at 20, where the end won.
+    const fired = dismiss(look(start(null, 20, t0, [stretch]), t0 + 10 * MINUTE), t0 + 10 * MINUTE)
+    const later = t0 + 45 * MINUTE
+    const more = extend(finish(fired), 10, later)
+    expect(dueReminder(more, later)).toBeNull()
+    expect(dueReminder(more, later + 10 * MINUTE - 1)).toBeNull()
+
+    // 25 minutes of focus, then ten more: the third interval is five minutes in.
+    const longer = extend(finish(start(null, 25, t0, [stretch])), 10, later)
+    expect(dueReminder(longer, later + 5 * MINUTE - 1)).toBeNull()
+    expect(dueReminder(longer, later + 5 * MINUTE)).toBe(stretch)
+  })
+
+  it('is dismissed by pause or resume, as the menu bar and the space bar do it', () => {
+    const reminding = look(start(null, 25, t0, [stretch]), t0 + 10 * MINUTE)
+    expect(toggle(reminding, t0 + 11 * MINUTE)).toEqual(dismiss(reminding, t0 + 11 * MINUTE))
+    // With no reminder showing there is nothing to dismiss.
+    const running = start(null, 25, t0, [stretch])
+    expect(dismiss(running, t0 + MINUTE)).toBe(running)
+  })
+
+  it('knows when the next one comes, for the menu bar to wake the window', () => {
+    const session = start(null, 25, t0, [stretch, water])
+    expect(nextReminderAt(session, t0)).toBe(t0 + 5 * MINUTE)
+    // One that is already due is due now.
+    expect(nextReminderAt(session, t0 + 6 * MINUTE)).toBe(t0 + 6 * MINUTE)
+    // Paused or reminding, none is coming.
+    expect(nextReminderAt(look(session, t0 + 5 * MINUTE), t0 + 5 * MINUTE)).toBeNull()
+    // None at or after the end, and none without reminders.
+    expect(nextReminderAt(start(null, 10, t0, [stretch]), t0)).toBeNull()
+    expect(nextReminderAt(start(null, 25, t0), t0)).toBeNull()
+  })
+
+  it('needs a label and an interval of 1 to 600 whole minutes', () => {
+    expect(newReminder('id', '  Stand up  ', 30)).toEqual({ id: 'id', label: 'Stand up', intervalMinutes: 30 })
+    expect(newReminder('id', '   ', 30)).toBeNull()
+    expect(newReminder('id', 'Stand up', 0)).toBeNull()
+    expect(newReminder('id', 'Stand up', Number.NaN)).toBeNull()
+    expect(newReminder('id', 'Stand up', 9999)?.intervalMinutes).toBe(600)
+    expect(newReminder('id', 'Stand up', 2.4)?.intervalMinutes).toBe(2)
   })
 })
 
