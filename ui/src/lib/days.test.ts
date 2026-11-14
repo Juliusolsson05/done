@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, dayOf, daysBetween, describeDay, nextWeekday } from '@/lib/days'
+import { addDays, addMonths, dayOf, daysBetween, describeDay, nextWeekday, realDay, spellDay } from '@/lib/days'
 
 describe('days', () => {
   it('writes a local date as its own calendar day, late at night too', () => {
@@ -37,5 +37,30 @@ describe('days', () => {
     // A week away the weekday alone would be ambiguous.
     expect(describeDay('2026-11-20', today)).toBe('20 Nov')
     expect(describeDay('2026-11-10', today)).toBe('10 Nov')
+  })
+
+  it('has no day the calendar does not have', () => {
+    expect(realDay(2026, 2, 28)).toBe('2026-02-28')
+    expect(realDay(2026, 2, 29)).toBeNull()
+    expect(realDay(2028, 2, 29)).toBe('2028-02-29')
+    expect(realDay(2026, 4, 31)).toBeNull()
+    expect(realDay(2026, 13, 1)).toBeNull()
+    expect(realDay(2026, 1, 0)).toBeNull()
+  })
+
+  it('adds months by the calendar, ending on the last day when the month is shorter', () => {
+    expect(addMonths('2026-11-13', 1)).toBe('2026-12-13')
+    expect(addMonths('2026-11-13', 2)).toBe('2027-01-13')
+    expect(addMonths('2026-01-31', 1)).toBe('2026-02-28')
+    expect(addMonths('2028-02-29', 12)).toBe('2029-02-28')
+    expect(addMonths('2026-12-01', 1)).toBe('2027-01-01')
+  })
+
+  it('spells a typed day with its weekday, and its year when it is not this one', () => {
+    const today = '2026-11-13'
+    expect(spellDay('2026-11-13', today)).toBe('Today')
+    expect(spellDay('2026-11-14', today)).toBe('Tomorrow')
+    expect(spellDay('2026-11-20', today)).toBe('Fri 20 Nov')
+    expect(spellDay('2027-01-05', today)).toBe('Tue 5 Jan 2027')
   })
 })
