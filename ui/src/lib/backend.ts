@@ -67,13 +67,19 @@ export const setWebviewZoom = (factor: number): void => {
 export interface MenuBarTimes {
   endsAt: number | null
   remaining: number | null
+  // When the next reminder comes. The menu bar says 'reminder' then, because
+  // a hidden window would not notice by itself.
+  reminderAt: number | null
+  // A reminder is showing: the menu bar rings and brings the window forward.
+  reminding: boolean
 }
 export const showInMenuBar = (session: MenuBarTimes | null): void => {
   void tauri?.core.invoke('focus_set', { session })
 }
 
-// The menu bar's own Pause and Stop, and its word that time is up.
-export type MenuBarCommand = 'pause' | 'stop' | 'ended'
+// The menu bar's own Pause and Stop, and its word that time is up or that a
+// reminder may be due.
+export type MenuBarCommand = 'pause' | 'stop' | 'ended' | 'reminder'
 // Returns how to stop listening.
 export const onMenuBarCommand = (handler: (command: MenuBarCommand) => void): (() => void) => {
   const listening = tauri?.event.listen<MenuBarCommand>('focus-command', (event) => handler(event.payload))

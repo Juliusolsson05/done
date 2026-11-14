@@ -15,7 +15,7 @@ import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
 import { isDesktop, onMenuBarCommand, setWebviewZoom } from '@/lib/backend'
 import { addDays, dayOf, TODAY } from '@/lib/days'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
-import { endFocus, getFocus, handOff, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
+import { endFocus, getFocus, handOff, remind, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
 import { deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -36,7 +36,14 @@ export default function App() {
   const focus = useSyncExternalStore(subscribeFocus, getFocus)
   const [failed, setFailed] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
-  const [ui, setUi] = useState<Ui>({ ...CLOSED, view: { kind: 'today' }, tlStart: addDays(TODAY, -4), focusPick: null, focusMinutes: DEFAULT_MINUTES })
+  const [ui, setUi] = useState<Ui>(() => ({
+    ...CLOSED,
+    // A reminder that was showing before a reload is still showing after it.
+    view: { kind: getFocus()?.reminding ? 'focus' : 'today' },
+    tlStart: addDays(TODAY, -4),
+    focusPick: null,
+    focusMinutes: DEFAULT_MINUTES,
+  }))
   const [noticed, setNoticed] = useState<number | null>(null)
   const [zoom, setZoomState] = useState(storedZoom)
   const [menuTarget, setMenuTarget] = useState<MenuTarget>({ kind: 'space' })
@@ -163,24 +170,35 @@ export default function App() {
     }
   }, [])
 
-  // The end of a focus session. This only watches for it: the digits are
-  // redrawn by the small components that show them, not by the whole app.
+  // The end of a focus session, and its reminders. This only watches for
+  // them: the digits are redrawn by the small components that show them, not
+  // by the whole app.
   useEffect(() => {
+    // Show it, unless that would pull the page out from under something being typed.
+    const show = (said: string) => {
+      if (busy()) latest.current.say(said)
+      else latest.current.openView({ kind: 'focus' })
+    }
     const announce = () => {
       const title = getFocus()?.title
-      if (!timeIsUp()) return
-      // Show it, unless that would pull the page out from under something being typed.
-      if (busy()) latest.current.say('Time is up: ' + title)
-      else latest.current.openView({ kind: 'focus' })
+      if (timeIsUp()) show('Time is up: ' + title)
+    }
+    const announceReminder = () => {
+      const reminder = remind()
+      if (reminder) show('Reminder: ' + reminder.label)
     }
     const timer = setInterval(() => {
       const session = getFocus()
+      // The end is looked for first: it wins over a reminder due at the same moment.
       if (session && isDue(session, Date.now())) announce()
+      else announceReminder()
     }, 250)
-    // From the menu bar: its Pause and Stop, and its word that time is up (it
-    // keeps time while this window is hidden and its timers are slowed).
+    // From the menu bar: its Pause and Stop, and its word that time is up or
+    // a reminder is due (it keeps time while this window is hidden and its
+    // timers are slowed). Its Pause continues from a reminder, as resuming does.
     const stopListening = onMenuBarCommand((command) => {
       if (command === 'ended') announce()
+      if (command === 'reminder') announceReminder()
       if (command === 'pause') toggleFocus()
       if (command === 'stop') endFocus()
     })
@@ -224,7 +242,10 @@ export default function App() {
         '6': { kind: 'focus' },
       }
       if (views[event.key]) app.openView(views[event.key])
-      if (event.key === ' ' && app.ui.view.kind === 'focus' && app.focus) {
+      // Space pauses and resumes; during a reminder Space or Enter continues.
+      // Enter on a button is left to the button, which may be Stop.
+      const enter = event.key === 'Enter' && app.focus?.reminding && !(event.target instanceof Element && event.target.closest('button'))
+      if ((event.key === ' ' || enter) && app.ui.view.kind === 'focus' && app.focus) {
         event.preventDefault()
         toggleFocus()
       }

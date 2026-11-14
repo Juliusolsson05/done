@@ -34,10 +34,30 @@ struct Session {
     ends_at: Option<f64>,
     /// What is left, in milliseconds, while paused.
     remaining: Option<f64>,
+    /// When the next reminder comes, if one does before the end. The window
+    /// decides whether a reminder is due; this is only when to wake it.
+    reminder_at: Option<f64>,
+    /// A reminder is showing in the window, which waits to be dismissed.
+    #[serde(default)]
+    reminding: bool,
     /// Set once the end has been announced, so it is announced only once.
     #[serde(skip)]
     rang: bool,
+    /// Set once the window has been woken for `reminder_at`.
+    #[serde(skip)]
+    woke: bool,
+    /// How often the reminder has rung, and when it rings next.
+    #[serde(skip)]
+    rings: u32,
+    #[serde(skip)]
+    next_ring: f64,
 }
+
+/// A reminder rings again every few seconds until it is dismissed, because
+/// one sound is easy to miss from across the room; and gives up after a
+/// minute, because nobody is there.
+const RING_EVERY: f64 = 3000.0;
+const RINGS: u32 = 20;
 
 #[derive(Default)]
 struct Focus(Mutex<Option<Session>>);
@@ -52,6 +72,14 @@ fn clock(milliseconds: f64) -> String {
     let seconds = (milliseconds / 1000.0).ceil() as u64;
     let (h, m, s) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+}
+
+/// Plays the sound. On a thread of its own that waits for the player to
+/// finish, so a reminder ringing many times leaves no dead processes behind.
+fn ring() {
+    std::thread::spawn(|| {
+        let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").status();
+    });
 }
 
 fn show_window(app: &tauri::AppHandle) {
@@ -90,19 +118,32 @@ fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
             std::thread::sleep(Duration::from_millis(250));
             let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0);
             let mut ended = false;
+            let mut reminder_due = false;
+            // Some(true) for the first ring of a reminder, Some(false) for a repeat.
+            let mut reminder_ring = None;
             let text = match app.state::<Focus>().0.lock().unwrap().as_mut() {
                 None => String::new(),
-                Some(session) => match (session.ends_at, session.remaining) {
-                    (Some(end), _) => {
-                        if end <= now && !session.rang {
-                            session.rang = true;
-                            ended = true;
-                        }
-                        clock((end - now).max(0.0))
+                Some(session) => {
+                    if session.reminding && session.rings < RINGS && session.next_ring <= now {
+                        reminder_ring = Some(session.rings == 0);
+                        session.rings += 1;
+                        session.next_ring = now + RING_EVERY;
                     }
-                    (None, Some(left)) => format!("Paused {}", clock(left)),
-                    (None, None) => String::new(),
-                },
+                    match (session.ends_at, session.remaining) {
+                        (Some(end), _) => {
+                            if end <= now && !session.rang {
+                                session.rang = true;
+                                ended = true;
+                            } else if end > now && !session.woke && session.reminder_at.is_some_and(|at| at <= now) {
+                                session.woke = true;
+                                reminder_due = true;
+                            }
+                            clock((end - now).max(0.0))
+                        }
+                        (None, Some(left)) => format!("Paused {}", clock(left)),
+                        (None, None) => String::new(),
+                    }
+                }
             };
             if text != shown {
                 if let Some(tray) = app.tray_by_id("focus") {
@@ -113,9 +154,22 @@ fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
             if ended {
                 // Time is up: say so out loud and bring the window forward,
                 // because the point of the timer is to be interrupted by it.
-                let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").spawn();
+                ring();
                 show_window(&app);
                 let _ = app.emit("focus-command", "ended");
+            }
+            if reminder_due {
+                // A hidden window's timers may be stopped, so it is told when
+                // to look. It answers by handing the session over as reminding.
+                let _ = app.emit("focus-command", "reminder");
+            }
+            if let Some(first) = reminder_ring {
+                ring();
+                // Brought forward once; after that only the sound repeats, so
+                // the window does not keep taking the keyboard from other work.
+                if first {
+                    show_window(&app);
+                }
             }
         }
     });

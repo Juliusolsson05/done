@@ -1,6 +1,7 @@
 // Focus: one countdown on one task. Before a session it asks what and for how
 // long; during one it shows the time left, as large as the type scale goes.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,7 +11,17 @@ import { ViewHeader } from '@/components/list-view'
 import { useApp } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
 import { chosenMinutes, clockText, focusTasks, MAX_MINUTES, presetLabel, PRESETS, timeLeft, type Session } from '@/lib/focus'
-import { endFocus, moreFocus, startFocus, toggleFocus } from '@/lib/focus-store'
+import {
+  addReminder,
+  continueFocus,
+  endFocus,
+  getReminders,
+  moreFocus,
+  removeReminder,
+  startFocus,
+  subscribeFocus,
+  toggleFocus,
+} from '@/lib/focus-store'
 import { goalTask } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -33,6 +44,70 @@ export function Countdown({ session }: { session: Session }) {
 // A select cannot have an empty value, so "no task" has a name.
 const NOTHING = 'none'
 const FIELD_LABEL = 'text-xs text-muted-foreground'
+
+// What to be told during a session, and how often. The list is remembered
+// between sessions; with none, only the row to add one is shown.
+function Reminders() {
+  const reminders = useSyncExternalStore(subscribeFocus, getReminders)
+  const [label, setLabel] = useState('')
+  const [minutes, setMinutes] = useState('')
+  const add = (event: FormEvent) => {
+    event.preventDefault()
+    if (!addReminder(label, Number(minutes))) return
+    setLabel('')
+    setMinutes('')
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label id="focus-reminders" className={FIELD_LABEL}>
+        Reminders
+      </Label>
+      {reminders.length > 0 && (
+        <ul aria-labelledby="focus-reminders" className="flex flex-col">
+          {reminders.map((reminder) => (
+            <li key={reminder.id} className="flex items-center gap-3">
+              <span className="min-w-0 flex-1 truncate">{reminder.label}</span>
+              <span className="text-muted-foreground tabular-nums">every {reminder.intervalMinutes} min</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                aria-label={'Remove reminder: ' + reminder.label}
+                onClick={() => removeReminder(reminder.id)}
+              >
+                <XIcon />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={add} className="flex items-center gap-1">
+        <Input
+          placeholder="Stand up and stretch"
+          aria-label="Reminder"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="h-7 flex-1"
+        />
+        <span className="px-1 text-muted-foreground">every</span>
+        <Input
+          type="number"
+          min={1}
+          max={MAX_MINUTES}
+          placeholder="min"
+          aria-label="Every how many minutes"
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          className="h-7 w-20"
+        />
+        <Button type="submit" variant="outline" size="sm">
+          Add
+        </Button>
+      </form>
+    </div>
+  )
+}
 
 function Setup() {
   const { data, ui, chooseFocus } = useApp()
@@ -102,6 +177,7 @@ function Setup() {
           />
         </div>
       </div>
+      <Reminders />
       <div>
         <Button onClick={() => startFocus(tasks.find((t) => String(t.id) === pick) ?? null, chosenMinutes(typed, ui.focusMinutes))}>
           Start focus
@@ -121,6 +197,24 @@ function Running({ session }: { session: Session }) {
     if (id !== null && data.tasks.some((t) => t.id === id)) complete(id)
   }
   const finish = session.taskId !== null && <Button onClick={finishTask}>Finish task</Button>
+
+  // A reminder takes the place of the countdown until it is dismissed.
+  if (session.reminding)
+    return (
+      <div className="flex min-h-96 flex-1 flex-col items-center justify-center gap-4 text-center">
+        <div className="text-sm text-muted-foreground">Reminder</div>
+        <div className="max-w-xl text-4xl leading-tight font-medium tracking-tight wrap-anywhere sm:text-5xl">{session.reminding.label}</div>
+        <div className="mb-4 text-muted-foreground tabular-nums">
+          Paused with <Countdown session={session} /> left
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button onClick={continueFocus}>Continue</Button>
+          <Button variant="ghost" className="text-muted-foreground" onClick={endFocus}>
+            Stop
+          </Button>
+        </div>
+      </div>
+    )
 
   return (
     <div className="flex min-h-96 flex-1 flex-col items-center justify-center gap-4 text-center">
