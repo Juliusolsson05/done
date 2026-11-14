@@ -32,13 +32,13 @@ export function parseQuickAdd(text: string, projects: Project[], today: Day): Pa
   let projectId: number | null = null
   for (const word of text.trim().split(/\s+/).filter(Boolean)) {
     const w = word.toLowerCase()
-    const day = due === null ? dayWord(w, today) : null
+    const day: Day | null = due === null ? dayWord(w, today) : null
     if (day) {
       due = day
       if (['on', 'by'].includes((kept.at(-1) ?? '').toLowerCase())) kept.pop()
       continue
     }
-    const p = priority === null ? /^p([1-4])$/.exec(w) : null
+    const p: RegExpExecArray | null = priority === null ? /^p([1-4])$/.exec(w) : null
     if (p) {
       priority = Number(p[1])
       continue
