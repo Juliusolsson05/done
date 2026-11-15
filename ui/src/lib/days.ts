@@ -39,3 +39,33 @@ export function describeDay(day: Day, today: Day): string {
 export const fullDay = (day: Day): string =>
   toDate(day).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
 export const shortDay = (day: Day): string => toDate(day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+
+// Calendar arithmetic for dates typed in words. Months count from 1 here, as
+// they are written.
+export const ymd = (day: Day): [number, number, number] => {
+  const [y, m, d] = day.split('-').map(Number)
+  return [y, m, d]
+}
+export const daysInMonth = (year: number, month: number): number => new Date(year, month, 0).getDate()
+// Null for a day the calendar does not have (30 February), so typed text can
+// never become an impossible date.
+export const realDay = (year: number, month: number, day: number): Day | null =>
+  month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month) ? `${year}-${two(month)}-${two(day)}` : null
+// A month after 31 January is the last day of February: a day the month does
+// not have becomes its last one instead of spilling into the next month.
+export const addMonths = (day: Day, n: number): Day => {
+  const [y, m, d] = ymd(day)
+  const months = y * 12 + (m - 1) + n
+  const year = Math.floor(months / 12)
+  const month = (months % 12) + 1
+  return `${year}-${two(month)}-${two(Math.min(d, daysInMonth(year, month)))}`
+}
+// A typed date said back so it cannot be misread: "next friday" is "Fri 20 Nov".
+export function spellDay(day: Day, today: Day): string {
+  const diff = daysBetween(today, day)
+  if (diff === 0) return 'Today'
+  if (diff === 1) return 'Tomorrow'
+  const year = day.slice(0, 4) === today.slice(0, 4) ? undefined : 'numeric'
+  // Some engines put a comma after the weekday and some do not.
+  return toDate(day).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year }).replace(',', '')
+}

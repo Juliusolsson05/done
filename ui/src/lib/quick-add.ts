@@ -1,43 +1,51 @@
 // Reading a typed line: "call the bank tomorrow p1 #home".
-import { addDays, nextWeekday, type Day } from '@/lib/days'
+import { findDate, type Dismissed, type Phrase } from '@/lib/date-phrases'
+import type { Day } from '@/lib/days'
 import type { Project } from '@/lib/tasks'
-
-const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-// "sat", "sun" and "tom" are left out on purpose: they are ordinary words and names.
-const SHORT: Record<string, number> = { mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, thurs: 4, fri: 5 }
-
-function dayWord(w: string, today: Day): Day | null {
-  if (w === 'today' || w === 'tod') return today
-  if (w === 'tomorrow' || w === 'tmr') return addDays(today, 1)
-  const target = WEEKDAYS.includes(w) ? WEEKDAYS.indexOf(w) : SHORT[w]
-  if (target === undefined) return null
-  return nextWeekday(today, target)
-}
 
 export const tagOf = (name: string): string => name.toLowerCase().replace(/\s+/g, '-')
 
 export interface Parsed {
   title: string
   due: Day | null
+  // Where the date was written, for showing it in the field.
+  date: Phrase | null
   priority: number | null
   projectId: number | null
 }
 
-// Only the first date word, the first priority and the first known #project
-// are taken out of the line; everything else stays in the title as typed.
-export function parseQuickAdd(text: string, projects: Project[], today: Day): Parsed {
+const CLOSES: Record<string, string> = { '(': ')', '[': ']', '"': '"', "'": "'" }
+
+// The line without its date phrase. Punctuation that leaned on the phrase
+// stays with the words before it ("call Anna today." is "call Anna.") and
+// goes when there are none ("today, call Anna" is "call Anna"). Brackets or
+// quotes that held only the phrase go with it ("call Anna (tomorrow)" is
+// "call Anna"); a pair that still holds something is left alone.
+function without(text: string, phrase: Phrase): string {
+  let before = text.slice(0, phrase.start)
+  let after = text.slice(phrase.end)
+  const opened = before.at(-1) ?? ''
+  if (after !== '' && after[0] === CLOSES[opened]) {
+    before = before.slice(0, -1)
+    after = after.slice(1)
+  }
+  before = before.trimEnd()
+  if (!before) return after.replace(/^[.,;:!?]+/, '')
+  // No gap after an opening bracket: "(tomorrow morning)" is "(morning)".
+  if (/[([]$/.test(before)) return before + after.trimStart()
+  return before + (/^[.,;:!?)\]]/.test(after) ? '' : ' ') + after
+}
+
+// The date is the last date phrase in the line that was not dismissed (see
+// date-phrases.ts). Only the first priority and the first known #project are
+// taken out as well; everything else stays in the title as typed.
+export function parseQuickAdd(text: string, projects: Project[], today: Day, dismissed: Dismissed[] = []): Parsed {
+  const date = findDate(text, today, dismissed)
   const kept: string[] = []
-  let due: Day | null = null
   let priority: number | null = null
   let projectId: number | null = null
-  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+  for (const word of (date ? without(text, date) : text).trim().split(/\s+/).filter(Boolean)) {
     const w = word.toLowerCase()
-    const day: Day | null = due === null ? dayWord(w, today) : null
-    if (day) {
-      due = day
-      if (['on', 'by'].includes((kept.at(-1) ?? '').toLowerCase())) kept.pop()
-      continue
-    }
     const p: RegExpExecArray | null = priority === null ? /^p([1-4])$/.exec(w) : null
     if (p) {
       priority = Number(p[1])
@@ -53,24 +61,28 @@ export function parseQuickAdd(text: string, projects: Project[], today: Day): Pa
     }
     kept.push(word)
   }
-  return { title: kept.join(' '), due, priority, projectId }
+  return { title: kept.join(' '), due: date?.day ?? null, date, priority, projectId }
 }
 
 export interface Read {
   title: string
   due: Day | null
+  // The typed date phrase, if `due` came from one rather than from the view.
+  date: Phrase | null
   priority: number
   projectId: number | null
 }
 
 // What a new task gets when the typed line does not say comes from the view
-// you are in (`fallback`).
+// you are in (`fallback`). A typed date wins over the view's day because the
+// user wrote it; a dismissed one is not a date, so the view's day applies.
 export function readLine(
   text: string,
   projects: Project[],
   today: Day,
   fallback: { due: Day | null; projectId: number | null },
+  dismissed: Dismissed[] = [],
 ): Read {
-  const p = parseQuickAdd(text, projects, today)
-  return { title: p.title, due: p.due ?? fallback.due, priority: p.priority ?? 4, projectId: p.projectId ?? fallback.projectId }
+  const p = parseQuickAdd(text, projects, today, dismissed)
+  return { title: p.title, due: p.due ?? fallback.due, date: p.date, priority: p.priority ?? 4, projectId: p.projectId ?? fallback.projectId }
 }
