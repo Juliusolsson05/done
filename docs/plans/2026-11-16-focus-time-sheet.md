@@ -2,7 +2,7 @@
 
 Fixes #9.
 Branch `feat/focus-time-sheet` · Worktree `../done-wt/focus-time-sheet` · Base `origin/main` @ 844f36a (2026-11-16)
-Status: approved 2026-11-16 (the owner asked to build it and look at it locally before merging; the decisions below were offered with defaults and not changed — see note)
+Status: implemented; the owner looked at the local build and approved merging and releasing it on 2026-11-16.
 
 ## Outcome
 
@@ -28,7 +28,7 @@ In Focus, a button in the corner opens **Up next**: the blocks to do after this 
 7. **Time sheet page** — *sidebar item and key 7, one day at a time with arrows, rows deletable, not editable.*
 8. **Not in this version** — editing entries, the time sheet over MCP, an estimate stored on the task.
 
-Answered 2026-11-16: the owner said to build it and show it locally before merging, without changing a decision. **All eight are shipped as the defaults and are UNCONFIRMED** until the owner has looked at the local build.
+Answered 2026-11-16: the owner said to build it and show it locally before merging, without changing a decision. All eight shipped as the defaults; the owner looked at the local build and approved it as it is.
 
 Ruling: entries carry no foreign key to `task` — a block on a task added seconds ago may be recorded before that task's save lands, and a foreign key would refuse it; the entry stores the title it had, so a deleted task's rows still read correctly, and undoing a delete re-links them because the id is kept — cost if wrong: an entry may name a task id that no longer exists, which the page already handles by showing the stored title.
 
@@ -95,3 +95,10 @@ Ruling: entries are written through their own `record_entry` call, not through `
 ## Out of scope
 
 Editing entries; the time sheet over MCP; an estimate stored on the task; a week view.
+
+## Execution notes
+
+- Plan vs built: Core, desktop and web app, Interface and Invariants MATCH. Two DRIFTs, both found in the local preview and fixed: the Up next task picker is held to its panel's width (`position="popper"`), and the time sheet's title column takes the free width.
+- Ruling: the shortcut keys (q, 1–7, Space) are ignored inside any `[role="dialog"]`, so Space on a button in the Up next panel presses that button instead of pausing the timer behind it — cost if wrong: a shortcut no longer works from inside the task editor dialog, where every field already swallowed it.
+- Verified: `npm run typecheck`, 387 interface tests, `cargo test -p done-core -p done-mcp -p done-server` (13), the two new focus tests proven by reverting `endedAt` and the finished-task check. Local web app run against a copy of the owner's tasks file: queue, reorder, end-of-block screen, Start next, a sub-minute Stop not recorded, an early Stop recorded as −2 min, rows surviving a server restart.
+- Not run here: the packaged desktop app and its menu bar; the nightly release builds it.
