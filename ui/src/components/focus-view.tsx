@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ViewHeader } from '@/components/list-view'
+import { UpNext } from '@/components/up-next'
 import { useApp } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
 import { chosenMinutes, clockText, focusTasks, MAX_MINUTES, presetLabel, PRESETS, timeLeft, type Session } from '@/lib/focus'
@@ -16,13 +17,16 @@ import {
   continueFocus,
   endFocus,
   getReminders,
+  getUpNext,
   moreFocus,
   removeReminder,
   startFocus,
+  startNext,
   subscribeFocus,
   toggleFocus,
 } from '@/lib/focus-store'
 import { goalTask } from '@/lib/tasks'
+import { minutesText } from '@/lib/time-sheet'
 import { cn } from '@/lib/utils'
 
 // The time left, as text that keeps itself current. The ticking stays in
@@ -109,6 +113,24 @@ function Reminders() {
   )
 }
 
+// Starts the first block in Up next, naming it and its length. Nothing
+// when the list is empty.
+function StartNext({ variant }: { variant: 'default' | 'outline' }) {
+  const { data } = useApp()
+  const next = useSyncExternalStore(subscribeFocus, getUpNext)[0]
+  if (!next) return null
+  return (
+    <Button variant={variant} className="max-w-full" onClick={() => startNext(data.tasks)}>
+      <span className="truncate">Start next: {next.title}</span>
+      <span className="opacity-70 tabular-nums">· {minutesText(next.minutes * 60000)}</span>
+    </Button>
+  )
+}
+
+// Asking for more time when it is up. Counts toward the time taken, not the
+// time planned, which is the point of the time sheet.
+const MORE = [5, 10, 15]
+
 function Setup() {
   const { data, ui, chooseFocus } = useApp()
   const [typed, setTyped] = useState('')
@@ -178,10 +200,13 @@ function Setup() {
         </div>
       </div>
       <Reminders />
-      <div>
+      <div className="flex flex-wrap gap-2">
         <Button onClick={() => startFocus(tasks.find((t) => String(t.id) === pick) ?? null, chosenMinutes(typed, ui.focusMinutes))}>
           Start focus
         </Button>
+        {/* With blocks queued, the first of them can be started from here too:
+            after a Stop, or to begin a day already planned. */}
+        <StartNext variant="outline" />
       </div>
     </div>
   )
@@ -196,7 +221,14 @@ function Running({ session }: { session: Session }) {
     // It may have been deleted, or finished elsewhere, while the clock ran.
     if (id !== null && data.tasks.some((t) => t.id === id)) complete(id)
   }
-  const finish = session.taskId !== null && <Button onClick={finishTask}>Finish task</Button>
+  const queued = useSyncExternalStore(subscribeFocus, getUpNext).length > 0
+  // When something is queued, starting it is the main thing to do at the end,
+  // so finishing the task steps back beside it.
+  const finish = session.taskId !== null && (
+    <Button variant={session.ended && queued ? 'outline' : 'default'} onClick={finishTask}>
+      Finish task
+    </Button>
+  )
 
   // A reminder takes the place of the countdown until it is dismissed.
   if (session.reminding)
@@ -226,14 +258,19 @@ function Running({ session }: { session: Session }) {
         <Countdown session={session} />
       </div>
       {session.ended ? (
-        <div className="flex flex-wrap justify-center gap-2">
-          {finish}
-          <Button variant="outline" onClick={() => moreFocus(10)}>
-            10 more minutes
-          </Button>
-          <Button variant="ghost" className="text-muted-foreground" onClick={endFocus}>
-            Close
-          </Button>
+        <div className="flex max-w-2xl flex-col items-center gap-3">
+          <StartNext variant="default" />
+          <div className="flex flex-wrap justify-center gap-2">
+            {finish}
+            {MORE.map((minutes) => (
+              <Button key={minutes} variant="outline" onClick={() => moreFocus(minutes)}>
+                +{minutes} min
+              </Button>
+            ))}
+            <Button variant="ghost" className="text-muted-foreground" onClick={endFocus}>
+              Close
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="flex flex-wrap justify-center gap-2">
@@ -254,7 +291,9 @@ export function FocusView() {
   const { focus } = useApp()
   return (
     <>
-      <ViewHeader title="Focus" />
+      <ViewHeader title="Focus">
+        <UpNext />
+      </ViewHeader>
       {focus ? <Running session={focus} /> : <Setup />}
     </>
   )

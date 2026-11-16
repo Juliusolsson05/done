@@ -4,16 +4,21 @@ import {
   clockText,
   dismiss,
   dueReminder,
+  entryOf,
   extend,
   finish,
   fire,
   focusTasks,
+  moveBlock,
+  newBlock,
+  startBlock,
   isDue,
   newReminder,
   nextReminderAt,
   start,
   timeLeft,
   toggle,
+  type Block,
   type Reminder,
   type Session,
 } from '@/lib/focus'
@@ -259,5 +264,72 @@ describe('choosing', () => {
       task(6, { due: today, done: true }),
     ]
     expect(focusTasks(tasks, today).map((t) => t.id)).toEqual([5, 4, 3, 1, 2])
+  })
+})
+
+describe('the time sheet row a block leaves', () => {
+  it('keeps the planned length and counts asked-for time as time taken', () => {
+    // 25 minutes planned, ran out, then 15 more minutes asked for 5 minutes later.
+    let session = finish(start(task(3, { title: 'write the report' }), 25, t0))
+    session = extend(session, 15, t0 + 30 * MINUTE)
+    const row = entryOf(session, t0 + 45 * MINUTE)
+    expect(row).toMatchObject({ taskId: 3, title: 'write the report', plannedMs: 25 * MINUTE, focusedMs: 40 * MINUTE, startedAt: t0 })
+  })
+
+  it('leaves out a pause and a reminder break', () => {
+    const stretch: Reminder = { id: 'r', label: 'Stretch', intervalMinutes: 10 }
+    let session = start(null, 30, t0, [stretch])
+    session = toggle(session, t0 + 5 * MINUTE) // paused for 7 minutes
+    session = toggle(session, t0 + 12 * MINUTE)
+    // The reminder is due 10 focused minutes in, at 17 minutes on the clock.
+    session = fire(session, stretch, t0 + 17 * MINUTE)
+    session = dismiss(session, t0 + 20 * MINUTE) // a 3 minute break
+    expect(entryOf(session, t0 + 25 * MINUTE)?.focusedMs).toBe(15 * MINUTE)
+  })
+
+  it('ends when the time ran out, not when Close was pressed later', () => {
+    const session = finish(start(null, 25, t0))
+    expect(entryOf(session, t0 + 60 * MINUTE)).toMatchObject({ endedAt: t0 + 25 * MINUTE, focusedMs: 25 * MINUTE })
+  })
+
+  it('is not written for a false start under a minute', () => {
+    expect(entryOf(start(null, 25, t0), t0 + 59 * 1000)).toBeNull()
+    expect(entryOf(start(null, 25, t0), t0 + MINUTE)).not.toBeNull()
+  })
+
+  it('is on the local day the block started, even if it ran past midnight', () => {
+    const lateEvening = new Date(2026, 10, 16, 23, 50).getTime()
+    expect(entryOf(start(null, 25, lateEvening), lateEvening + 25 * MINUTE)?.day).toBe('2026-11-16')
+  })
+})
+
+describe('Up next', () => {
+  const blocks = ['a', 'b', 'c'].map((id) => newBlock(id, null, 15) as Block)
+
+  it('refuses a block without a sensible length and caps a long one', () => {
+    expect(newBlock('x', null, 0)).toBeNull()
+    expect(newBlock('x', null, Number.NaN)).toBeNull()
+    expect(newBlock('x', task(4, { title: 'call the bank' }), 900)).toEqual({ id: 'x', taskId: 4, title: 'call the bank', minutes: 600 })
+  })
+
+  it('moves a block up or down and leaves it at either end', () => {
+    expect(moveBlock(blocks, 'c', -1).map((b) => b.id)).toEqual(['a', 'c', 'b'])
+    expect(moveBlock(blocks, 'a', 1).map((b) => b.id)).toEqual(['b', 'a', 'c'])
+    expect(moveBlock(blocks, 'a', -1)).toBe(blocks)
+    expect(moveBlock(blocks, 'c', 1)).toBe(blocks)
+  })
+
+  it('starts a block on its task as it is now, for the length estimated', () => {
+    const block = newBlock('x', task(4, { title: 'call the bank' }), 15) as Block
+    const session = startBlock(block, [task(4, { title: 'call the bank about the loan' })], t0)
+    expect(session).toMatchObject({ taskId: 4, title: 'call the bank about the loan', planned: 15 * MINUTE, startedAt: t0 })
+    expect(timeLeft(session, t0)).toBe(15 * MINUTE)
+  })
+
+  it('runs a block whose task was finished meanwhile under its title, on no task', () => {
+    const block = newBlock('x', task(4, { title: 'call the bank' }), 15) as Block
+    const finished = task(4, { title: 'call the bank', done: true, doneDay: '2026-11-16' })
+    expect(startBlock(block, [finished], t0)).toMatchObject({ taskId: null, title: 'call the bank' })
+    expect(startBlock(block, [], t0)).toMatchObject({ taskId: null, title: 'call the bank' })
   })
 })

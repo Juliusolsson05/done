@@ -4,6 +4,7 @@
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import type { Data } from '@/lib/tasks'
+import type { Entry, NewEntry } from '@/lib/time-sheet'
 
 // What the desktop app knows about itself: its version, where its program is
 // (for connecting an agent), and whether an update is waiting for a restart.
@@ -44,6 +45,19 @@ export const sync = (change: Change): Promise<{ rev: number }> =>
     : fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change) }).then((r) =>
         answer<{ rev: number }>(r),
       )
+
+// The time sheet. Written through calls of its own rather than `sync`: a
+// row is only ever added, so it never has to wait for the tasks file's
+// revision, and the end of a block is never lost to another window's save.
+const post = <T>(url: string, body: unknown): Promise<T> =>
+  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => answer<T>(r))
+
+export const loadEntries = (day: Day): Promise<Entry[]> =>
+  tauri ? tauri.core.invoke<Entry[]>('entries', { day }) : fetch('/api/entries?day=' + day).then((r) => answer<Entry[]>(r))
+export const recordEntry = (entry: NewEntry): Promise<Entry> =>
+  tauri ? tauri.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
+export const deleteEntry = (id: number): Promise<void> =>
+  tauri ? tauri.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
 
 // In a browser there is no app to ask, so the usual install path stands in.
 export const BROWSER_INFO: Info = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null }
