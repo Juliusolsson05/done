@@ -91,7 +91,7 @@ export function TimeSheet() {
           <thead>
             <tr className="border-b text-xs text-muted-foreground">
               <th className="py-2 pr-3 text-left font-normal">Time</th>
-              <th className="px-3 py-2 text-left font-normal">Worked on</th>
+              <th className="w-full px-3 py-2 text-left font-normal">Worked on</th>
               <th className={cn(NUMBER, 'font-normal')}>Planned</th>
               <th className={cn(NUMBER, 'font-normal')}>Took</th>
               <th className={cn(NUMBER, 'font-normal')}>Difference</th>

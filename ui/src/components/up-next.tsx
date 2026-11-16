@@ -41,11 +41,13 @@ function AddBlock() {
         <SelectTrigger id="up-next-task" className="w-full">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        {/* Held to the panel's width: a long task title would otherwise pull
+            the list out across the page behind it. */}
+        <SelectContent position="popper" className="max-w-(--radix-select-trigger-width)">
           <SelectItem value={NOTHING}>Nothing in particular</SelectItem>
           {tasks.map((t) => (
             <SelectItem key={t.id} value={String(t.id)}>
-              {t.title}
+              <span className="truncate">{t.title}</span>
             </SelectItem>
           ))}
         </SelectContent>
