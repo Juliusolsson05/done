@@ -7,7 +7,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use done_core::{Change, State, Store, Synced};
+use done_core::{Change, Entry, NewEntry, State, Store, Synced};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -200,6 +200,21 @@ fn sync(store: tauri::State<Store>, change: Change) -> Result<Synced, String> {
 }
 
 #[tauri::command]
+fn entries(store: tauri::State<Store>, day: String) -> Result<Vec<Entry>, String> {
+    store.entries(&day).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn record_entry(store: tauri::State<Store>, entry: NewEntry) -> Result<Entry, String> {
+    store.record(entry).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_entry(store: tauri::State<Store>, id: i64) -> Result<(), String> {
+    store.delete_entry(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
     Info {
         version: app.package_info().version.to_string(),
@@ -259,7 +274,7 @@ fn main() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, info, restart, focus_set])
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, info, restart, focus_set])
         // Closing the window hides it and leaves done running, as Mac apps
         // do: a countdown in the menu bar must outlive its window. Cmd+Q quits.
         .on_window_event(|window, event| {
