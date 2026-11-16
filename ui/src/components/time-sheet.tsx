@@ -50,6 +50,13 @@ export function TimeSheet() {
     }
   }, [day, reads])
 
+  // The old day's rows are cleared at once rather than shown under the new
+  // day's date until its answer arrives.
+  const go = (next: string) => {
+    setEntries(null)
+    setDay(next)
+  }
+
   const remove = (entry: Entry) => {
     setEntries((rows) => rows && rows.filter((e) => e.id !== entry.id))
     deleteEntry(entry.id).then(
@@ -66,17 +73,17 @@ export function TimeSheet() {
   return (
     <div className="max-w-4xl">
       <ViewHeader title="Time sheet" sub={fullDay(day)}>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Day before" onClick={() => setDay(addDays(day, -1))}>
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Day before" onClick={() => go(addDays(day, -1))}>
           <ChevronLeftIcon />
         </Button>
-        {day !== TODAY && <HeaderButton onClick={() => setDay(TODAY)}>Today</HeaderButton>}
+        {day !== TODAY && <HeaderButton onClick={() => go(TODAY)}>Today</HeaderButton>}
         <Button
           variant="ghost"
           size="icon-sm"
           className="text-muted-foreground"
           aria-label="Day after"
           disabled={day >= TODAY}
-          onClick={() => setDay(addDays(day, 1))}
+          onClick={() => go(addDays(day, 1))}
         >
           <ChevronRightIcon />
         </Button>

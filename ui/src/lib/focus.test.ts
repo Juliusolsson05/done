@@ -292,6 +292,15 @@ describe('the time sheet row a block leaves', () => {
     expect(entryOf(session, t0 + 60 * MINUTE)).toMatchObject({ endedAt: t0 + 25 * MINUTE, focusedMs: 25 * MINUTE })
   })
 
+  // The tasks file stores whole milliseconds and refuses a fraction, which
+  // used to lose a block started from "33.3" typed in the minutes field.
+  it('holds whole numbers, whatever was typed for the length', () => {
+    const session = start(null, chosenMinutes('33.3', 25), t0 + 0.5)
+    const row = entryOf(session, t0 + 40 * MINUTE) as NonNullable<ReturnType<typeof entryOf>>
+    for (const value of [row.startedAt, row.endedAt, row.plannedMs, row.focusedMs]) expect(Number.isInteger(value)).toBe(true)
+    expect(row.plannedMs).toBe(33 * MINUTE)
+  })
+
   it('is not written for a false start under a minute', () => {
     expect(entryOf(start(null, 25, t0), t0 + 59 * 1000)).toBeNull()
     expect(entryOf(start(null, 25, t0), t0 + MINUTE)).not.toBeNull()

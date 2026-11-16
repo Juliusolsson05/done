@@ -16,7 +16,7 @@ import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
 import { isDesktop, onMenuBarCommand, setWebviewZoom } from '@/lib/backend'
 import { addDays, dayOf, TODAY } from '@/lib/days'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
-import { endFocus, getFocus, handOff, onRecordFailed, remind, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
+import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
 import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
@@ -159,6 +159,7 @@ export default function App() {
         if (zoom !== 1) setWebviewZoom(zoom)
         // A session that was running before a reload: the menu bar is told again.
         handOff()
+        retryUnsaved()
         setReady(true)
       },
       (error: unknown) => setFailed(String(error instanceof Error ? error.message : error)),
@@ -172,7 +173,7 @@ export default function App() {
     })
     onRecordFailed(() => {
       play('error')
-      latest.current.say('That focus block could not be written to the time sheet.')
+      latest.current.say('That focus block could not be written to the time sheet yet. It will be tried again.')
     })
   }, [])
 

@@ -21,6 +21,7 @@ import {
   type Session,
 } from '@/lib/focus'
 import type { Task } from '@/lib/tasks'
+import type { NewEntry } from '@/lib/time-sheet'
 
 const KEY = 'done-focus'
 // The reminders are kept apart from the session: the list outlives it.
@@ -28,6 +29,9 @@ const REMINDERS_KEY = 'done-reminders'
 // Up next: the blocks to do after this one. Kept with the session in this
 // window's storage, because it is today's plan, not part of the tasks.
 const UP_NEXT_KEY = 'done-up-next'
+// Blocks that ended but could not be written to the time sheet yet (the web
+// server was down, say). Kept until a write succeeds, so none is lost.
+const UNSAVED_KEY = 'done-unsaved-entries'
 
 function stored(): Session | null {
   try {
@@ -73,6 +77,19 @@ function storedUpNext(): Block[] {
 let session: Session | null = stored()
 let reminders: Reminder[] = storedReminders()
 let upNext: Block[] = storedUpNext()
+
+// Other tabs of the web app share this storage. Without following their
+// changes, a session ended in one tab would live on in another and be
+// written to the time sheet a second time when that one was closed.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === KEY) session = stored()
+    else if (event.key === UP_NEXT_KEY) upNext = storedUpNext()
+    else if (event.key === REMINDERS_KEY) reminders = storedReminders()
+    else return
+    for (const listener of listeners) listener()
+  })
+}
 const listeners = new Set<() => void>()
 
 export const subscribeFocus = (listener: () => void) => {
@@ -132,18 +149,60 @@ export const onRecordFailed = (handler: () => void) => {
   recordFailed = handler
 }
 
+function storedUnsaved(): NewEntry[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(UNSAVED_KEY) ?? '[]')
+    return Array.isArray(value) ? (value as NewEntry[]) : []
+  } catch {
+    return []
+  }
+}
+function setUnsaved(entries: NewEntry[]) {
+  try {
+    if (entries.length) localStorage.setItem(UNSAVED_KEY, JSON.stringify(entries))
+    else localStorage.removeItem(UNSAVED_KEY)
+  } catch {
+    // Nowhere to keep them; the write is still tried once.
+  }
+}
+
+// Writes the waiting blocks, oldest first, one at a time. Each is taken off
+// the list only once it is written, and only one run goes at a time, so a
+// block is neither lost nor sent twice by two runs overlapping.
+let saving = false
+async function saveUnsaved() {
+  if (saving) return
+  saving = true
+  let wrote = false
+  try {
+    for (;;) {
+      const [entry] = storedUnsaved()
+      if (!entry) break
+      await recordEntry(entry)
+      setUnsaved(storedUnsaved().slice(1))
+      wrote = true
+    }
+  } catch {
+    recordFailed()
+  } finally {
+    saving = false
+  }
+  if (wrote) for (const listener of recordedListeners) listener()
+}
+
 // Writes down a session that is ending. Callers clear the session in the
-// same step, which is what keeps a block from being written twice.
+// same step, which is what keeps a block from being written twice. It goes
+// on the waiting list first, so it survives a failed write or a reload
+// while the write is on its way.
 function record(ending: Session | null) {
   const entry = ending && entryOf(ending, Date.now())
   if (!entry) return
-  recordEntry(entry).then(
-    () => {
-      for (const listener of recordedListeners) listener()
-    },
-    () => recordFailed(),
-  )
+  setUnsaved([...storedUnsaved(), entry])
+  void saveUnsaved()
 }
+
+// Blocks left waiting by an earlier run are tried again when the app opens.
+export const retryUnsaved = (): void => void saveUnsaved()
 
 // Tells the menu bar. An ended session is still sent: the menu bar is what
 // rings, and it shows 0:00 until the session is closed. Also called once at

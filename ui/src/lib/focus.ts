@@ -180,9 +180,12 @@ export const extend = (session: Session, minutes: number, now: number): Session 
 })
 
 // The minutes field wins over the buttons when something is typed in it.
+// Whole minutes: the field says minutes, and a fraction typed into it would
+// carry into every time the session keeps, which the time sheet stores as
+// whole milliseconds and would refuse.
 export function chosenMinutes(typed: string, preset: number): number {
-  const minutes = Number(typed)
-  return minutes > 0 ? Math.min(minutes, MAX_MINUTES) : preset
+  const minutes = Math.round(Number(typed))
+  return minutes >= 1 ? Math.min(minutes, MAX_MINUTES) : preset
 }
 
 // The tasks offered to focus on: today's goal first, then what is due today
@@ -206,16 +209,18 @@ const SHORTEST = MINUTE
 export function entryOf(session: Session, now: number): NewEntry | null {
   const focusedMs = focused(session, now)
   if (focusedMs < SHORTEST) return null
+  // Rounded, because the tasks file keeps whole milliseconds and refuses a
+  // fraction; a session stored by an older version may hold one.
   return {
     taskId: session.taskId,
     title: session.title,
     day: dayOf(new Date(session.startedAt)),
-    startedAt: session.startedAt,
+    startedAt: Math.round(session.startedAt),
     // Time ran out at the end time, however long the 0:00 was left showing
     // before Close was pressed. Paused, it ends now.
-    endedAt: session.endsAt !== null ? Math.min(now, session.endsAt) : now,
-    plannedMs: session.planned,
-    focusedMs,
+    endedAt: Math.round(session.endsAt !== null ? Math.min(now, session.endsAt) : now),
+    plannedMs: Math.round(session.planned),
+    focusedMs: Math.round(focusedMs),
   }
 }
 
