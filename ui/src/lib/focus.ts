@@ -3,8 +3,9 @@
 //
 // A session runs from timestamps, never from counting ticks, so it stays
 // right through sleep, a hidden window or a reload.
-import type { Day } from '@/lib/days'
+import { dayOf, type Day } from '@/lib/days'
 import { byPriority, openTasks, type Task } from '@/lib/tasks'
+import type { NewEntry } from '@/lib/time-sheet'
 
 // Something to be told every so many minutes of focus: "Stand up and stretch".
 export interface Reminder {
@@ -37,6 +38,21 @@ export interface Session {
   fired: string[]
   // The reminder being shown. The session is paused until it is dismissed.
   reminding: Reminder | null
+  // When it was started, for the time sheet's clock times.
+  startedAt: number
+  // The length it was started with, in milliseconds. Unlike `total`, asking
+  // for more time leaves this alone: it is what the time sheet compares
+  // the time really taken against.
+  planned: number
+}
+
+// A block waiting in Up next: what to work on and the time it should take.
+export interface Block {
+  id: string
+  taskId: number | null
+  // Kept so a block still reads if its task is finished or deleted meanwhile.
+  title: string
+  minutes: number
 }
 
 // The lengths offered as buttons, in minutes.
@@ -75,6 +91,8 @@ export const start = (task: Pick<Task, 'id' | 'title'> | null, minutes: number, 
   reminders,
   fired: [],
   reminding: null,
+  startedAt: now,
+  planned: minutes * MINUTE,
 })
 
 // Pause a running session, or resume a paused one. Pausing keeps what is
@@ -162,9 +180,12 @@ export const extend = (session: Session, minutes: number, now: number): Session 
 })
 
 // The minutes field wins over the buttons when something is typed in it.
+// Whole minutes: the field says minutes, and a fraction typed into it would
+// carry into every time the session keeps, which the time sheet stores as
+// whole milliseconds and would refuse.
 export function chosenMinutes(typed: string, preset: number): number {
-  const minutes = Number(typed)
-  return minutes > 0 ? Math.min(minutes, MAX_MINUTES) : preset
+  const minutes = Math.round(Number(typed))
+  return minutes >= 1 ? Math.min(minutes, MAX_MINUTES) : preset
 }
 
 // The tasks offered to focus on: today's goal first, then what is due today
@@ -172,4 +193,61 @@ export function chosenMinutes(typed: string, preset: number): number {
 export function focusTasks(tasks: Task[], today: Day): Task[] {
   const rank = (t: Task) => (t.goalDay === today ? 0 : t.due !== null && t.due <= today ? 1 : 2)
   return openTasks(tasks).sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
+}
+
+// ---------- The time sheet and Up next ----------
+
+// Time spent focusing so far. Pauses and reminder breaks are not in it (the
+// clock was stopped), extra time asked for is.
+export const focused = (session: Session, now: number): number => session.total - timeLeft(session, now)
+
+// A block shorter than this is a false start, not work worth a row.
+const SHORTEST = MINUTE
+
+// The time sheet row for a session that is ending now, or null when it was
+// too short to write down.
+export function entryOf(session: Session, now: number): NewEntry | null {
+  const focusedMs = focused(session, now)
+  if (focusedMs < SHORTEST) return null
+  // Rounded, because the tasks file keeps whole milliseconds and refuses a
+  // fraction; a session stored by an older version may hold one.
+  return {
+    taskId: session.taskId,
+    title: session.title,
+    day: dayOf(new Date(session.startedAt)),
+    startedAt: Math.round(session.startedAt),
+    // Time ran out at the end time, however long the 0:00 was left showing
+    // before Close was pressed. Paused, it ends now.
+    endedAt: Math.round(session.endsAt !== null ? Math.min(now, session.endsAt) : now),
+    plannedMs: Math.round(session.planned),
+    focusedMs: Math.round(focusedMs),
+  }
+}
+
+// A block for Up next, or null without a sensible length. The same check
+// is used on what comes back from storage.
+export function newBlock(id: string, task: Pick<Task, 'id' | 'title'> | null, minutes: number): Block | null {
+  const length = Math.min(Math.round(minutes), MAX_MINUTES)
+  if (!(length >= 1)) return null
+  return { id, taskId: task ? task.id : null, title: task ? task.title : 'Focus', minutes: length }
+}
+
+// Moves a block up (by -1) or down (by 1) the list; at either end it stays.
+export function moveBlock(blocks: Block[], id: string, by: -1 | 1): Block[] {
+  const from = blocks.findIndex((b) => b.id === id)
+  const to = from + by
+  if (from < 0 || to < 0 || to >= blocks.length) return blocks
+  const next = [...blocks]
+  ;[next[from], next[to]] = [next[to], next[from]]
+  return next
+}
+
+// The session for a queued block. Its task is used as it is now (renamed,
+// perhaps); if it has been finished or deleted since it was queued, the
+// block still runs under the title it was queued with, on no task, so the
+// time sheet does not point at a task that is done.
+export function startBlock(block: Block, tasks: Task[], now: number, reminders: Reminder[] = []): Session {
+  const task = block.taskId === null ? undefined : openTasks(tasks).find((t) => t.id === block.taskId)
+  const session = start(task ?? null, block.minutes, now, reminders)
+  return task ? session : { ...session, title: block.title }
 }

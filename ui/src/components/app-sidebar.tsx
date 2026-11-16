@@ -1,5 +1,16 @@
 import type { ReactNode } from 'react'
-import { CalendarDaysIcon, CalendarIcon, ChartGanttIcon, Columns3Icon, InboxIcon, PlusIcon, SlidersHorizontalIcon, TimerIcon, type LucideIcon } from 'lucide-react'
+import {
+  CalendarDaysIcon,
+  CalendarIcon,
+  ChartGanttIcon,
+  ClipboardListIcon,
+  Columns3Icon,
+  InboxIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  TimerIcon,
+  type LucideIcon,
+} from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -71,6 +82,7 @@ export function AppSidebar() {
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
             {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
+            {nav('timesheet', 'Time sheet', ClipboardListIcon)}
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>

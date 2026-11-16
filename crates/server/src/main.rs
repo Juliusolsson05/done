@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use done_core::{Change, Error, Store};
+use done_core::{Change, Error, NewEntry, Store};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -59,6 +59,30 @@ async fn sync(State(store): State<Arc<Store>>, Json(change): Json<Change>) -> Re
     reply(store.sync(change))
 }
 
+#[derive(Deserialize)]
+struct Day {
+    day: String,
+}
+
+async fn entries(State(store): State<Arc<Store>>, Query(q): Query<Day>) -> Response {
+    reply(store.entries(&q.day))
+}
+
+// JSON only, like /api/sync, for the same reason: a form posted by another
+// site cannot reach these.
+async fn record_entry(State(store): State<Arc<Store>>, Json(entry): Json<NewEntry>) -> Response {
+    reply(store.record(entry))
+}
+
+#[derive(Deserialize)]
+struct Id {
+    id: i64,
+}
+
+async fn delete_entry(State(store): State<Arc<Store>>, Json(q): Json<Id>) -> Response {
+    reply(store.delete_entry(q.id).map(|()| serde_json::json!({})))
+}
+
 #[tokio::main]
 async fn main() {
     let path = done_core::default_path();
@@ -68,6 +92,8 @@ async fn main() {
         .route("/", get(|| async { Html(UI) }))
         .route("/api/state", get(state))
         .route("/api/sync", post(sync))
+        .route("/api/entries", get(entries).post(record_entry))
+        .route("/api/entries/delete", post(delete_entry))
         .layer(middleware::from_fn(local_only))
         .with_state(store);
     // 127.0.0.1 only: never reachable from the network.

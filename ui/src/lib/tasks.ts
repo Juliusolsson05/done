@@ -31,7 +31,7 @@ export interface Data {
 }
 
 export type View =
-  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'settings' }
+  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'settings' }
   | { kind: 'project'; id: number }
 
 export const PRIORITY_NAME: Record<number, string> = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }
@@ -71,7 +71,7 @@ export interface Section {
 
 export function sections(view: View, all: Task[], today: Day): Section[] {
   const tasks = openTasks(all)
-  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'settings') return []
+  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'settings') return []
   if (view.kind === 'inbox') return [{ tasks: tasks.filter((t) => t.projectId === null).sort(byPriority) }]
   if (view.kind === 'project') return [{ tasks: tasks.filter((t) => t.projectId === view.id).sort(byPriority) }]
   if (view.kind === 'today') {
