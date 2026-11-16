@@ -87,6 +87,48 @@ pub struct Synced {
     pub rev: i64,
 }
 
+/// One focus block, written down when it ended: what it was on, and how long
+/// it was meant to take against how long it took. The time sheet is a list
+/// of these.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Entry {
+    pub id: i64,
+    /// The task it was on, if any. Not a foreign key: a block on a task added
+    /// seconds ago can be recorded before that task's own save lands, and a
+    /// deleted task's rows keep their title and come back linked on Undo.
+    pub task_id: Option<i64>,
+    /// The title when the block ran, so the row still reads after a rename
+    /// or a delete.
+    pub title: String,
+    /// The local day the block started on, YYYY-MM-DD: the time sheet is read
+    /// a day at a time.
+    pub day: String,
+    /// Milliseconds since 1970. Unlike a task's days, a block is a span of
+    /// real time, and the sheet shows the clock times it ran between.
+    pub started_at: i64,
+    pub ended_at: i64,
+    /// The length it was started with. Asking for more time does not change it.
+    pub planned_ms: i64,
+    /// Time spent focusing: pauses and reminder breaks are left out, extra
+    /// time asked for is counted.
+    pub focused_ms: i64,
+}
+
+/// An entry before it has been given an id.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NewEntry {
+    #[serde(default)]
+    pub task_id: Option<i64>,
+    pub title: String,
+    pub day: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub planned_ms: i64,
+    pub focused_ms: i64,
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// Someone else (another window, or the other app) saved first. The caller
@@ -142,6 +184,22 @@ fn check(task: &Task) -> Result<(), Error> {
     check_day("The goal day", &task.goal_day)?;
     if task.done && task.done_day.is_none() {
         return Err(Error::Invalid("A finished task needs the day it was finished.".into()));
+    }
+    Ok(())
+}
+
+fn check_entry(entry: &NewEntry) -> Result<(), Error> {
+    if entry.title.trim().is_empty() {
+        return Err(Error::Invalid("A time sheet entry needs a title.".into()));
+    }
+    if !is_day(&entry.day) {
+        return Err(Error::Invalid("The day must be written YYYY-MM-DD.".into()));
+    }
+    if entry.ended_at < entry.started_at {
+        return Err(Error::Invalid("A block cannot end before it started.".into()));
+    }
+    if entry.planned_ms < 0 || entry.focused_ms < 0 {
+        return Err(Error::Invalid("Times cannot be negative.".into()));
     }
     Ok(())
 }
@@ -203,7 +261,80 @@ impl Store {
         if !has_goal {
             conn.execute("ALTER TABLE task ADD COLUMN goal_day TEXT", [])?;
         }
+        // The time sheet. IF NOT EXISTS, so a tasks file made before it gains
+        // the table the first time a newer version opens it.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS entry (
+               id INTEGER PRIMARY KEY,
+               task_id INTEGER,
+               title TEXT NOT NULL,
+               day TEXT NOT NULL,
+               started_at INTEGER NOT NULL,
+               ended_at INTEGER NOT NULL,
+               planned_ms INTEGER NOT NULL,
+               focused_ms INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS entry_day ON entry (day);",
+        )?;
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// Writes down a block that has ended. Apart from `sync` and its revision
+    /// on purpose: entries are only ever added, so there is nothing to
+    /// conflict over, and the end of a block must never be lost because
+    /// another window happened to save first.
+    pub fn record(&self, entry: NewEntry) -> Result<Entry, Error> {
+        check_entry(&entry)?;
+        let conn = self.conn.lock().unwrap();
+        let title = entry.title.trim();
+        conn.execute(
+            "INSERT INTO entry (task_id, title, day, started_at, ended_at, planned_ms, focused_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![entry.task_id, title, entry.day, entry.started_at, entry.ended_at, entry.planned_ms, entry.focused_ms],
+        )?;
+        Ok(Entry {
+            id: conn.last_insert_rowid(),
+            task_id: entry.task_id,
+            title: title.to_string(),
+            day: entry.day,
+            started_at: entry.started_at,
+            ended_at: entry.ended_at,
+            planned_ms: entry.planned_ms,
+            focused_ms: entry.focused_ms,
+        })
+    }
+
+    /// One day's blocks, in the order they ran.
+    pub fn entries(&self, day: &str) -> Result<Vec<Entry>, Error> {
+        if !is_day(day) {
+            return Err(Error::Invalid("The day must be written YYYY-MM-DD.".into()));
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, task_id, title, day, started_at, ended_at, planned_ms, focused_ms
+             FROM entry WHERE day = ?1 ORDER BY started_at, id",
+        )?;
+        let entries = stmt
+            .query_map([day], |r| {
+                Ok(Entry {
+                    id: r.get(0)?,
+                    task_id: r.get(1)?,
+                    title: r.get(2)?,
+                    day: r.get(3)?,
+                    started_at: r.get(4)?,
+                    ended_at: r.get(5)?,
+                    planned_ms: r.get(6)?,
+                    focused_ms: r.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    pub fn delete_entry(&self, id: i64) -> Result<(), Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM entry WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     /// Today as the Mac sees it, YYYY-MM-DD. Asked of SQLite so that nothing
@@ -419,5 +550,69 @@ mod tests {
         let result = s.sync(Change { rev: 0, tasks: vec![task(1, "Good"), bad], ..Default::default() });
         assert!(matches!(result, Err(Error::Invalid(_))));
         assert!(s.state("2026-11-13").unwrap().tasks.is_empty());
+    }
+
+    // 09:00 on 16 Nov 2026 (UTC); the values are what the Focus view sends.
+    const NINE: i64 = 1_794_819_600_000;
+    const MINUTE: i64 = 60_000;
+
+    fn block(task_id: Option<i64>, title: &str, day: &str) -> NewEntry {
+        NewEntry {
+            task_id,
+            title: title.into(),
+            day: day.into(),
+            started_at: NINE,
+            ended_at: NINE + 47 * MINUTE,
+            planned_ms: 25 * MINUTE,
+            focused_ms: 45 * MINUTE,
+        }
+    }
+
+    #[test]
+    fn a_recorded_block_is_on_its_own_day_only() {
+        let s = store();
+        let kept = s.record(block(Some(3), "  Write the report ", "2026-11-16")).unwrap();
+        s.record(block(None, "Focus", "2026-11-17")).unwrap();
+        let day = s.entries("2026-11-16").unwrap();
+        assert_eq!(day, vec![kept]);
+        assert_eq!(day[0].title, "Write the report");
+        assert_eq!((day[0].planned_ms, day[0].focused_ms), (25 * MINUTE, 45 * MINUTE));
+    }
+
+    // The reason recording has its own call: a block that ends while another
+    // window has saved must still be written down.
+    #[test]
+    fn recording_a_block_does_not_wait_for_the_tasks_revision() {
+        let s = store();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "First")], ..Default::default() }).unwrap();
+        s.record(block(Some(1), "First", "2026-11-16")).unwrap();
+        assert_eq!(s.entries("2026-11-16").unwrap().len(), 1);
+        // Nor does it move the revision, which would make every open window stale.
+        assert_eq!(s.state("2026-11-16").unwrap().rev, 1);
+    }
+
+    #[test]
+    fn a_block_outlives_its_task_and_can_name_one_not_saved_yet() {
+        let s = store();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "Call the bank")], ..Default::default() }).unwrap();
+        s.record(block(Some(1), "Call the bank", "2026-11-16")).unwrap();
+        s.sync(Change { rev: 1, delete_tasks: vec![1], ..Default::default() }).unwrap();
+        // Task 9 was added in the window a moment ago and is not saved yet.
+        s.record(block(Some(9), "Brand new", "2026-11-16")).unwrap();
+        let day = s.entries("2026-11-16").unwrap();
+        assert_eq!(day.iter().map(|e| (e.task_id, e.title.as_str())).collect::<Vec<_>>(), vec![(Some(1), "Call the bank"), (Some(9), "Brand new")]);
+    }
+
+    #[test]
+    fn a_bad_block_is_refused_and_a_deleted_one_is_gone() {
+        let s = store();
+        let mut backwards = block(None, "Focus", "2026-11-16");
+        backwards.ended_at = NINE - 1;
+        assert!(matches!(s.record(backwards), Err(Error::Invalid(_))));
+        assert!(matches!(s.record(block(None, "  ", "2026-11-16")), Err(Error::Invalid(_))));
+        assert!(matches!(s.record(block(None, "Focus", "16/11/2026")), Err(Error::Invalid(_))));
+        let e = s.record(block(None, "Focus", "2026-11-16")).unwrap();
+        s.delete_entry(e.id).unwrap();
+        assert!(s.entries("2026-11-16").unwrap().is_empty());
     }
 }
