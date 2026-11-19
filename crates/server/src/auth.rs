@@ -6,13 +6,14 @@
 
 use axum::{
     extract::{FromRef, FromRequestParts, Query, State},
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    http::{header, request::Parts, HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
 use axum_extra::extract::cookie::{Cookie, Key, SameSite, SignedCookieJar};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -125,9 +126,36 @@ fn gone(name: &'static str) -> Cookie<'static> {
     Cookie::build((name, "")).path("/").build()
 }
 
-fn session_in(jar: &SignedCookieJar) -> Option<Session> {
-    let session: Session = serde_json::from_str(jar.get(SESSION)?.value()).ok()?;
+fn live(session: Session) -> Option<Session> {
     (session.exp > now()).then_some(session)
+}
+
+fn session_in(jar: &SignedCookieJar) -> Option<Session> {
+    live(serde_json::from_str(jar.get(SESSION)?.value()).ok()?)
+}
+
+// A text signed with the server's key, to hand to an app and be handed back.
+// The cookie crate's own signing, so there is one way of signing here and it
+// is the one the session cookie has.
+fn seal(key: &Key, text: String) -> String {
+    let mut jar = cookie::CookieJar::new();
+    jar.signed_mut(key).add(Cookie::new("sealed", text));
+    jar.get("sealed").expect("just added").value().to_string()
+}
+
+/// The text, if it was signed with this server's key and has not been changed.
+fn unseal(key: &Key, sealed: &str) -> Option<String> {
+    let mut jar = cookie::CookieJar::new();
+    jar.add_original(Cookie::new("sealed", sealed.to_string()));
+    jar.signed(key).get("sealed").map(|c| c.value().to_string())
+}
+
+/// What an app sends in place of the cookie: the same signed session, as a
+/// header. A web view inside an app is not the server's own site, so the
+/// cookie is never sent from it.
+fn bearer(headers: &HeaderMap, key: &Key) -> Option<Session> {
+    let sealed = headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
+    live(serde_json::from_str(&unseal(key, sealed)?).ok()?)
 }
 
 fn signed_out() -> Response {
@@ -140,15 +168,39 @@ impl FromRequestParts<Cloud> for Session {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, cloud: &Cloud) -> Result<Self, Self::Rejection> {
+        if let Some(session) = bearer(&parts.headers, &cloud.config.key) {
+            return Ok(session);
+        }
         let jar = SignedCookieJar::<Key>::from_request_parts(parts, cloud).await.map_err(|_| signed_out())?;
         session_in(&jar).ok_or_else(signed_out)
     }
 }
 
+#[derive(Deserialize)]
+pub struct Start {
+    /// Sent by an app signing in: the SHA-256, in hex, of a secret only that
+    /// app knows. See `exchange`.
+    #[serde(default)]
+    app_challenge: Option<String>,
+}
+
+/// What this browser is remembered by while it is away at Google.
+#[derive(Serialize, Deserialize)]
+struct SigningIn {
+    word: String,
+    #[serde(default)]
+    challenge: Option<String>,
+}
+
 /// Sends the person to Google, remembering a random word to recognise them by
 /// when they come back.
-pub async fn start(State(cloud): State<Cloud>, jar: SignedCookieJar) -> Response {
+pub async fn start(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Query<Start>) -> Response {
+    // A SHA-256 in hex and nothing else: it ends up in a page.
+    if q.app_challenge.as_deref().is_some_and(|c| c.len() != 64 || !c.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return (StatusCode::BAD_REQUEST, "That is not a challenge.").into_response();
+    }
     let word = format!("{:032x}", rand::random::<u128>());
+    let remembered = serde_json::to_string(&SigningIn { word: word.clone(), challenge: q.app_challenge }).expect("plain text fields");
     let mut to = reqwest::Url::parse(&cloud.config.authorize_url).expect("a valid address");
     to.query_pairs_mut()
         .append_pair("client_id", &cloud.config.client_id)
@@ -158,7 +210,7 @@ pub async fn start(State(cloud): State<Cloud>, jar: SignedCookieJar) -> Response
         .append_pair("state", &word)
         // Always ask which account: someone with two must be able to choose.
         .append_pair("prompt", "select_account");
-    (jar.add(cookie(SIGNING_IN, word, &cloud.config, 600)), Redirect::to(to.as_str())).into_response()
+    (jar.add(cookie(SIGNING_IN, remembered, &cloud.config, 600)), Redirect::to(to.as_str())).into_response()
 }
 
 #[derive(Deserialize)]
@@ -204,9 +256,10 @@ pub async fn back(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Qu
     let config = &cloud.config;
     // The word must be the one this browser was sent off with. Without this,
     // a link made by someone else could sign a person in to that someone's account.
-    let expected = jar.get(SIGNING_IN).map(|c| c.value().to_string());
+    let remembered: Option<SigningIn> = jar.get(SIGNING_IN).and_then(|c| serde_json::from_str(c.value()).ok());
     let jar = jar.remove(gone(SIGNING_IN));
-    if q.code.is_empty() || q.state.is_empty() || expected.as_deref() != Some(q.state.as_str()) {
+    let expected = remembered.as_ref().map(|r| r.word.as_str());
+    if q.code.is_empty() || q.state.is_empty() || expected != Some(q.state.as_str()) {
         return (jar, refuse("the reply does not belong to a sign-in this browser started")).into_response();
     }
     let form = [
@@ -252,8 +305,78 @@ pub async fn back(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Qu
         return (jar, refuse("the account has no verified email or no usable id")).into_response();
     }
     let session = Session { sub: claims.sub, email: claims.email, name: claims.name, picture: claims.picture, exp: now() + THIRTY_DAYS };
+    // An app started this: the browser is only the way to Google and back,
+    // so it gets no session. It gets a link that hands the app a code.
+    if let Some(challenge) = remembered.and_then(|r| r.challenge) {
+        let code = Code { session, challenge, exp: now() + TWO_MINUTES };
+        let sealed = seal(&config.key, serde_json::to_string(&code).expect("plain text fields"));
+        let mut link = reqwest::Url::parse("done://auth").expect("a valid address");
+        link.query_pairs_mut().append_pair("code", &sealed);
+        return (jar, Html(BACK_TO_THE_APP.replace("LINK", link.as_str()))).into_response();
+    }
     let value = serde_json::to_string(&session).expect("plain text fields");
     (jar.add(cookie(SESSION, value, config, THIRTY_DAYS)), Redirect::to("/")).into_response()
+}
+
+const TWO_MINUTES: u64 = 120;
+
+/// What the browser hands the app. Not a session: it is traded for one, once
+/// the app shows it holds the secret behind `challenge`.
+#[derive(Serialize, Deserialize)]
+struct Code {
+    session: Session,
+    challenge: String,
+    exp: u64,
+}
+
+// A page, not a redirect: a browser does not follow a redirect to an app's
+// own kind of link without being asked, and some never do. The page tries by
+// itself and leaves a button for when that is not allowed. LINK is made of
+// letters, digits and percent-escapes only, so it is safe inside the quotes.
+const BACK_TO_THE_APP: &str = r#"<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>done</title>
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #1a1a1e; margin: 0; min-height: 100svh; display: grid; place-items: center; }
+  main { max-width: 22rem; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 .5rem; }
+  p { color: #63636b; margin: 0 0 1.5rem; }
+  a { display: block; text-align: center; background: #2f5fe0; color: #fff; text-decoration: none; padding: .75rem 1rem; border-radius: .5rem; font-weight: 500; }
+</style>
+<main>
+  <h1>You are signed in</h1>
+  <p>Go back to done to finish. You can close this page afterwards.</p>
+  <a href="LINK">Open done</a>
+</main>
+<script>location.href = "LINK"</script>
+</html>"#;
+
+#[derive(Deserialize)]
+pub struct Exchange {
+    code: String,
+    verifier: String,
+}
+
+/// An app trades the code from its link for a token. It has to send the
+/// secret whose SHA-256 it gave when it started: any app on a device can
+/// claim a `done://` link, and one that did would hold a code and nothing
+/// that makes it worth anything.
+pub async fn exchange(State(cloud): State<Cloud>, Json(q): Json<Exchange>) -> Response {
+    let refused = || (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "That sign-in can no longer be finished. Start it again." }))).into_response();
+    let key = &cloud.config.key;
+    let Some(code) = unseal(key, &q.code).and_then(|text| serde_json::from_str::<Code>(&text).ok()) else {
+        return refused();
+    };
+    let shown: String = Sha256::digest(q.verifier.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    if code.exp <= now() || !shown.eq_ignore_ascii_case(&code.challenge) {
+        return refused();
+    }
+    let s = &code.session;
+    let account = serde_json::json!({ "email": s.email, "name": s.name, "picture": s.picture });
+    let token = seal(key, serde_json::to_string(&code.session).expect("plain text fields"));
+    Json(serde_json::json!({ "token": token, "account": account })).into_response()
 }
 
 pub async fn sign_out(jar: SignedCookieJar, Json(_): Json<serde_json::Value>) -> Response {
@@ -262,8 +385,9 @@ pub async fn sign_out(jar: SignedCookieJar, Json(_): Json<serde_json::Value>) ->
 
 /// Who the interface is talking to. Answers without a session too: that is
 /// how the interface learns it has to show the sign-in screen.
-pub async fn me(jar: SignedCookieJar) -> Response {
-    let account = session_in(&jar).map(|s| serde_json::json!({ "email": s.email, "name": s.name, "picture": s.picture }));
+pub async fn me(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCookieJar) -> Response {
+    let session = bearer(&headers, &cloud.config.key).or_else(|| session_in(&jar));
+    let account = session.map(|s| serde_json::json!({ "email": s.email, "name": s.name, "picture": s.picture }));
     Json(serde_json::json!({ "mode": "cloud", "account": account })).into_response()
 }
 
