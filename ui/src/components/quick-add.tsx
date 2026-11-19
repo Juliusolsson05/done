@@ -8,6 +8,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
 import { PriorityDot, ProjectDot } from '@/components/marks'
 import { useFocus } from '@/hooks/use-focus'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { carryDismissed, dismissOnBackspace, type Dismissed } from '@/lib/date-phrases'
 import { describeDay, spellDay, TODAY } from '@/lib/days'
@@ -149,7 +150,7 @@ function QuickAdd() {
         </div>
         <Separator />
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Enter adds the task and keeps this open</span>
+          <span className="text-xs text-muted-foreground max-md:hidden">Enter adds the task and keeps this open</span>
           <span className="flex-1" />
           <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={closeAll}>
             Close
@@ -163,15 +164,33 @@ function QuickAdd() {
   )
 }
 
+// On a phone the box opens at the top of the screen, over a dimmed page. In
+// place of the row, as in a window, it would usually open under the keyboard.
+export function MobileQuickAdd() {
+  const { ui, closeAll } = useApp()
+  const isMobile = useIsMobile()
+  if (!isMobile || !ui.adding) return null
+  return (
+    <div className="fixed inset-0 z-50 animate-in bg-black/20 px-3 pt-[calc(env(safe-area-inset-top)+0.5rem)] fade-in" onClick={closeAll}>
+      <div onClick={(event) => event.stopPropagation()}>
+        <QuickAdd />
+      </div>
+    </div>
+  )
+}
+
 // The "Add task" row, which turns into the quick add box.
 export function AddRow() {
   const { ui, add } = useApp()
-  if (ui.adding) return <QuickAdd />
+  const isMobile = useIsMobile()
+  // On a phone the box is drawn by MobileQuickAdd, and the row stays a row.
+  if (ui.adding && !isMobile) return <QuickAdd />
   return (
-    <Button variant="ghost" onClick={add} className="h-9 w-full justify-start gap-2.5 px-2 font-normal text-faint hover:text-muted-foreground">
+    <Button variant="ghost" onClick={add} className="h-9 w-full justify-start gap-2.5 px-2 font-normal text-faint hover:text-muted-foreground max-md:h-11 max-md:gap-3 max-md:text-base">
       <PlusIcon className="size-4.5" />
       Add task
-      <Kbd className="ml-auto">Q</Kbd>
+      {/* A phone has no Q to press. */}
+      <Kbd className="ml-auto max-md:hidden">Q</Kbd>
     </Button>
   )
 }

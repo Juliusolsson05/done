@@ -43,7 +43,9 @@ export function TaskCheck({ task, checked, onChange, className }: { task: Task; 
       checked={checked}
       onCheckedChange={onChange}
       aria-label={`${task.done ? 'Reopen' : 'Complete'}: ${task.title}`}
-      className={cn('size-4.5 rounded-full', CHECK_TONE[task.priority], className)}
+      // On a phone the circle is a little larger, and the area that takes a
+      // tap is larger still (the ::after), so a thumb does not have to aim.
+      className={cn('relative size-4.5 rounded-full max-md:size-5.5 max-md:after:absolute max-md:after:-inset-3', CHECK_TONE[task.priority], className)}
     />
   )
 }
@@ -63,7 +65,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
     <div
       data-task={task.id}
       className={cn(
-        'flex items-start gap-2.5 rounded-lg p-2 hover:bg-muted',
+        'flex items-start gap-2.5 rounded-lg p-2 hover:bg-muted max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-0.5 max-md:px-1 max-md:py-2.5',
         noticed === task.id && 'animate-noticed',
         leaving && 'opacity-0 transition-opacity delay-150 duration-150',
       )}
@@ -72,7 +74,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
       <Button
         variant="ghost"
         onClick={() => edit(task.id)}
-        className="h-auto min-w-0 flex-1 flex-col items-start gap-0 rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent"
+        className="h-auto min-w-0 flex-1 flex-col items-start gap-0 rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
       >
         <span
           className={cn(
@@ -85,7 +87,14 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         </span>
         {task.notes && <span className="w-full truncate text-xs text-muted-foreground">{task.notes}</span>}
       </Button>
-      <div className={cn('flex items-center gap-3 pl-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums', goal ? 'leading-7' : 'leading-5')}>
+      {/* Beside the title in a window. On a phone, on a line of its own under
+          it, starting where the title starts: a long title needs the width. */}
+      <div
+        className={cn(
+          'flex items-center gap-3 pl-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums empty:hidden max-md:basis-full max-md:flex-wrap max-md:pl-8.5 max-md:leading-5',
+          goal ? 'leading-7' : 'leading-5',
+        )}
+      >
         {/* Shown whenever there are subtasks, or the list is open to add the
             first one: the count is also how the list is opened and closed. */}
         {(sub || open) && (
@@ -95,7 +104,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             aria-expanded={open}
             aria-label={open ? 'Hide subtasks' : 'Show subtasks'}
             onClick={() => toggleExpanded(task.id)}
-            className="h-5 gap-1 px-1.5 text-xs font-normal text-muted-foreground tabular-nums"
+            className="h-5 gap-1 px-1.5 text-xs font-normal text-muted-foreground tabular-nums max-md:-ml-1.5 max-md:h-7 max-md:text-sm"
           >
             <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
             {sub ? `${sub.done}/${sub.total}` : 'Subtasks'}
