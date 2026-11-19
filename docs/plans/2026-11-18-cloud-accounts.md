@@ -2,7 +2,7 @@
 
 Fixes #13.
 Branch `feat/cloud-accounts` · Worktree `../done-wt/cloud` · Base `origin/main` @ f4a2f5e (2026-11-18)
-Status: plan only. Size: standard plan. The shape is known; the choices below are real.
+Status: implemented, PR open. Size: standard plan. The shape is known; the choices below are real.
 
 ## Outcome
 
@@ -76,3 +76,16 @@ UNCONFIRMED: all nine are defaults chosen while the owner was away; he asked for
 ## Out of scope
 
 The container image, the desktop and phone apps signing in, the MCP server against an account, sharing between accounts, offline edits.
+
+## Execution notes
+
+- Plan vs built: Core, Server, Interface and Invariants MATCH, with the rulings below.
+- Ruling: `Files` is an enum of the two real places (folder, bucket), not a trait. There is no third, and the tests use the folder. Cost if wrong: a third place means one more arm in four small functions.
+- Ruling: a read trusts its open copy for 30 seconds before asking whether the stored file changed (decision 4 said every read asks). The interface asks for the tasks every four seconds while a window is open, and each ask would be a paid request to the bucket. A change is still checked every time, in the same step as the write. Cost if wrong: during a release, when two copies of the server run for a moment, a window may show tasks up to 30 seconds old; it can never save over what it has not seen.
+- Ruling: the sign-in screen and the account are a `Gate` in front of the app rather than a state inside it, so the app itself is untouched and loads tasks only once there is someone to load them for.
+- Ruling: Settings hides "Connect an AI agent" for a hosted account. The MCP server reads the tasks file on the Mac, which is not where a hosted account's tasks are.
+- Scope addition: a `Dockerfile` for the hosted mode and a README section, because the mode is of no use without a way to run it. A `/healthz` route for the host.
+- Verified: `npm run typecheck`, 396 interface tests, `npm run build`; `cargo test -p done-core -p done-mcp -p done-server` (core 15, server 13). Fail-first: switching off the generation check fails `two_servers_never_overwrite_each_other`; accepting any `state` fails `a_reply_from_google_this_browser_did_not_ask_for_is_refused`; accepting any audience fails `a_statement_that_does_not_hold_up_signs_nobody_in`.
+- Run for real: the server started in cloud mode on this Mac against a folder. `/api/me` says nobody is signed in, `/api/state` answers 401, `/auth/google` redirects to Google with the right return address, and the sign-in screen shows in a browser, with its message after a failed sign-in.
+- Not run here: a real Google sign-in, the bucket, and the image build. All three need the hosted setup and are exercised there.
+- Not done: the `pr-review` round by other agents (one self-review pass of the full diff instead; the machine is short on memory).

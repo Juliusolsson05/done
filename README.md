@@ -2,7 +2,7 @@
 
 A super simple to-do list app I made for myself.
 
-It runs on my Mac, keeps everything in one local SQLite file, and has no account, no cloud and no tracking.
+It runs on my Mac, keeps everything in one local SQLite file, and needs no account, no cloud and no tracking. It can also be hosted, with a sign-in, for using the same list on several devices.
 
 ## What it has
 
@@ -46,13 +46,33 @@ cargo run -p done-server                                # the web app, at http:/
 cd crates/app && npx @tauri-apps/cli@2 build            # the Mac app, in target/release/bundle/macos
 ```
 
+## Host it for others
+
+The web app can also run as a hosted service, where each person signs in with a Google account and has a tasks file of their own. Nothing changes for running it on your own Mac.
+
+```bash
+docker build -t done .
+docker run -p 8080:8080 \
+  -e DONE_PUBLIC_URL=https://done.example.com \
+  -e DONE_GOOGLE_CLIENT_ID=... -e DONE_GOOGLE_CLIENT_SECRET=... \
+  -e DONE_SESSION_KEY="$(openssl rand -hex 48)" \
+  -e DONE_ACCOUNTS=/accounts -v done-accounts:/accounts \
+  done
+```
+
+- `DONE_PUBLIC_URL` is where people reach it. In the Google Cloud console, the sign-in client's redirect address is that plus `/auth/google/callback`.
+- `DONE_ACCOUNTS` is where the account files are kept: a folder, or `gs://bucket` for Google Cloud Storage (the server then uses the identity it runs as; there is no key to hand it).
+- `DONE_SESSION_KEY` signs the sign-in cookie. Changing it signs everyone out.
+
+Deleting an account in Settings deletes its file.
+
 ## How it is put together
 
 - `ui/` is the interface: React, Tailwind and shadcn/ui components, with the whole look defined as theme tokens in `ui/src/index.css`. The desktop app and the web app both show the same build of it.
 - `crates/core` owns the SQLite file and the rules for a valid task.
 - `crates/app` is the desktop app (Tauri). Started as `done mcp`, the same program is the MCP server.
 - `crates/mcp` is the MCP server itself.
-- `crates/server` is the web app, reachable only from the Mac it runs on.
+- `crates/server` is the web app. By default it is reachable only from the Mac it runs on; with `DONE_MODE=cloud` it is the hosted service described above.
 
 Tasks are stored in `~/Library/Application Support/done/done.db`.
 
