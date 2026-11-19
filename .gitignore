@@ -2,4 +2,6 @@ target/
 .DS_Store
 *.db
 *.db-*
-gen/
+# Made at build time. The Xcode project under gen/apple is kept: it is what
+# the iPhone app is built from.
+crates/app/gen/schemas/

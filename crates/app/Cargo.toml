@@ -7,6 +7,12 @@ edition.workspace = true
 name = "done"
 path = "src/main.rs"
 
+# An iPhone app is built from a library, not a program, so the app lives in
+# one and the Mac program above starts it.
+[lib]
+name = "done_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
 
@@ -18,4 +24,7 @@ serde_json = "1.0.154"
 tauri = { version = "2.12.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-opener = "2.7.3"
+
+# Updating itself is something only the Mac app does; on a phone the store does it.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2.14.1"
