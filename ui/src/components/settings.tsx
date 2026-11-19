@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
-import { deleteAccount, isDesktop, restart, signOut } from '@/lib/backend'
+import { canSignIn, deleteAccount, isDesktop, restart, signIn, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -60,7 +60,21 @@ function AccountPane() {
   // Deleting takes two clicks. A dialog would be the usual way, but this is
   // the one place it would be used, and the second button says all it would.
   const [sure, setSure] = useState(false)
-  if (!account) return null
+  if (!account) {
+    // An app that could sign in and has not.
+    if (!canSignIn) return null
+    return (
+      <Pane title="Account">
+        <p className="text-muted-foreground">
+          Your tasks are kept on this device. Sign in to use one list here, on the web and on your phone. The tasks on this device stay as they are
+          and come back when you sign out.
+        </p>
+        <Button size="sm" className="self-start" onClick={() => void signIn().catch(() => say('Your browser could not be opened.'))}>
+          Sign in with Google
+        </Button>
+      </Pane>
+    )
+  }
   const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
   return (
     <Pane title="Account">

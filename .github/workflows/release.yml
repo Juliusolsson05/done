@@ -63,6 +63,10 @@ jobs:
         if: steps.plan.outputs.build == 'true'
         working-directory: crates/app
         env:
+          # The hosted server the app offers to sign in to. A repository
+          # variable, not written here: a copy of this project built by someone
+          # else has none, and is then an app without accounts.
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           VERSION: ${{ steps.plan.outputs.version }}

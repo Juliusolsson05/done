@@ -149,13 +149,29 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/auth/google", get(auth::start))
         .route("/auth/google/callback", get(auth::back))
         .route("/auth/signout", post(auth::sign_out))
+        .route("/auth/exchange", post(auth::exchange))
         .route("/api/me", get(auth::me))
         .route("/api/account/delete", post(auth::delete_account))
         .route("/api/state", get(cloud_state))
         .route("/api/sync", post(cloud_sync))
         .route("/api/entries", get(cloud_entries).post(cloud_record_entry))
         .route("/api/entries/delete", post(cloud_delete_entry))
+        .layer(for_the_apps())
         .with_state(cloud)
+}
+
+// The Mac and iPhone apps show the interface in a web view of their own,
+// which to a server is another site. These are the addresses such a web view
+// has, on every system Tauri runs on; a call from one of them is answered,
+// and from any other site it is not. Credentials are not allowed on such a
+// call, so it is only ever answered on a token the app sends itself, never
+// on a cookie the browser happens to hold.
+fn for_the_apps() -> tower_http::cors::CorsLayer {
+    use axum::http::{header, HeaderValue, Method};
+    tower_http::cors::CorsLayer::new()
+        .allow_origin(["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"].map(HeaderValue::from_static))
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
 #[tokio::main]
@@ -426,5 +442,104 @@ mod tests {
         let other = http.get(format!("{at}/api/state?today=2026-11-18")).header("host", "evil.example.com").send().await.unwrap();
         assert_eq!(other.status(), 403);
         assert_eq!(http.get(format!("{at}/auth/google")).send().await.unwrap().status(), 404);
+    }
+
+    // What the Mac or iPhone app does: it never sees the cookie, only a link
+    // with a code, which it trades for a token by showing its secret.
+    fn challenge_of(secret: &str) -> String {
+        use sha2::Digest;
+        sha2::Sha256::digest(secret.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Runs the browser's part for an app and returns the code from the link.
+    async fn code_for_app(at: &str, secret: &str) -> String {
+        let mut browser = Browser::new(at);
+        let off = browser.get(&format!("/auth/google?app_challenge={}", challenge_of(secret))).await;
+        let to = reqwest::Url::parse(off.headers()["location"].to_str().unwrap()).unwrap();
+        let word = to.query_pairs().find(|(k, _)| k == "state").unwrap().1.to_string();
+        let back = browser.get(&format!("/auth/google/callback?code=abc&state={word}")).await;
+        assert_eq!(back.status(), 200);
+        // The browser is given a page with the link, and no session of its own.
+        assert!(!browser.cookies.contains_key("done_session"), "the browser was signed in as well");
+        let page = back.text().await.unwrap();
+        let link = page.split("href=\"").nth(1).unwrap().split('"').next().unwrap();
+        let link = reqwest::Url::parse(link).unwrap();
+        assert_eq!(link.scheme(), "done");
+        link.query_pairs().find(|(k, _)| k == "code").unwrap().1.to_string()
+    }
+
+    async fn exchange(at: &str, code: &str, secret: &str) -> reqwest::Response {
+        reqwest::Client::new().post(format!("{at}/auth/exchange")).json(&serde_json::json!({ "code": code, "verifier": secret })).send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_app_signs_in_through_the_browser_and_uses_a_token() {
+        let (at, google, _kept) = hosted(1).await;
+        google.says(person("1001", "anna@example.com"));
+        let code = code_for_app(&at, "a secret only the app knows").await;
+        let answer: serde_json::Value = exchange(&at, &code, "a secret only the app knows").await.json().await.unwrap();
+        assert_eq!(answer["account"]["email"], "anna@example.com");
+        let token = answer["token"].as_str().unwrap();
+
+        let http = reqwest::Client::new();
+        let saved = http
+            .post(format!("{at}/api/sync"))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "rev": 0, "tasks": [{ "id": 1, "title": "Call the bank" }] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(saved.status(), 200);
+        // The same account the web app shows: signed in there, the task is there.
+        let mut web = Browser::new(&at);
+        web.sign_in().await;
+        assert_eq!(web.titles().await, vec!["Call the bank"]);
+        let me: serde_json::Value = http.get(format!("{at}/api/me")).bearer_auth(token).send().await.unwrap().json().await.unwrap();
+        assert_eq!(me["account"]["email"], "anna@example.com");
+    }
+
+    #[tokio::test]
+    async fn a_code_is_worth_nothing_without_the_secret_and_is_never_a_token() {
+        let (at, google, _kept) = hosted(1).await;
+        google.says(person("1001", "anna@example.com"));
+        let code = code_for_app(&at, "the secret").await;
+        // Another app that claimed the link has the code and not the secret.
+        assert_eq!(exchange(&at, &code, "a guess").await.status(), 400);
+        assert_eq!(exchange(&at, "not a code", "the secret").await.status(), 400);
+        // A code is not a token.
+        let http = reqwest::Client::new();
+        let as_token = http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(&code).send().await.unwrap();
+        assert_eq!(as_token.status(), 401);
+        // And a token is not a code.
+        let answer: serde_json::Value = exchange(&at, &code, "the secret").await.json().await.unwrap();
+        let token = answer["token"].as_str().unwrap();
+        assert_eq!(exchange(&at, token, "the secret").await.status(), 400);
+        // A token signed by another server is refused.
+        let (other, other_google, _other_kept) = hosted(2).await;
+        other_google.says(person("1001", "anna@example.com"));
+        let theirs: serde_json::Value = exchange(&other, &code_for_app(&other, "s").await, "s").await.json().await.unwrap();
+        let refused = http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(theirs["token"].as_str().unwrap()).send().await.unwrap();
+        assert_eq!(refused.status(), 401);
+        // Something that is not a challenge never reaches a page.
+        assert_eq!(Browser::new(&at).get("/auth/google?app_challenge=%22%3E%3Cscript%3E").await.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn only_the_apps_are_answered_from_another_origin() {
+        let (at, _google, _kept) = hosted(1).await;
+        let http = reqwest::Client::new();
+        let ask = |origin: &'static str| {
+            http.request(reqwest::Method::OPTIONS, format!("{at}/api/sync"))
+                .header("origin", origin)
+                .header("access-control-request-method", "POST")
+                .header("access-control-request-headers", "authorization,content-type")
+                .send()
+        };
+        let app = ask("tauri://localhost").await.unwrap();
+        assert_eq!(app.headers().get("access-control-allow-origin").unwrap(), "tauri://localhost");
+        // Never with credentials: a call from another origin is answered on a token only.
+        assert!(app.headers().get("access-control-allow-credentials").is_none());
+        let site = ask("https://evil.example.com").await.unwrap();
+        assert!(site.headers().get("access-control-allow-origin").is_none());
     }
 }

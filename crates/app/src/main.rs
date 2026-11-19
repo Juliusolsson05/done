@@ -225,6 +225,19 @@ fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
     }
 }
 
+/// Opens a page in the person's own browser. Signing in to a hosted account
+/// starts there: Google does not show its sign-in page inside an app's window.
+#[tauri::command]
+fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    // Web pages only. The window asks for this, and it must not be a way to
+    // open files or other apps.
+    if !url.starts_with("https://") && !url.starts_with("http://localhost") && !url.starts_with("http://127.0.0.1") {
+        return Err("Only web pages can be opened.".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn restart(app: tauri::AppHandle) {
     app.restart();
@@ -271,10 +284,12 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, info, restart, focus_set])
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, info, restart, focus_set, open_in_browser])
         // Closing the window hides it and leaves done running, as Mac apps
         // do: a countdown in the menu bar must outlive its window. Cmd+Q quits.
         .on_window_event(|window, event| {
@@ -284,6 +299,18 @@ fn main() {
             }
         })
         .setup(|app| {
+            // A `done://` link is how the browser hands a finished sign-in
+            // back. The window does the rest, so the link is passed on as is.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        let _ = handle.emit("opened-link", url.to_string());
+                    }
+                    show_window(&handle);
+                });
+            }
             run_menu_bar(app.handle())?;
             // Development builds are not releases and must not replace themselves.
             if !cfg!(debug_assertions) {
