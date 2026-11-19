@@ -76,6 +76,7 @@ impl Config {
 pub struct Cloud {
     pub accounts: Arc<Accounts>,
     pub config: Arc<Config>,
+    pub operator: Arc<crate::pages::Operator>,
     pub http: reqwest::Client,
 }
 

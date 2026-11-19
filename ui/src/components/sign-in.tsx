@@ -27,7 +27,14 @@ function SignIn({ failed }: { failed: boolean }) {
           </p>
         )}
         <p className="text-xs text-muted-foreground">
-          done keeps your Google account's name, email address and picture to show who is signed in, and nothing else from Google.
+          done keeps your Google account's name, email address and picture to show who is signed in, and nothing else from Google.{' '}
+          <a href="/privacy" className="underline underline-offset-2">
+            Privacy
+          </a>{' '}
+          ·{' '}
+          <a href="/terms" className="underline underline-offset-2">
+            Terms
+          </a>
         </p>
       </div>
     </main>
