@@ -51,6 +51,10 @@ pub struct Task {
     /// itself. At most one task holds any given day.
     #[serde(default)]
     pub goal_day: Option<String>,
+    /// Set on a subtask: the task it is listed under. One level only, so the
+    /// task named here never has a parent of its own.
+    #[serde(default)]
+    pub parent_id: Option<i64>,
 }
 
 fn no_priority() -> i64 {
@@ -248,7 +252,10 @@ impl Store {
                priority INTEGER NOT NULL DEFAULT 4,
                status TEXT,
                done_day TEXT,
-               goal_day TEXT
+               goal_day TEXT,
+               -- ON DELETE CASCADE: a subtask is part of its task and means
+               -- nothing without it, unlike a task, which outlives its project.
+               parent_id INTEGER REFERENCES task(id) ON DELETE CASCADE
              );",
         )?;
         // Files made before the daily goal existed lack its column. CREATE
@@ -261,6 +268,17 @@ impl Store {
         if !has_goal {
             conn.execute("ALTER TABLE task ADD COLUMN goal_day TEXT", [])?;
         }
+        // The same for subtasks. SQLite allows adding a column that points at
+        // another row as long as it starts out empty, which this does.
+        let has_parent: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('task') WHERE name = 'parent_id'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_parent {
+            conn.execute("ALTER TABLE task ADD COLUMN parent_id INTEGER REFERENCES task(id) ON DELETE CASCADE", [])?;
+        }
+        conn.execute("CREATE INDEX IF NOT EXISTS task_parent ON task (parent_id)", [])?;
         // The time sheet. IF NOT EXISTS, so a tasks file made before it gains
         // the table the first time a newer version opens it.
         conn.execute_batch(
@@ -346,7 +364,9 @@ impl Store {
 
     /// Everything a window shows: all projects, every open task, and the tasks
     /// finished on `today` (the caller's local day), which the board's last
-    /// column lists. Older finished tasks stay in the file but are not sent.
+    /// column lists. Older finished tasks stay in the file but are not sent,
+    /// except the subtasks of an open task: a list being ticked off over
+    /// several days has to keep showing what was ticked.
     pub fn state(&self, today: &str) -> Result<State, Error> {
         if !is_day(today) {
             return Err(Error::Invalid("Today must be a day written YYYY-MM-DD.".into()));
@@ -358,8 +378,10 @@ impl Store {
             .query_map([], |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day
-             FROM task WHERE done_day IS NULL OR done_day = ?1 ORDER BY id",
+            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id
+             FROM task WHERE done_day IS NULL OR done_day = ?1
+                OR parent_id IN (SELECT id FROM task WHERE done_day IS NULL)
+             ORDER BY id",
         )?;
         let tasks = stmt
             .query_map([today], |r| {
@@ -376,6 +398,7 @@ impl Store {
                     done: done_day.is_some(),
                     done_day,
                     goal_day: r.get(9)?,
+                    parent_id: r.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -409,6 +432,10 @@ impl Store {
         if rev != change.rev {
             return Err(Error::Stale);
         }
+        // Checked when the change is committed rather than row by row: a task
+        // and its subtasks arrive together in whatever order the window listed
+        // them, and a subtask may be written before the task it belongs to.
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
         // Projects first: the tasks below may point at a project made in this
         // same change.
         for p in &change.projects {
@@ -426,13 +453,13 @@ impl Store {
                 tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2", params![day, t.id])?;
             }
             tx.execute(
-                "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(id) DO UPDATE SET title = excluded.title, notes = excluded.notes,
                    project_id = excluded.project_id, start = excluded.start, due = excluded.due,
                    priority = excluded.priority, status = excluded.status, done_day = excluded.done_day,
-                   goal_day = excluded.goal_day",
-                params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day],
+                   goal_day = excluded.goal_day, parent_id = excluded.parent_id",
+                params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day, t.parent_id],
             )?;
         }
         for id in &change.delete_tasks {
@@ -441,8 +468,28 @@ impl Store {
         for id in &change.delete_projects {
             tx.execute("DELETE FROM project WHERE id = ?1", [id])?;
         }
+        // One level only, checked on the result rather than on what was sent:
+        // the rule can be broken from either end (giving a subtask a subtask,
+        // or putting a task that has subtasks under another), and only one of
+        // the two rows need be in this change. A task that is its own parent
+        // is caught by the same test.
+        let nested: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM task c JOIN task p ON c.parent_id = p.id WHERE p.parent_id IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )?;
+        if nested > 0 {
+            return Err(Error::Invalid("A subtask cannot have subtasks of its own.".into()));
+        }
         tx.execute("UPDATE meta SET value = ?1 WHERE key = 'rev'", [rev + 1])?;
-        tx.commit()?;
+        // A subtask naming a task that does not exist is refused here, when
+        // the deferred check runs.
+        tx.commit().map_err(|e| match e {
+            rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+                Error::Invalid("A subtask has to belong to a task that exists.".into())
+            }
+            e => Error::Db(e),
+        })?;
         Ok(Synced { rev: rev + 1 })
     }
 }
@@ -468,7 +515,92 @@ mod tests {
             done: false,
             done_day: None,
             goal_day: None,
+            parent_id: None,
         }
+    }
+
+    fn subtask(id: i64, parent: i64, title: &str) -> Task {
+        Task { parent_id: Some(parent), ..task(id, title) }
+    }
+
+    fn done_on(mut t: Task, day: &str) -> Task {
+        t.done = true;
+        t.done_day = Some(day.into());
+        t
+    }
+
+    // Why state() sends more than open tasks: a list ticked off over several
+    // days must keep showing what was ticked, until the task itself is done.
+    #[test]
+    fn a_subtask_ticked_days_ago_stays_under_its_open_task() {
+        let s = store();
+        // Child first, as a window may list them: the check waits for the commit.
+        s.sync(Change { rev: 0, tasks: vec![done_on(subtask(2, 1, "Anna"), "2026-11-10"), subtask(3, 1, "Ben"), task(1, "Reply on WhatsApp")], ..Default::default() })
+            .unwrap();
+        let ids = |day: &str| s.state(day).unwrap().tasks.iter().map(|t| (t.id, t.done)).collect::<Vec<_>>();
+        assert_eq!(ids("2026-11-13"), vec![(1, false), (2, true), (3, false)]);
+        // The task is finished on the 13th; the day after, none of it is sent.
+        s.sync(Change { rev: 1, tasks: vec![done_on(task(1, "Reply on WhatsApp"), "2026-11-13"), done_on(subtask(3, 1, "Ben"), "2026-11-13")], ..Default::default() })
+            .unwrap();
+        assert!(s.state("2026-11-14").unwrap().tasks.is_empty());
+    }
+
+    #[test]
+    fn subtasks_go_one_level_deep_whichever_end_breaks_it() {
+        let s = store();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "Parent"), subtask(2, 1, "Child"), task(4, "Other")], ..Default::default() }).unwrap();
+        // A subtask under a subtask.
+        let deeper = s.sync(Change { rev: 1, tasks: vec![subtask(3, 2, "Grandchild")], ..Default::default() });
+        assert!(matches!(deeper, Err(Error::Invalid(_))));
+        // A task that has subtasks put under another task: only the parent's row is sent.
+        let moved = s.sync(Change { rev: 1, tasks: vec![subtask(1, 4, "Parent")], ..Default::default() });
+        assert!(matches!(moved, Err(Error::Invalid(_))));
+        let unknown = s.sync(Change { rev: 1, tasks: vec![subtask(5, 99, "Nobody's")], ..Default::default() });
+        assert!(matches!(unknown, Err(Error::Invalid(_))));
+        // Nothing of the three was kept, and the file is still usable.
+        let state = s.state("2026-11-13").unwrap();
+        assert_eq!((state.rev, state.tasks.len()), (1, 3));
+        assert_eq!(state.tasks[0].parent_id, None);
+    }
+
+    #[test]
+    fn deleting_a_task_deletes_its_subtasks() {
+        let s = store();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "Parent"), subtask(2, 1, "Child"), task(3, "Stays")], ..Default::default() }).unwrap();
+        s.sync(Change { rev: 1, delete_tasks: vec![1], ..Default::default() }).unwrap();
+        let left: Vec<i64> = s.state("2026-11-13").unwrap().tasks.iter().map(|t| t.id).collect();
+        assert_eq!(left, vec![3]);
+    }
+
+    // A tasks file as the released app made it, before subtasks existed.
+    #[test]
+    fn a_file_from_before_subtasks_gains_them_on_open() {
+        let dir = std::env::temp_dir().join(format!("done-subtasks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let old = Connection::open(&path).unwrap();
+            // The task table exactly as origin/main @ 1fc3741 creates it.
+            old.execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+                 INSERT INTO meta (key, value) VALUES ('rev', 4);
+                 CREATE TABLE project (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color INTEGER NOT NULL DEFAULT 0);
+                 CREATE TABLE task (
+                   id INTEGER PRIMARY KEY, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+                   project_id INTEGER REFERENCES project(id) ON DELETE SET NULL,
+                   start TEXT, due TEXT, priority INTEGER NOT NULL DEFAULT 4, status TEXT, done_day TEXT, goal_day TEXT
+                 );
+                 INSERT INTO task (id, title) VALUES (1, 'Already here');",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        s.sync(Change { rev: 4, tasks: vec![subtask(2, 1, "New under old")], ..Default::default() }).unwrap();
+        let state = s.state("2026-11-13").unwrap();
+        assert_eq!(state.tasks.iter().map(|t| (t.id, t.parent_id)).collect::<Vec<_>>(), vec![(1, None), (2, Some(1))]);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
