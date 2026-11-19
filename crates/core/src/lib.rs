@@ -297,6 +297,16 @@ impl Store {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
+    /// Writes a complete copy of the tasks file to `to`, which must not exist
+    /// yet. Not a plain file copy on purpose: the newest changes sit in the
+    /// write-ahead log beside the file, and a copy of the file alone could
+    /// miss them. This is what a hosted server stores after each change.
+    pub fn snapshot(&self, to: &Path) -> Result<(), Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("VACUUM INTO ?1", [to.to_string_lossy()])?;
+        Ok(())
+    }
+
     /// Writes down a block that has ended. Apart from `sync` and its revision
     /// on purpose: entries are only ever added, so there is nothing to
     /// conflict over, and the end of a block must never be lost because
@@ -746,5 +756,22 @@ mod tests {
         let e = s.record(block(None, "Focus", "2026-11-16")).unwrap();
         s.delete_entry(e.id).unwrap();
         assert!(s.entries("2026-11-16").unwrap().is_empty());
+    }
+
+    // Why a snapshot and not a copy of the file: the change below is still in
+    // the write-ahead log when the copy is taken.
+    #[test]
+    fn a_snapshot_holds_the_change_made_just_before_it() {
+        let dir = std::env::temp_dir().join(format!("done-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = Store::open(&dir.join("live.db")).unwrap();
+        s.sync(Change { rev: 0, tasks: vec![task(1, "Call the bank")], ..Default::default() }).unwrap();
+        let copy = dir.join("copy.db");
+        s.snapshot(&copy).unwrap();
+        let again = Store::open(&copy).unwrap().state("2026-11-18").unwrap();
+        assert_eq!(again.rev, 1);
+        assert_eq!(again.tasks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), vec!["Call the bank"]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
