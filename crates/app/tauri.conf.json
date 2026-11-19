@@ -50,6 +50,21 @@
       "endpoints": [
         "https://github.com/Juliusolsson05/done/releases/latest/download/latest.json"
       ]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "done"
+        ]
+      },
+      "mobile": [
+        {
+          "scheme": [
+            "done"
+          ],
+          "appLink": false
+        }
+      ]
     }
   }
 }

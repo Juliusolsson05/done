@@ -3,6 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
+import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import type { Data } from '@/lib/tasks'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
@@ -31,11 +32,25 @@ const tauri = window.__TAURI__
 
 export const isDesktop = tauri !== undefined
 
+// An app that has signed in to a hosted account. Looked at once, when the
+// window loads: signing in or out reloads the window, so it cannot go stale.
+const hosted = tauri ? cloudSession() : null
+// The tasks file on this machine, through the app's own commands. An app
+// that has signed in uses the hosted server instead, like a browser does.
+const local = tauri !== undefined && hosted === null ? tauri : undefined
+// Where /api is: this same server for a browser, the hosted one for an app.
+const at = hosted ? CLOUD_URL : ''
+const who: Record<string, string> = hosted ? { authorization: `Bearer ${hosted.token}` } : {}
+const get = (path: string) => fetch(at + path, { headers: who })
+
 async function answer<T>(response: Response): Promise<T> {
   // The hosted server no longer knows who this is: the session ran out, or
   // was ended in another tab. Starting over shows the sign-in screen, and
   // nothing typed since is lost that could have been saved anyway.
   if (response.status === 401) {
+    // For an app, the token is what stopped working. Without it the app is
+    // back on its local file.
+    if (hosted) forgetCloudSession()
     location.reload()
     throw new Error('signed out')
   }
@@ -47,38 +62,60 @@ async function answer<T>(response: Response): Promise<T> {
 // Asked before anything else is loaded. The desktop app has no accounts and
 // does not need to ask.
 export const loadMe = async (): Promise<Me> => {
+  // An app knows its account from when it signed in. If the token has since
+  // stopped working, the first load of tasks finds that out.
+  if (hosted) return { mode: 'cloud', account: hosted.account }
   if (tauri) return { mode: 'local' }
   const response = await fetch('/api/me')
   return readMe(response.status, await response.json().catch(() => null))
 }
 
 export const loadState = (today: Day): Promise<Data> =>
-  tauri ? tauri.core.invoke<Data>('state', { today }) : fetch('/api/state?today=' + today).then((r) => answer<Data>(r))
+  local ? local.core.invoke<Data>('state', { today }) : get('/api/state?today=' + today).then((r) => answer<Data>(r))
 
 export const sync = (change: Change): Promise<{ rev: number }> =>
-  tauri
-    ? tauri.core.invoke<{ rev: number }>('sync', { change })
-    : fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(change) }).then((r) =>
-        answer<{ rev: number }>(r),
-      )
+  local ? local.core.invoke<{ rev: number }>('sync', { change }) : post<{ rev: number }>('/api/sync', change)
 
 // The time sheet. Written through calls of its own rather than `sync`: a
 // row is only ever added, so it never has to wait for the tasks file's
 // revision, and the end of a block is never lost to another window's save.
-const post = <T>(url: string, body: unknown): Promise<T> =>
-  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => answer<T>(r))
+function post<T>(path: string, body: unknown): Promise<T> {
+  return fetch(at + path, { method: 'POST', headers: { 'content-type': 'application/json', ...who }, body: JSON.stringify(body) }).then((r) => answer<T>(r))
+}
 
 export const loadEntries = (day: Day): Promise<Entry[]> =>
-  tauri ? tauri.core.invoke<Entry[]>('entries', { day }) : fetch('/api/entries?day=' + day).then((r) => answer<Entry[]>(r))
+  local ? local.core.invoke<Entry[]>('entries', { day }) : get('/api/entries?day=' + day).then((r) => answer<Entry[]>(r))
 export const recordEntry = (entry: NewEntry): Promise<Entry> =>
-  tauri ? tauri.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
+  local ? local.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
 export const deleteEntry = (id: number): Promise<void> =>
-  tauri ? tauri.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
+  local ? local.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
 
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
-export const signOut = (): Promise<void> => post<unknown>('/auth/signout', {}).then(() => location.reload())
-export const deleteAccount = (): Promise<void> => post<unknown>('/api/account/delete', {}).then(() => location.reload())
+export const signOut = async (): Promise<void> => {
+  // An app's session is its token: forgetting it is signing out. A browser's
+  // is a cookie only the server can take back.
+  if (hosted) forgetCloudSession()
+  else await post<unknown>('/auth/signout', {})
+  location.reload()
+}
+export const deleteAccount = async (): Promise<void> => {
+  await post<unknown>('/api/account/delete', {})
+  if (hosted) forgetCloudSession()
+  location.reload()
+}
+
+// Signing in from an app. It can be offered where the app was built knowing
+// a hosted server and is not signed in yet.
+export const canSignIn = tauri !== undefined && CLOUD_URL !== null && hosted === null
+export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url }))
+// The browser hands a finished sign-in back as a link. Returns how to stop listening.
+export const onSignedIn = (done: () => void): (() => void) => {
+  const listening = tauri?.event.listen<string>('opened-link', (event) => {
+    void finishSignIn(event.payload).then((ok) => ok && done())
+  })
+  return () => void listening?.then((stop) => stop())
+}
 
 // In a browser there is no app to ask, so the usual install path stands in.
 export const BROWSER_INFO: Info = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null }

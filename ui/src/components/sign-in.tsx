@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { loadMe } from '@/lib/backend'
+import { loadMe, onSignedIn } from '@/lib/backend'
 import type { Account, Me } from '@/lib/me'
 
 // The signed-in account, or null where there are no accounts (the desktop
@@ -42,6 +42,9 @@ export function Gate({ children }: { children: ReactNode }) {
     // If the question cannot be asked at all the app is shown anyway, and
     // says what is wrong in its own words when its first load fails.
     loadMe().then(setMe, () => setMe({ mode: 'local' }))
+    // In an app: the browser has handed back a finished sign-in. Starting
+    // over is the simplest way for every part to see the account's tasks.
+    return onSignedIn(() => location.reload())
   }, [])
   if (me === null) return null
   if (me.mode === 'cloud' && me.account === null) {

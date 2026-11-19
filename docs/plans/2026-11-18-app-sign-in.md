@@ -2,7 +2,7 @@
 
 Fixes #17.
 Branch `feat/app-signin` · Worktree `../done-wt/app-signin` · Base `origin/main` @ 972dc75 (2026-11-18)
-Status: plan only. Size: standard plan.
+Status: implemented, PR open. Size: standard plan.
 
 ## Outcome
 
@@ -67,3 +67,14 @@ UNCONFIRMED: all six are defaults chosen while the owner was away.
 ## Out of scope
 
 The Keychain, offline edits while signed in, moving local tasks into an account, the MCP server against an account.
+
+## Execution notes
+
+- Plan vs built: all six decisions MATCH.
+- Ruling: the app has one new command, `open_in_browser`, where the plan said none. Opening the browser from the interface would need the plugin's script and a permission for it; one command that only opens web pages is smaller and says what it allows. The link coming back is passed to the window as an `opened-link` event.
+- Ruling: after Google, the browser is shown a page with an "Open done" button that also tries the link by itself, not a bare redirect. A browser does not follow a redirect to an app's own kind of link without asking, and some never do.
+- Ruling: signing in or out reloads the window. Which way tasks are reached is decided once when the window loads, so no part of the interface can be left looking at the other set of tasks.
+- Ruling: the release workflow reads the server's address from the repository variable `DONE_CLOUD_URL`. Until it is set, released apps have no sign-in.
+- Verified: `npm run typecheck`, 399 interface tests, `npm run build`; `cargo test -p done-core -p done-mcp -p done-server` (server 16); `cargo check -p done-app`. Fail-first: dropping the check of the secret fails `a_code_is_worth_nothing_without_the_secret_and_is_never_a_token`.
+- Not run here: the round trip through real Google, and the `done://` link reaching a built app. Both need the Google sign-in client, which does not exist yet; they are checked when the hosted service is first deployed.
+- Not done: the `pr-review` round by other agents.
