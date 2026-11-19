@@ -2,7 +2,7 @@
 
 Fixes #21.
 Branch `feat/privacy-terms` · Worktree `../done-wt/pages` · Base `origin/main` @ 2ff894d (2026-11-18)
-Status: plan only. Size: small plan.
+Status: implemented, PR open. Size: small plan.
 
 ## Outcome
 
@@ -24,3 +24,10 @@ Both pages answer without a session and name the operator from the settings; the
 ## Verification
 
 `cargo test -p done-server`, the interface suite, and the two pages read in a browser.
+
+## Execution notes
+
+- Plan vs built: all four decisions MATCH.
+- Verified: `cargo test -p done-server` (17, one new: both pages answer without a session, name the operator with its markup made harmless, leave no placeholder, and the local server answers neither), `npm run typecheck`, 399 interface tests, `npm run build`.
+- Not done: the wording has not been read by the owner or by a lawyer. It must be before the service is opened to the public.
+- Not done: the `pr-review` round by other agents.

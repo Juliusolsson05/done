@@ -8,6 +8,7 @@
 
 mod accounts;
 mod auth;
+mod pages;
 
 use axum::{
     extract::{Query, Request, State},
@@ -146,6 +147,8 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/", get(|| async { Html(UI) }))
         // For the host to ask whether the server is up. Says nothing else.
         .route("/healthz", get(|| async { "ok" }))
+        .route("/privacy", get(pages::privacy))
+        .route("/terms", get(pages::terms))
         .route("/auth/google", get(auth::start))
         .route("/auth/google/callback", get(auth::back))
         .route("/auth/signout", post(auth::sign_out))
@@ -184,7 +187,8 @@ async fn main() {
             std::process::exit(2);
         }
         let accounts = Accounts::new(Files::from_setting(kept.trim()), std::env::temp_dir().join("done-accounts"));
-        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), http: reqwest::Client::new() };
+        let operator = Arc::new(pages::Operator::from_env());
+        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), operator, http: reqwest::Client::new() };
         // PORT is what a container host sets. Every address, not only this
         // machine: here, being reachable is the point, and the session is the guard.
         let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
@@ -262,7 +266,8 @@ mod tests {
             token_url: format!("{google_at}/token"),
         };
         let accounts = Accounts::new(Files::Folder(kept.path().join("kept")), kept.path().join("work"));
-        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), http: reqwest::Client::new() };
+        let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
+        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), operator, http: reqwest::Client::new() };
         tokio::spawn(async move { axum::serve(listener, cloud(state)).await.unwrap() });
         (at, google, kept)
     }
@@ -541,5 +546,25 @@ mod tests {
         assert!(app.headers().get("access-control-allow-credentials").is_none());
         let site = ask("https://evil.example.com").await.unwrap();
         assert!(site.headers().get("access-control-allow-origin").is_none());
+    }
+
+    #[tokio::test]
+    async fn the_privacy_and_terms_pages_are_open_to_everyone_and_name_who_runs_the_server() {
+        let (at, _google, _kept) = hosted(1).await;
+        let http = reqwest::Client::new();
+        for path in ["/privacy", "/terms"] {
+            let page = http.get(format!("{at}{path}")).send().await.unwrap();
+            assert_eq!(page.status(), 200, "{path}");
+            let text = page.text().await.unwrap();
+            // The operator's name is a setting and goes into a page: as text, never as markup.
+            assert!(text.contains("Anna &amp; &lt;Co&gt;"), "{path}");
+            assert!(!text.contains("<Co>"), "{path}");
+            assert!(text.contains("mailto:anna@example.com"), "{path}");
+            assert!(!text.contains("WHO"), "{path}: a placeholder was left in");
+        }
+        // A server on this Mac has no accounts and keeps nothing about anyone.
+        let dir = tempfile::tempdir().unwrap();
+        let local_at = serve(local(Arc::new(Store::open(&dir.path().join("done.db")).unwrap()))).await;
+        assert_eq!(http.get(format!("{local_at}/privacy")).send().await.unwrap().status(), 404);
     }
 }

@@ -76,6 +76,7 @@ docker run -p 8080:8080 \
 - `DONE_PUBLIC_URL` is where people reach it. In the Google Cloud console, the sign-in client's redirect address is that plus `/auth/google/callback`.
 - `DONE_ACCOUNTS` is where the account files are kept: a folder, or `gs://bucket` for Google Cloud Storage (the server then uses the identity it runs as; there is no key to hand it).
 - `DONE_SESSION_KEY` signs the sign-in cookie. Changing it signs everyone out.
+- `DONE_OPERATOR` and `DONE_CONTACT` (optional) are who runs your copy and how to reach them. They are shown on the `/privacy` and `/terms` pages the server answers. Read both pages before opening your copy to others: they describe what the code does, and the terms are a starting point, not legal advice.
 
 Deleting an account in Settings deletes its file.
 
