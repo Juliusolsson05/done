@@ -12,7 +12,8 @@ import { PriorityDot } from '@/components/marks'
 import { colorStyle, useApp } from '@/lib/app-context'
 import { addDays, nextWeekday, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
-import { COLOR_COUNT, colorIndex, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
+import { expand } from '@/lib/expanded'
+import { COLOR_COUNT, colorIndex, isSubtask, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 export type MenuTarget =
@@ -58,6 +59,20 @@ function TaskMenu({ task }: { task: Task }) {
       </>
     )
   }
+  // A subtask is a line to tick off: it has no date, priority or project of
+  // its own to choose here, and cannot be the day's goal.
+  if (isSubtask(task)) {
+    return (
+      <>
+        <ContextMenuItem onSelect={() => edit(task.id)}>Edit subtask</ContextMenuItem>
+        <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onSelect={() => removeTask(task.id)}>
+          Delete subtask
+        </ContextMenuItem>
+      </>
+    )
+  }
   const due = (label: string, day: Day) => (
     <ContextMenuCheckboxItem
       checked={task.due === day && !task.start}
@@ -75,6 +90,8 @@ function TaskMenu({ task }: { task: Task }) {
   return (
     <>
       <ContextMenuItem onSelect={() => edit(task.id)}>Edit task</ContextMenuItem>
+      {/* Opens the list under the task, where the field to add one is. */}
+      <ContextMenuItem onSelect={() => expand(task.id)}>Add subtask</ContextMenuItem>
       <ContextMenuItem onSelect={() => focusOn(task.id)}>Focus on this</ContextMenuItem>
       <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
       {task.goalDay === TODAY ? (

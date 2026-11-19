@@ -21,6 +21,8 @@ export interface Task {
   done?: boolean
   doneDay?: Day | null
   goalDay?: Day | null
+  // Set on a subtask: the task it is listed under. One level only.
+  parentId?: number | null
 }
 
 export interface Data {
@@ -37,7 +39,20 @@ export type View =
 export const PRIORITY_NAME: Record<number, string> = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }
 
 export const byPriority = (a: Task, b: Task): number => a.priority - b.priority || a.id - b.id
-export const openTasks = (tasks: Task[]): Task[] => tasks.filter((t) => !t.done)
+// Subtasks are left out here, and every list, count, board column, timeline
+// row and focus picker is built from this: a subtask is only ever shown under
+// its task, so it must not also turn up on its own anywhere.
+export const isSubtask = (task: Task): boolean => task.parentId != null
+export const openTasks = (tasks: Task[]): Task[] => tasks.filter((t) => !t.done && !isSubtask(t))
+
+// A task's subtasks, in the order they were added, done ones included: a
+// list being ticked off keeps showing what was ticked.
+export const subtasksOf = (tasks: Task[], id: number): Task[] => tasks.filter((t) => t.parentId === id).sort((a, b) => a.id - b.id)
+// Null for a task with no subtasks, so a row can tell "none" from "0 of 3".
+export function progress(tasks: Task[], id: number): { done: number; total: number } | null {
+  const under = tasks.filter((t) => t.parentId === id)
+  return under.length ? { done: under.filter((t) => t.done).length, total: under.length } : null
+}
 export const projectName = (projects: Project[], id: number | null): string => projects.find((p) => p.id === id)?.name ?? ''
 
 // Each project has a colour, used wherever its tasks show up. The eight
@@ -132,7 +147,7 @@ export function lanes(all: Task[], today: Day): Record<LaneKey, Task[]> {
     todo: open.filter((t) => t.status !== 'doing').sort(order),
     doing: open.filter((t) => t.status === 'doing').sort(order),
     // Only today's, so the column is a record of the day and empties overnight.
-    done: all.filter((t) => t.done && t.doneDay === today),
+    done: all.filter((t) => t.done && t.doneDay === today && !isSubtask(t)),
   }
 }
 
@@ -170,6 +185,17 @@ export function addTask(data: Data, fields: Pick<Task, 'title' | 'due' | 'priori
   return { ...data, nextId: data.nextId + 1, tasks: [...data.tasks, task] }
 }
 
+// A subtask starts in its task's project. Nothing reads a subtask's project
+// afterwards (it is only ever shown under its task), so moving the task does
+// not need to move them.
+export function addSubtask(data: Data, parentId: number, title: string): Data {
+  const parent = data.tasks.find((t) => t.id === parentId)
+  // One level only: nothing is added under a subtask or a task that is gone.
+  if (!parent || isSubtask(parent)) return data
+  const task: Task = { id: data.nextId, title, notes: '', start: null, due: null, priority: 4, projectId: parent.projectId, parentId }
+  return { ...data, nextId: data.nextId + 1, tasks: [...data.tasks, task] }
+}
+
 // Naming another task as today's goal moves the title.
 export function setGoal(data: Data, id: number, today: Day): Data {
   return {
@@ -184,10 +210,23 @@ export function setGoal(data: Data, id: number, today: Day): Data {
 
 // Finishing and reopening go through these two, whichever view it happens in.
 // doneDay is what puts a task in the board's "Done today" column.
-export const markDone = (data: Data, id: number, today: Day): Data =>
-  patch(data, id, (t) => (t.done ? t : { ...t, done: true, doneDay: today }))
-export const markOpen = (data: Data, id: number): Data =>
-  patch(data, id, (t) => (t.done ? { ...t, done: false, doneDay: undefined } : t))
+// A finished task has nothing left open under it, so its open subtasks are
+// finished with it. Reopening (Undo) brings back the ones finished on the
+// same day as the task, which are the ones it took with it; a subtask ticked
+// on an earlier day was ticked by hand and stays ticked.
+export function markDone(data: Data, id: number, today: Day): Data {
+  const finish = (t: Task): Task => (t.done ? t : { ...t, done: true, doneDay: today })
+  return { ...data, tasks: data.tasks.map((t) => (t.id === id || t.parentId === id ? finish(t) : t)) }
+}
+export function markOpen(data: Data, id: number): Data {
+  const task = data.tasks.find((t) => t.id === id)
+  if (!task?.done) return data
+  const reopen = (t: Task): Task => ({ ...t, done: false, doneDay: undefined })
+  return {
+    ...data,
+    tasks: data.tasks.map((t) => (t.id === id || (t.parentId === id && t.done && t.doneDay === task.doneDay) ? reopen(t) : t)),
+  }
+}
 
 // A task with only a start date is simply due that day; a start on or after
 // the due date means a one-day task.
@@ -218,12 +257,16 @@ export function dragBar(task: Task, mode: DragMode, days: number): { start: Day 
   return { start: start === due ? null : start, due }
 }
 
+// A task goes with its subtasks: the file deletes them with it, so the
+// window must too, or it would keep showing rows that no longer exist.
 export function deleteTask(data: Data, id: number): { data: Data; undo: (d: Data) => Data } {
-  const index = data.tasks.findIndex((t) => t.id === id)
-  const task = data.tasks[index]
+  const gone = (t: Task) => t.id === id || t.parentId === id
+  // Where each one was, lowest first, so putting them back one at a time
+  // lands every one at its old position.
+  const removed = data.tasks.flatMap((task, index) => (gone(task) ? [{ task, index }] : []))
   return {
-    data: { ...data, tasks: data.tasks.filter((t) => t.id !== id) },
-    undo: (d) => ({ ...d, tasks: d.tasks.toSpliced(index, 0, task) }),
+    data: { ...data, tasks: data.tasks.filter((t) => !gone(t)) },
+    undo: (d) => ({ ...d, tasks: removed.reduce((tasks, { task, index }) => tasks.toSpliced(index, 0, task), d.tasks) }),
   }
 }
 

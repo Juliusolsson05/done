@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addProject,
+  addSubtask,
   clearsToday,
   counts,
   deleteProject,
@@ -10,6 +11,7 @@ import {
   markDone,
   markOpen,
   nextColor,
+  progress,
   sections,
   setGoal,
   tidyDates,
@@ -222,5 +224,60 @@ describe('new projects', () => {
   it('starts again once all eight colours are taken', () => {
     const eight = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: 'P', color: i }))
     expect(nextColor(eight)).toBe(0)
+  })
+})
+
+describe('subtasks', () => {
+  // Reply on WhatsApp (1) with three people under it; 2 was ticked two days ago.
+  const list = [
+    task(1, { title: 'Reply on WhatsApp', due: today, projectId: 5 }),
+    task(2, { parentId: 1, projectId: 5, done: true, doneDay: '2026-11-11' }),
+    task(3, { parentId: 1, projectId: 5, due: today }),
+    task(4, { parentId: 1, projectId: 5, status: 'doing' }),
+    task(9),
+  ]
+
+  it('are shown under their task and nowhere on their own', () => {
+    const projects = [{ id: 5, name: 'Catch up' }]
+    expect(ids(sections({ kind: 'today' }, list, today).flatMap((s) => s.tasks))).toEqual([1])
+    expect(ids(sections({ kind: 'project', id: 5 }, list, today).flatMap((s) => s.tasks))).toEqual([1])
+    expect(counts(list, today).today).toBe(1)
+    expect(counts(list, today).project(5)).toBe(1)
+    const board = lanes([...list, task(8, { parentId: 9, done: true, doneDay: today })], today)
+    expect([ids(board.todo), ids(board.doing), ids(board.done)]).toEqual([[1, 9], [], []])
+    expect(timelineGroups(projects, list).flatMap((g) => ids(g.tasks))).toEqual([9, 1])
+    // Finishing the task is what clears Today, not its last subtask.
+    expect(clearsToday(list, 1, today)).toBe(true)
+    expect(progress(list, 1)).toEqual({ done: 1, total: 3 })
+    expect(progress(list, 9)).toBeNull()
+  })
+
+  it('are added to a task but not to a subtask', () => {
+    const added = addSubtask(data(list), 1, 'Dana')
+    expect(added.tasks.at(-1)).toMatchObject({ id: 100, title: 'Dana', parentId: 1, projectId: 5 })
+    expect(added.nextId).toBe(101)
+    expect(addSubtask(data(list), 3, 'Too deep').tasks).toHaveLength(list.length)
+  })
+
+  it('are finished with their task, and Undo reopens only the ones it took', () => {
+    const done = markDone(data(list), 1, today)
+    expect(done.tasks.filter((t) => t.done).map((t) => [t.id, t.doneDay])).toEqual([
+      [1, today],
+      [2, '2026-11-11'],
+      [3, today],
+      [4, today],
+    ])
+    // 2 was ticked by hand two days earlier and stays ticked.
+    expect(ids(markOpen(done, 1).tasks.filter((t) => t.done))).toEqual([2])
+    // Ticking one subtask leaves the task and the others alone.
+    expect(ids(markDone(data(list), 3, today).tasks.filter((t) => t.done))).toEqual([2, 3])
+  })
+
+  it('are deleted with their task and all come back, in place, on Undo', () => {
+    const removed = deleteTask(data(list), 1)
+    expect(ids(removed.data.tasks)).toEqual([9])
+    // A task added while the toast was up does not shift what is restored.
+    const later = { ...removed.data, tasks: [...removed.data.tasks, task(10)] }
+    expect(ids(removed.undo(later).tasks)).toEqual([1, 2, 3, 4, 9, 10])
   })
 })

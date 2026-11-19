@@ -53,7 +53,7 @@ fn handle(store: &Store, message: &Value) -> Option<Value> {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "done", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 1 is the most urgent and 4 means none. A task with no project is in the Inbox.",
+                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 1 is the most urgent and 4 means none. A task with no project is in the Inbox. A task can have subtasks, one level deep: a list to tick off under it. A subtask has its own id and is changed, completed and deleted like any task.",
             })
         }
         "ping" => json!({}),
@@ -87,19 +87,25 @@ fn tools() -> Value {
     fields["goal"] = json!({ "type": "boolean", "description": "true makes this today's goal: the one thing that has to happen today. Only one task can be it." });
     let mut update = fields.clone();
     update["id"] = json!({ "type": "integer" });
+    let mut add = fields.clone();
+    add["parent"] = json!({ "type": "integer", "description": "The id of an open task: the new task becomes a subtask of it. Not together with subtasks." });
+    add["subtasks"] = json!({
+        "type": "array", "description": "Subtasks to add under the new task, in order.",
+        "items": { "type": "object", "properties": { "title": { "type": "string" }, "notes": { "type": "string" } }, "required": ["title"] },
+    });
     update["status"] = json!({ "type": "string", "enum": ["todo", "doing"], "description": "doing means in progress." });
     let id_only = json!({ "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] });
     json!([
-        { "name": "list_tasks", "description": "List open tasks, with today's date. Finished tasks are not listed.",
+        { "name": "list_tasks", "description": "List open tasks, with today's date. Finished tasks are not listed. Each task carries its subtasks, including the ones already done.",
           "inputSchema": { "type": "object", "properties": {
               "filter": { "type": "string", "enum": ["all", "today", "upcoming", "inbox"], "description": "today includes overdue tasks. Defaults to all." },
               "project": { "type": "string", "description": "Only tasks in this project." } } } },
-        { "name": "add_task", "description": "Add a task.",
-          "inputSchema": { "type": "object", "properties": fields, "required": ["title"] } },
+        { "name": "add_task", "description": "Add a task, optionally with subtasks, or add one subtask to an existing task.",
+          "inputSchema": { "type": "object", "properties": add, "required": ["title"] } },
         { "name": "update_task", "description": "Change a task. Only the fields given are changed.",
           "inputSchema": { "type": "object", "properties": update, "required": ["id"] } },
-        { "name": "complete_task", "description": "Mark a task as finished.", "inputSchema": id_only },
-        { "name": "delete_task", "description": "Delete a task for good. Prefer complete_task for work that was done.", "inputSchema": id_only },
+        { "name": "complete_task", "description": "Mark a task or a subtask as finished. Finishing a task finishes its open subtasks.", "inputSchema": id_only },
+        { "name": "delete_task", "description": "Delete a task for good, with its subtasks. Prefer complete_task for work that was done.", "inputSchema": id_only },
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
@@ -113,7 +119,19 @@ fn describe(task: &Task, projects: &[Project]) -> Value {
         "start": task.start, "due": task.due, "priority": task.priority,
         "status": task.status.as_deref().unwrap_or("todo"),
         "goalDay": task.goal_day,
+        "parent": task.parent_id,
     })
+}
+
+/// A task as list_tasks gives it: with the subtasks under it, done or not.
+fn describe_with_subtasks(task: &Task, state: &State) -> Value {
+    let mut said = describe(task, &state.projects);
+    let subtasks: Vec<Value> = state.tasks.iter()
+        .filter(|t| t.parent_id == Some(task.id))
+        .map(|t| json!({ "id": t.id, "title": t.title, "notes": t.notes, "done": t.done }))
+        .collect();
+    said["subtasks"] = json!(subtasks);
+    said
 }
 
 fn project_named(state: &State, name: &str) -> Result<i64, String> {
@@ -197,7 +215,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             };
             let filter = args.get("filter").and_then(Value::as_str).unwrap_or("all");
             let tasks: Vec<Value> = state.tasks.iter()
-                .filter(|t| !t.done)
+                // Subtasks are listed under their task, never on their own.
+                .filter(|t| !t.done && t.parent_id.is_none())
                 .filter(|t| project.is_none() || t.project_id == project)
                 .filter(|t| match filter {
                     // Days written YYYY-MM-DD compare correctly as text.
@@ -206,7 +225,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
                     "inbox" => t.project_id.is_none(),
                     _ => true,
                 })
-                .map(|t| describe(t, &state.projects))
+                .map(|t| describe_with_subtasks(t, &state))
                 .collect();
             Ok(json!({ "today": today, "todaysGoal": goal, "tasks": tasks }))
         }
@@ -214,7 +233,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let today = store.today().map_err(|e| e.to_string())?;
             let state = store.state(&today).map_err(|e| e.to_string())?;
             let projects: Vec<Value> = state.projects.iter().map(|p| {
-                let open = state.tasks.iter().filter(|t| !t.done && t.project_id == Some(p.id)).count();
+                let open = state.tasks.iter().filter(|t| !t.done && t.parent_id.is_none() && t.project_id == Some(p.id)).count();
                 json!({ "name": p.name, "openTasks": open })
             }).collect();
             Ok(json!({ "projects": projects }))
@@ -222,11 +241,43 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         "add_task" => change(store, |state, today| {
             let mut task = Task {
                 id: state.next_id, title: String::new(), notes: String::new(), project_id: None,
-                start: None, due: None, priority: 4, status: None, done: false, done_day: None, goal_day: None,
+                start: None, due: None, priority: 4, status: None, done: false, done_day: None, goal_day: None, parent_id: None,
             };
             apply(&mut task, args, state, today)?;
-            let said = describe(&task, &state.projects);
-            Ok((Change { tasks: vec![task], ..Default::default() }, said))
+            let listed = args.get("subtasks").and_then(Value::as_array).cloned().unwrap_or_default();
+            if let Some(parent) = args.get("parent").and_then(Value::as_i64) {
+                if !listed.is_empty() {
+                    return Err("A subtask cannot have subtasks of its own. Give parent or subtasks, not both.".into());
+                }
+                let parent = state.tasks.iter().find(|t| t.id == parent && !t.done)
+                    .ok_or_else(|| format!("There is no open task with id {parent}."))?;
+                if parent.parent_id.is_some() {
+                    return Err(format!("Task {} is itself a subtask, and subtasks go one level deep.", parent.id));
+                }
+                task.parent_id = Some(parent.id);
+                // A subtask lives where its task lives, unless told otherwise.
+                if args.get("project").is_none() {
+                    task.project_id = parent.project_id;
+                }
+            }
+            let mut tasks = vec![task.clone()];
+            for (i, sub) in listed.iter().enumerate() {
+                tasks.push(Task {
+                    // The ids straight after the task's own: nothing else is
+                    // handed out in this change.
+                    id: task.id + 1 + i as i64,
+                    title: sub.get("title").and_then(Value::as_str).unwrap_or("").to_string(),
+                    notes: sub.get("notes").and_then(Value::as_str).unwrap_or("").to_string(),
+                    project_id: task.project_id,
+                    start: None, due: None, priority: 4, status: None, done: false, done_day: None, goal_day: None,
+                    parent_id: Some(task.id),
+                });
+            }
+            let mut said = describe(&task, &state.projects);
+            if !listed.is_empty() {
+                said["subtasks"] = tasks[1..].iter().map(|t| json!({ "id": t.id, "title": t.title, "notes": t.notes, "done": false })).collect();
+            }
+            Ok((Change { tasks, ..Default::default() }, said))
         }),
         "update_task" => change(store, |state, today| {
             let mut task = open_task(state, args)?;
@@ -239,7 +290,18 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             task.done = true;
             task.done_day = Some(today.to_string());
             let said = json!({ "completed": task.title });
-            Ok((Change { tasks: vec![task], ..Default::default() }, said))
+            // As in the app: a finished task has nothing left open under it.
+            let mut tasks: Vec<Task> = state.tasks.iter()
+                .filter(|t| t.parent_id == Some(task.id) && !t.done)
+                .cloned()
+                .map(|mut t| {
+                    t.done = true;
+                    t.done_day = Some(today.to_string());
+                    t
+                })
+                .collect();
+            tasks.push(task);
+            Ok((Change { tasks, ..Default::default() }, said))
         }),
         "delete_task" => change(store, |state, _| {
             let task = open_task(state, args)?;
@@ -322,6 +384,39 @@ mod tests {
         let today = store.today().unwrap();
         let stored = store.state(&today).unwrap();
         assert!(stored.tasks.iter().any(|t| t.id == id && t.done && t.done_day.as_deref() == Some(today.as_str())));
+    }
+
+    #[test]
+    fn a_task_added_with_subtasks_is_listed_with_them_until_it_is_finished() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[
+            tool(1, "add_task", json!({ "title": "Reply on WhatsApp", "subtasks": [
+                { "title": "Anna", "notes": "Asked about Thursday" }, { "title": "Ben" } ] })),
+        ]);
+        let added = said(&replies[0]);
+        let (parent, anna) = (added["id"].as_i64().unwrap(), added["subtasks"][0]["id"].as_i64().unwrap());
+
+        let replies = talk(&store, &[
+            tool(2, "add_task", json!({ "title": "Cleo", "parent": parent })),
+            tool(3, "complete_task", json!({ "id": anna })),
+            tool(4, "list_tasks", json!({})),
+            // One level only, and said in a way an agent can act on.
+            tool(5, "add_task", json!({ "title": "Too deep", "parent": anna + 1 })),
+            tool(6, "complete_task", json!({ "id": parent })),
+            tool(7, "list_tasks", json!({})),
+        ]);
+        let listed = said(&replies[2]);
+        // The subtasks are under their task and nowhere else.
+        assert_eq!(listed["tasks"].as_array().unwrap().len(), 1);
+        let under: Vec<(&str, bool)> = listed["tasks"][0]["subtasks"].as_array().unwrap().iter()
+            .map(|t| (t["title"].as_str().unwrap(), t["done"].as_bool().unwrap())).collect();
+        assert_eq!(under, vec![("Anna", true), ("Ben", false), ("Cleo", false)]);
+        assert_eq!(listed["tasks"][0]["subtasks"][0]["notes"], "Asked about Thursday");
+        assert_eq!(replies[3]["result"]["isError"], true);
+        // Finishing the task finished Ben and Cleo with it.
+        assert!(said(&replies[5])["tasks"].as_array().unwrap().is_empty());
+        let today = store.today().unwrap();
+        assert!(store.state(&today).unwrap().tasks.iter().all(|t| t.done));
     }
 
     #[test]

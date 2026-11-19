@@ -12,7 +12,7 @@ import { PriorityDot } from '@/components/marks'
 import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
-import { patchTask, PRIORITY_NAME, tidyDates, type Task } from '@/lib/tasks'
+import { isSubtask, patchTask, PRIORITY_NAME, tidyDates, type Task } from '@/lib/tasks'
 
 function EditorForm({ task }: { task: Task }) {
   const { data, update, closeAll, removeTask } = useApp()
@@ -77,19 +77,22 @@ function EditorForm({ task }: { task: Task }) {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <Select value={String(projectId ?? 'inbox')} onValueChange={(value) => setProjectId(value === 'inbox' ? null : Number(value))}>
-          <SelectTrigger size="sm" aria-label="Project">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inbox">Inbox</SelectItem>
-            {data.projects.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* A subtask is shown under its task wherever that is, so it has no project to choose. */}
+        {!isSubtask(task) && (
+          <Select value={String(projectId ?? 'inbox')} onValueChange={(value) => setProjectId(value === 'inbox' ? null : Number(value))}>
+            <SelectTrigger size="sm" aria-label="Project">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inbox">Inbox</SelectItem>
+              {data.projects.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <div className="ml-auto flex gap-2">
           <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => removeTask(task.id)}>
             Delete task

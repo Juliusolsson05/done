@@ -1,11 +1,14 @@
 import { useState } from 'react'
+import { ChevronRightIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Subtasks } from '@/components/subtasks'
 import { TaskEditor } from '@/components/task-editor'
 import { ProjectDot } from '@/components/marks'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
-import { projectName, type Task } from '@/lib/tasks'
+import { toggleExpanded, useExpanded } from '@/lib/expanded'
+import { progress, projectName, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // Finishing is shown before the row goes: the check fills and the title is
@@ -48,12 +51,15 @@ export function TaskCheck({ task, checked, onChange, className }: { task: Task; 
 export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) {
   const { data, ui, noticed, edit } = useApp()
   const [leaving, finish] = useFinish(task.id)
+  const open = useExpanded(task.id)
   if (ui.editing === task.id) return <TaskEditor task={task} />
+  const sub = progress(data.tasks, task.id)
 
   const view = ui.view.kind
   // The date is left out where the section heading already says it.
   const showDue = task.due !== null && view !== 'upcoming' && !(view === 'today' && task.due === TODAY)
   return (
+    <>
     <div
       data-task={task.id}
       className={cn(
@@ -80,6 +86,21 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         {task.notes && <span className="w-full truncate text-xs text-muted-foreground">{task.notes}</span>}
       </Button>
       <div className={cn('flex items-center gap-3 pl-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums', goal ? 'leading-7' : 'leading-5')}>
+        {/* Shown whenever there are subtasks, or the list is open to add the
+            first one: the count is also how the list is opened and closed. */}
+        {(sub || open) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={open}
+            aria-label={open ? 'Hide subtasks' : 'Show subtasks'}
+            onClick={() => toggleExpanded(task.id)}
+            className="h-5 gap-1 px-1.5 text-xs font-normal text-muted-foreground tabular-nums"
+          >
+            <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+            {sub ? `${sub.done}/${sub.total}` : 'Subtasks'}
+          </Button>
+        )}
         {task.goalDay === TODAY && view !== 'today' && <span className="font-medium text-primary">Today’s goal</span>}
         {task.status === 'doing' && <span>In progress</span>}
         {showDue && task.due && <span className={cn(task.due < TODAY && 'text-overdue')}>{describeDay(task.due, TODAY)}</span>}
@@ -91,5 +112,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         )}
       </div>
     </div>
+    {open && !leaving && <Subtasks parent={task} />}
+    </>
   )
 }
