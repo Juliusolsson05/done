@@ -3,6 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
+import { readMe, type Me } from '@/lib/me'
 import type { Data } from '@/lib/tasks'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
 
@@ -31,9 +32,24 @@ const tauri = window.__TAURI__
 export const isDesktop = tauri !== undefined
 
 async function answer<T>(response: Response): Promise<T> {
+  // The hosted server no longer knows who this is: the session ran out, or
+  // was ended in another tab. Starting over shows the sign-in screen, and
+  // nothing typed since is lost that could have been saved anyway.
+  if (response.status === 401) {
+    location.reload()
+    throw new Error('signed out')
+  }
   const data = (await response.json()) as T & { error?: string }
   if (!response.ok) throw new Error(data.error || 'failed')
   return data
+}
+
+// Asked before anything else is loaded. The desktop app has no accounts and
+// does not need to ask.
+export const loadMe = async (): Promise<Me> => {
+  if (tauri) return { mode: 'local' }
+  const response = await fetch('/api/me')
+  return readMe(response.status, await response.json().catch(() => null))
 }
 
 export const loadState = (today: Day): Promise<Data> =>
@@ -58,6 +74,11 @@ export const recordEntry = (entry: NewEntry): Promise<Entry> =>
   tauri ? tauri.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
 export const deleteEntry = (id: number): Promise<void> =>
   tauri ? tauri.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
+
+// Both are sent as JSON, like every call that changes something: another
+// site can make a browser post a form here, but not JSON.
+export const signOut = (): Promise<void> => post<unknown>('/auth/signout', {}).then(() => location.reload())
+export const deleteAccount = (): Promise<void> => post<unknown>('/api/account/delete', {}).then(() => location.reload())
 
 // In a browser there is no app to ask, so the usual install path stands in.
 export const BROWSER_INFO: Info = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null }

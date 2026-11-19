@@ -4,7 +4,8 @@ import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
-import { isDesktop, restart } from '@/lib/backend'
+import { useAccount } from '@/components/sign-in'
+import { deleteAccount, isDesktop, restart, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -52,24 +53,67 @@ function Sounds() {
   )
 }
 
+// Only where there are accounts: the hosted web app.
+function AccountPane() {
+  const account = useAccount()
+  const { say } = useApp()
+  // Deleting takes two clicks. A dialog would be the usual way, but this is
+  // the one place it would be used, and the second button says all it would.
+  const [sure, setSure] = useState(false)
+  if (!account) return null
+  const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  return (
+    <Pane title="Account">
+      <p className="text-muted-foreground">Signed in as {account.name ? `${account.name} (${account.email})` : account.email}.</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+        {sure ? (
+          <>
+            <Button variant="destructive" size="sm" onClick={remove}>
+              Delete every task and my account
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSure(false)}>
+              Keep it
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setSure(true)}>
+            Delete my account
+          </Button>
+        )}
+      </div>
+      {sure && <p className="text-sm text-muted-foreground">This removes all your tasks, projects and time sheet for good. It cannot be undone.</p>}
+    </Pane>
+  )
+}
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
+  const account = useAccount()
   const path = info.mcpCommand
   return (
     <div className="max-w-3xl">
       <ViewHeader title="Settings" />
       <div className="flex flex-col gap-8">
-        <Pane title="Connect an AI agent">
-          <p className="text-muted-foreground">
-            done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
-            here within a few seconds.
-          </p>
-          <Snippet label="Claude Code: run this once in a terminal" text={`claude mcp add done -- "${path}" mcp`} />
-          <Snippet
-            label="Other apps: add this to their MCP settings"
-            text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
-          />
-        </Pane>
+        <AccountPane />
+
+        {/* The built-in MCP server reads the tasks file on this Mac. A hosted
+            account's tasks are not in it, so the instructions would mislead. */}
+        {!account && (
+          <Pane title="Connect an AI agent">
+            <p className="text-muted-foreground">
+              done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
+              here within a few seconds.
+            </p>
+            <Snippet label="Claude Code: run this once in a terminal" text={`claude mcp add done -- "${path}" mcp`} />
+            <Snippet
+              label="Other apps: add this to their MCP settings"
+              text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
+            />
+          </Pane>
+        )}
 
         <Sounds />
 
