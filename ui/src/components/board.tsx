@@ -7,6 +7,7 @@ import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
 import { play } from '@/lib/sounds'
@@ -72,6 +73,8 @@ function BoardCard({ task, dragged, onDrag }: { task: Task; dragged: boolean; on
 
 export function Board() {
   const { data, dragging, update, complete } = useApp()
+  // A finger cannot drag a card here; the long-press menu moves it instead.
+  const isMobile = useIsMobile()
   const [card, setCard] = useState<number | null>(null)
   const [over, setOver] = useState<LaneKey | null>(null)
   const columns = lanes(data.tasks, TODAY)
@@ -95,7 +98,7 @@ export function Board() {
 
   return (
     <div>
-      <ViewHeader title="Board" sub="Drag a card between columns" />
+      <ViewHeader title="Board" sub={isMobile ? 'Press and hold a card to move it' : 'Drag a card between columns'} />
       <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3">
         {LANES.map((lane) => (
           <div

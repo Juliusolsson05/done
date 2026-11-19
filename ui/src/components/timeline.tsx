@@ -93,7 +93,7 @@ function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | 
 
   return (
     <div data-task={task.id} className={cn('relative flex h-9', leaving && 'opacity-0 transition-opacity delay-150 duration-150')}>
-      <div className="sticky left-0 z-30 flex w-64 shrink-0 items-center gap-2.5 border-r bg-background px-3">
+      <div className="sticky left-0 z-30 flex w-64 shrink-0 max-md:w-36 items-center gap-2.5 border-r bg-background px-3">
         <TaskCheck task={task} checked={leaving} onChange={finish} />
         <Button
           variant="ghost"
@@ -180,7 +180,7 @@ export function Timeline() {
       <div ref={scroller} className="min-h-0 overflow-auto rounded-xl border">
         <div className="relative w-max min-w-full">
           {/* The day columns behind every row: weekends shaded, today marked. */}
-          <div className="pointer-events-none absolute inset-y-0 left-64" style={{ width }}>
+          <div className="pointer-events-none absolute inset-y-0 left-64 max-md:left-36" style={{ width }}>
             {days.map((day, i) => {
               const weekday = toDate(day).getDay()
               return (
@@ -197,7 +197,7 @@ export function Timeline() {
           </div>
 
           <div className="sticky top-0 z-40 flex h-12 border-b bg-background">
-            <div className="sticky left-0 z-50 flex w-64 shrink-0 items-center border-r bg-background px-3 text-xs font-medium text-faint">Task</div>
+            <div className="sticky left-0 z-50 flex w-64 shrink-0 max-md:w-36 items-center border-r bg-background px-3 text-xs font-medium text-faint">Task</div>
             <div className="relative shrink-0" style={{ width }}>
               {days.map((day, i) => {
                 const date = toDate(day)
@@ -226,7 +226,7 @@ export function Timeline() {
           {groups.map((group) => (
             <div key={group.id ?? 'inbox'}>
               <div className="relative mt-1 flex h-8">
-                <div className="sticky left-0 z-30 flex w-64 shrink-0 items-center gap-2 border-r bg-background px-3 text-xs font-semibold text-muted-foreground">
+                <div className="sticky left-0 z-30 flex w-64 shrink-0 max-md:w-36 items-center gap-2 border-r bg-background px-3 text-xs font-semibold text-muted-foreground">
                   <ProjectDot id={group.id} />
                   {group.name}
                   <span className="font-normal text-faint">{group.tasks.length}</span>

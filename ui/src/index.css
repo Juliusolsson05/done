@@ -167,3 +167,28 @@
     }
   }
 }
+
+/* A finger, not a pointer. */
+@media (pointer: coarse) {
+  html {
+    /* No grey flash on every tap, and no wait to see whether a tap is the
+       first half of a double tap. */
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    /* Turning the phone must not change the size of the type. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    /* The page does not rubber-band away from the bar at the bottom. */
+    overscroll-behavior-y: none;
+  }
+  /* A long press on a task or in the sidebar opens done's own menu. The
+     system's text callout would open on the same press, so it is off there. */
+  [data-task],
+  [data-slot='sidebar'] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}

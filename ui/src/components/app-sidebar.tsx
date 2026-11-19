@@ -24,6 +24,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { Countdown } from '@/components/focus-view'
 import { ProjectDot } from '@/components/marks'
@@ -36,6 +37,11 @@ import { addProject, counts, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 type BuiltIn = Exclude<View['kind'], 'project'>
+
+// On a phone a row is tall enough to hit with a thumb.
+const ROW = 'max-md:h-11 max-md:pr-9 max-md:text-base'
+// The count sits in the middle of the taller row.
+const BADGE = 'max-md:top-3 max-md:text-sm'
 
 function NewProject() {
   const { data, update, openView, closeAll } = useApp()
@@ -56,23 +62,31 @@ function NewProject() {
 }
 
 export function AppSidebar() {
-  const { data, info, ui, focus, openView, newProject } = useApp()
+  const { data, info, ui, focus, openView: open, newProject } = useApp()
+  const { isMobile, setOpenMobile } = useSidebar()
   const count = counts(data.tasks, TODAY)
+  // On a phone the sidebar lies over the page, so choosing a view puts it away.
+  const openView = (view: View) => {
+    setOpenMobile(false)
+    open(view)
+  }
 
   // `badge` is a count, left out at zero, or for Focus the time left.
   const nav = (kind: BuiltIn, label: string, Icon: LucideIcon, badge: ReactNode = 0, late = false) => (
     <SidebarMenuItem>
-      <SidebarMenuButton data-view={kind} isActive={ui.view.kind === kind} onClick={() => openView({ kind })}>
+      <SidebarMenuButton data-view={kind} isActive={ui.view.kind === kind} onClick={() => openView({ kind })} className={ROW}>
         <Icon className="text-muted-foreground" />
         <span>{label}</span>
       </SidebarMenuButton>
-      {badge ? <SidebarMenuBadge className={cn('font-normal', late ? 'text-overdue' : 'text-faint')}>{badge}</SidebarMenuBadge> : null}
+      {badge ? <SidebarMenuBadge className={cn('font-normal', BADGE, late ? 'text-overdue' : 'text-faint')}>{badge}</SidebarMenuBadge> : null}
     </SidebarMenuItem>
   )
 
   return (
-    <Sidebar collapsible="none" className="select-none max-md:h-auto max-md:w-full">
-      <SidebarHeader className="px-4 pt-4 pb-1 text-base font-semibold tracking-tight">done</SidebarHeader>
+    // On a phone the sidebar is a sheet that slides in over the page (opened
+    // from the bar at the bottom); in a window it is always there.
+    <Sidebar collapsible={isMobile ? 'offcanvas' : 'none'} className="select-none">
+      <SidebarHeader className="px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">done</SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
@@ -97,18 +111,19 @@ export function AppSidebar() {
                   data-project={project.id}
                   isActive={ui.view.kind === 'project' && ui.view.id === project.id}
                   onClick={() => openView({ kind: 'project', id: project.id })}
+                  className={ROW}
                 >
                   <ProjectDot id={project.id} className="mx-1" />
                   <span>{project.name}</span>
                 </SidebarMenuButton>
-                {count.project(project.id) > 0 && <SidebarMenuBadge className="font-normal text-faint">{count.project(project.id)}</SidebarMenuBadge>}
+                {count.project(project.id) > 0 && <SidebarMenuBadge className={cn('font-normal text-faint', BADGE)}>{count.project(project.id)}</SidebarMenuBadge>}
               </SidebarMenuItem>
             ))}
             {ui.newProject && <NewProject />}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="max-md:pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
         <SidebarMenu>
           {info.updateReady && (
             <SidebarMenuItem>

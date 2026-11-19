@@ -8,6 +8,8 @@ import { AppSidebar } from '@/components/app-sidebar'
 import { Board } from '@/components/board'
 import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
+import { MobileBar } from '@/components/mobile-bar'
+import { MobileQuickAdd } from '@/components/quick-add'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog } from '@/components/task-editor'
 import { TimeSheet } from '@/components/time-sheet'
@@ -15,6 +17,7 @@ import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
 import { isDesktop, onMenuBarCommand, setWebviewZoom } from '@/lib/backend'
 import { addDays, dayOf, TODAY } from '@/lib/days'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
@@ -51,6 +54,7 @@ export default function App() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget>({ kind: 'space' })
   const dragging = useRef(false)
   const menuOpen = useRef(false)
+  const isMobile = useIsMobile()
 
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
 
@@ -322,9 +326,18 @@ export default function App() {
             off for everything inside it, which only the sidebar wants. */}
         <ContextMenuTrigger asChild className="select-auto">
           <div>
-            <SidebarProvider className="max-md:flex-col md:h-svh" onContextMenu={onContextMenu}>
+            <SidebarProvider className="md:h-svh" onContextMenu={onContextMenu}>
               <AppSidebar />
-              <SidebarInset className={cn('m-2 min-w-0 overflow-y-auto rounded-xl shadow-sm ring-1 ring-foreground/5 max-md:w-auto md:ml-0', wide ? 'p-8' : 'px-12 pt-10 pb-24 max-md:px-4 max-md:pt-6')}>
+              {/* In a window the content is a sheet lying on the sidebar. On a
+                  phone it is the whole screen, edge to edge, kept clear of
+                  the notch above and of the bar below. */}
+              <SidebarInset
+                className={cn(
+                  'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
+                  'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+1.25rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+6rem)]',
+                  wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
+                )}
+              >
                 <div
                   key={view.kind === 'project' ? view.id : view.kind}
                   className={cn('animate-enter', (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col')}
@@ -338,6 +351,8 @@ export default function App() {
                 </div>
                 <TaskEditorDialog task={editing} />
               </SidebarInset>
+              <MobileQuickAdd />
+              <MobileBar />
             </SidebarProvider>
           </div>
         </ContextMenuTrigger>
@@ -346,7 +361,8 @@ export default function App() {
         </ContextMenuContent>
       </ContextMenu>
       {/* Light only; without this the toasts would follow the system. */}
-      <Toaster theme="light" position="bottom-center" />
+      {/* On a phone the bottom belongs to the bar, so messages come from the top. */}
+      <Toaster theme="light" position={isMobile ? 'top-center' : 'bottom-center'} />
     </AppContext.Provider>
   )
 }

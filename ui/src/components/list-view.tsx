@@ -17,10 +17,12 @@ import { cn } from '@/lib/utils'
 
 export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
   return (
-    <header className="mb-6 flex min-h-8 items-baseline gap-3">
-      <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight">{title}</h1>
-      {sub && <span className="text-sm text-muted-foreground">{sub}</span>}
-      <div className="ml-auto flex gap-1 self-center">{children}</div>
+    // On a phone the heading wraps: the title and what it is about on one
+    // line, the view's buttons on the next, where they have room.
+    <header className="mb-6 flex min-h-8 items-baseline gap-3 max-md:mb-4 max-md:flex-wrap max-md:gap-y-1">
+      <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight max-md:text-3xl">{title}</h1>
+      {sub && <span className="text-sm whitespace-nowrap text-muted-foreground">{sub}</span>}
+      <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full">{children}</div>
     </header>
   )
 }
