@@ -46,6 +46,19 @@ cargo run -p done-server                                # the web app, at http:/
 cd crates/app && npx @tauri-apps/cli@2 build            # the Mac app, in target/release/bundle/macos
 ```
 
+## The iPhone app
+
+The same app builds for an iPhone. It keeps tasks on the phone, and can sign in to a hosted account if it was built knowing one.
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+cd ui && npm ci && npm run build && cd ../crates/app
+npx @tauri-apps/cli@2 ios build --target aarch64-sim --debug   # for the simulator
+npx @tauri-apps/cli@2 ios dev                                  # run it on a simulator or a connected phone
+```
+
+You need Xcode, `xcodegen` and CocoaPods. Putting it on a real phone needs your own Apple developer team, set in Xcode or with `APPLE_DEVELOPMENT_TEAM`; none is written in this repository.
+
 ## Host it for others
 
 The web app can also run as a hosted service, where each person signs in with a Google account and has a tasks file of their own. Nothing changes for running it on your own Mac.
@@ -70,7 +83,7 @@ Deleting an account in Settings deletes its file.
 
 - `ui/` is the interface: React, Tailwind and shadcn/ui components, with the whole look defined as theme tokens in `ui/src/index.css`. The desktop app and the web app both show the same build of it.
 - `crates/core` owns the SQLite file and the rules for a valid task.
-- `crates/app` is the desktop app (Tauri). Started as `done mcp`, the same program is the MCP server.
+- `crates/app` is the app (Tauri): the Mac app, and the iPhone app from the same code. On a Mac, started as `done mcp`, the same program is the MCP server.
 - `crates/mcp` is the MCP server itself.
 - `crates/server` is the web app. By default it is reachable only from the Mac it runs on; with `DONE_MODE=cloud` it is the hosted service described above.
 

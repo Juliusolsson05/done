@@ -2,7 +2,7 @@
 
 Fixes #19.
 Branch `feat/iphone-app` · Worktree `../done-wt/ios` · Base `origin/main` @ 75ad189 (2026-11-18)
-Status: plan only. Size: standard plan.
+Status: implemented, PR open. Size: standard plan.
 
 ## Outcome
 
@@ -39,3 +39,13 @@ No new logic. The existing suites must pass, and the Mac app must compile unchan
 ## Out of scope
 
 TestFlight and the App Store, Android, push notifications, a share extension.
+
+## Execution notes
+
+- Plan vs built: all five decisions MATCH.
+- Ruling: the generated Xcode build step called the Tauri CLI through an npm script this project does not have (`npm run -- tauri`). It now calls `npx @tauri-apps/cli@2` directly, in `project.yml` and the project file. Cost if wrong: regenerating the project with `tauri ios init` brings the npm form back, and the same one-line change is needed again.
+- Ruling: `.gitignore` ignored all of `gen/`; it now ignores only `crates/app/gen/schemas/`, so the Xcode project is kept. Tauri's own ignore file inside `gen/apple` keeps build output out.
+- Verified: `cargo check -p done-app` (Mac), `cargo test -p done-core -p done-mcp -p done-server`, 399 interface tests.
+- Built and run for real: `tauri ios build --target aarch64-sim --debug` succeeded, and the app was installed and started on an iPhone 17 simulator (iOS 26.2). It opens on Today in the phone layout, clear of the Dynamic Island and the home indicator, with the bar at the bottom. Its tasks file is in the app's own container (`Library/Application Support/done/done.db`); a task written into that file was shown after the app was started again.
+- Not done here: typing in the simulator (no way to tap from the command line), a real iPhone (needs the owner's Apple team), sign-in (no Google sign-in client yet), and a release build. The long press, the keyboard and the browser round trip are therefore still unseen on iOS.
+- Not done: the `pr-review` round by other agents.
