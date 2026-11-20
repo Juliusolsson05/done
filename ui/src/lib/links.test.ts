@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { linkParts } from '@/lib/links'
+import { label, linkParts } from '@/lib/links'
 
 describe('linkParts', () => {
   it('leaves text without an address as it is', () => {
@@ -32,5 +32,16 @@ describe('linkParts', () => {
 
   it('keeps a bracket that belongs to the address', () => {
     expect(linkParts('https://en.wikipedia.org/wiki/Done_(app)')[0].href).toBe('https://en.wikipedia.org/wiki/Done_(app)')
+  })
+})
+
+describe('label', () => {
+  it('shows a link by its site name', () => {
+    expect(label('https://www.bestbuy.com/product/refurbished-dell-latitude-5431/JXRKGP53TT')).toBe('bestbuy.com')
+    expect(label('https://docs.google.com/presentation/d/13CL/edit')).toBe('docs.google.com')
+  })
+
+  it('shows an address it cannot read as written', () => {
+    expect(label('https://')).toBe('https://')
   })
 })
