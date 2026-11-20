@@ -34,3 +34,13 @@ export function linkParts(text: string): Part[] {
   if (at < text.length) parts.push({ text: text.slice(at) })
   return parts
 }
+
+// What a link shows: the site's name, `amazon.com` for a long product
+// address. The whole address is still what opens.
+export function label(href: string): string {
+  try {
+    return new URL(href).hostname.replace(/^www\./, '')
+  } catch {
+    return href
+  }
+}

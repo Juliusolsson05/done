@@ -19,3 +19,9 @@ A product or doc link is often longer than the notes around it and wraps over tw
 ## Verification
 
 `npm test`, `npm run build`, and the web interface with a long Best Buy link.
+
+## Execution notes
+
+- Plan vs built: both decisions MATCH.
+- Verified: `npm test` (407, two new), `npm run build`, and the web interface on a scratch tasks file: notes
+  with the full Best Buy and Amazon addresses show `bestbuy.com` and `amazon.com` on one line.

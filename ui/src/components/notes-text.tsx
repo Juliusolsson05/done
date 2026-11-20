@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react'
 import { openLink } from '@/lib/backend'
-import { linkParts } from '@/lib/links'
+import { label, linkParts } from '@/lib/links'
 import { cn } from '@/lib/utils'
 
 // A task's notes with their web addresses as links. A link opens the page;
@@ -21,10 +21,11 @@ export function NotesText({ notes, onEdit, className }: { notes: string; onEdit:
           <a
             key={i}
             href={part.href}
+            title={part.href}
             onClick={(event) => open(event, part.href!)}
             className="text-foreground/80 underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
           >
-            {part.text}
+            {label(part.href)}
           </a>
         ) : (
           part.text
