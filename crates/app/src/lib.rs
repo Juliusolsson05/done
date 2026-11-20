@@ -249,7 +249,7 @@ fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     // Web pages only. The window asks for this, and it must not be a way to
     // open files or other apps.
-    if !url.starts_with("https://") && !url.starts_with("http://localhost") && !url.starts_with("http://127.0.0.1") {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("Only web pages can be opened.".into());
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())

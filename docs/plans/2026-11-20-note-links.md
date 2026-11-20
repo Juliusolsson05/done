@@ -36,3 +36,13 @@ with no scheme (`done.app`) stays text.
 
 `npm test`, `npm run build`, `cargo check -p done-app`, and the web interface opened locally with a task
 whose notes hold two links: link opens, the rest opens the editor.
+
+## Execution notes
+
+- Plan vs built: all five decisions MATCH.
+- Verified: `npm test` (405, six new), `npm run build`, `cargo check -p done-app`, and the web interface on a
+  scratch tasks file: a task with `https://example.com/deck` and `www.example.org/notes.` shows two links,
+  the full stop outside; clicking the `www.` link opened `https://www.example.org/notes` in a new tab with
+  the editor closed; clicking the plain words opened the editor.
+- Not verified here: the link in the Mac and iPhone apps (it goes through `open_in_browser`, already used by
+  sign-in). Checked once the release is installed.
