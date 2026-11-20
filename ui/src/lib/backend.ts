@@ -109,6 +109,13 @@ export const deleteAccount = async (): Promise<void> => {
 // a hosted server and is not signed in yet.
 export const canSignIn = tauri !== undefined && CLOUD_URL !== null && hosted === null
 export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url }))
+
+// A link in a task's notes. The apps open it in the person's own browser:
+// inside the app's window it would replace the task list.
+export const openLink = (url: string): void => {
+  if (tauri) void tauri.core.invoke('open_in_browser', { url })
+  else window.open(url, '_blank', 'noopener')
+}
 // The browser hands a finished sign-in back as a link. Returns how to stop listening.
 export const onSignedIn = (done: () => void): (() => void) => {
   const listening = tauri?.event.listen<string>('opened-link', (event) => {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { NotesText } from '@/components/notes-text'
 import { Subtasks } from '@/components/subtasks'
 import { TaskEditor } from '@/components/task-editor'
 import { ProjectDot } from '@/components/marks'
@@ -71,22 +72,24 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
       )}
     >
       <TaskCheck task={task} checked={leaving} onChange={finish} className={goal ? 'mt-1 size-5' : 'mt-px'} />
-      <Button
-        variant="ghost"
-        onClick={() => edit(task.id)}
-        className="h-auto min-w-0 flex-1 flex-col items-start gap-0 rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
-      >
-        <span
-          className={cn(
-            'wrap-anywhere transition-colors',
-            goal && 'text-lg font-semibold tracking-tight',
-            leaving && 'text-faint line-through',
-          )}
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <Button
+          variant="ghost"
+          onClick={() => edit(task.id)}
+          className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
         >
-          {task.title}
-        </span>
-        {task.notes && <span className="w-full truncate text-xs text-muted-foreground">{task.notes}</span>}
-      </Button>
+          <span
+            className={cn(
+              'wrap-anywhere transition-colors',
+              goal && 'text-lg font-semibold tracking-tight',
+              leaving && 'text-faint line-through',
+            )}
+          >
+            {task.title}
+          </span>
+        </Button>
+        {task.notes && <NotesText notes={task.notes} onEdit={() => edit(task.id)} className="truncate" />}
+      </div>
       {/* Beside the title in a window. On a phone, on a line of its own under
           it, starting where the title starts: a long title needs the width. */}
       <div

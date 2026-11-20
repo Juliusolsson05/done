@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { PlusIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NotesText } from '@/components/notes-text'
 import { TaskEditor } from '@/components/task-editor'
 import { TaskCheck } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
@@ -19,16 +20,18 @@ function SubtaskRow({ task }: { task: Task }) {
     <div data-task={task.id} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted max-md:gap-3 max-md:px-1 max-md:py-2">
       {/* No fade-out as on a task's row: a ticked subtask stays where it is. */}
       <TaskCheck task={task} checked={!!task.done} onChange={() => (task.done ? reopen(task.id) : complete(task.id))} className="mt-px size-4 max-md:size-5" />
-      <Button
-        variant="ghost"
-        onClick={() => edit(task.id)}
-        className="h-auto min-w-0 flex-1 flex-col items-start gap-0 rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
-      >
-        <span className={cn('wrap-anywhere', task.done && 'text-faint line-through')}>{task.title}</span>
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <Button
+          variant="ghost"
+          onClick={() => edit(task.id)}
+          className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
+        >
+          <span className={cn('wrap-anywhere', task.done && 'text-faint line-through')}>{task.title}</span>
+        </Button>
         {/* Not cut to one line as on a task's row: for a subtask the notes
             are the point, the few words that say what the line is about. */}
-        {task.notes && <span className={cn('w-full text-xs wrap-anywhere whitespace-pre-line text-muted-foreground', task.done && 'text-faint')}>{task.notes}</span>}
-      </Button>
+        {task.notes && <NotesText notes={task.notes} onEdit={() => edit(task.id)} className={cn('wrap-anywhere whitespace-pre-line', task.done && 'text-faint')} />}
+      </div>
     </div>
   )
 }
