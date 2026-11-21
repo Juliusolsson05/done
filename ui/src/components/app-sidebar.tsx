@@ -43,7 +43,9 @@ import { cn } from '@/lib/utils'
 type BuiltIn = Exclude<View['kind'], 'project'>
 
 // On a phone a row is tall enough to hit with a thumb.
-const ROW = 'max-md:h-11 max-md:pr-9 max-md:text-base'
+// A row with a count beside it keeps room for the count, so a long name is
+// cut short before it, never under it.
+const ROW = 'group-has-data-[sidebar=menu-badge]/menu-item:pr-8 max-md:h-11 max-md:pr-9 max-md:text-base'
 // The count sits in the middle of the taller row.
 const BADGE = 'max-md:top-3 max-md:text-sm'
 
