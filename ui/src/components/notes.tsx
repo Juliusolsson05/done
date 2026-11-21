@@ -3,7 +3,7 @@
 // open note on the right; on a phone one at a time.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'markdown-to-jsx/react'
-import { ChevronLeftIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { BookOpenIcon, ChevronLeftIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
@@ -23,6 +23,9 @@ export function Notes() {
   // What is typed in the search field. Kept while notes are opened, so going
   // through the matches one by one does not lose it.
   const [query, setQuery] = useState('')
+  // Reading: the open note shown formatted as a document, on its own, with
+  // the list put away. Writing is always plain text.
+  const [reading, setReading] = useState(false)
   // The note just made: its field opens with the cursor in it.
   const [fresh, setFresh] = useState<number | null>(null)
   // The note waiting to be written, and its timer. One at a time: switching
@@ -92,13 +95,24 @@ export function Notes() {
     if (!isMobile && openId === null && notes && notes.length > 0) setOpenId(notes[0].id)
   }, [isMobile, openId, notes])
 
+  useEffect(() => {
+    if (!reading) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setReading(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [reading])
+
   const open = (id: number | null) => {
+    setReading(false)
     if (id === openId) return
     leave(openId)
     setOpenId(id)
   }
 
   const create = async () => {
+    setReading(false)
     leave(openId)
     try {
       await queue.current
@@ -153,6 +167,20 @@ export function Notes() {
     now,
   )
 
+  const readToggle = current && !isBlank(current.text) && (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className={reading ? 'text-foreground' : 'text-muted-foreground'}
+      aria-label={reading ? 'Back to writing' : 'View as document'}
+      aria-pressed={reading}
+      title={reading ? 'Back to writing (Esc)' : 'View as document'}
+      onClick={() => setReading((r) => !r)}
+    >
+      {reading ? <PenLineIcon /> : <BookOpenIcon />}
+    </Button>
+  )
+
   // On a phone: the open note alone, with a way back to the list.
   if (isMobile && current) {
     return (
@@ -162,11 +190,14 @@ export function Notes() {
             <ChevronLeftIcon />
             Notes
           </Button>
-          <Button variant="ghost" size="icon-sm" className="ml-auto text-muted-foreground" aria-label="Delete note" onClick={() => remove(current)}>
-            <Trash2Icon />
-          </Button>
+          <div className="ml-auto flex gap-1">
+            {readToggle}
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete note" onClick={() => remove(current)}>
+              <Trash2Icon />
+            </Button>
+          </div>
         </div>
-        <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
+        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />}
       </div>
     )
   }
@@ -174,6 +205,7 @@ export function Notes() {
   return (
     <div>
       <ViewHeader title="Notes">
+        {!isMobile && readToggle}
         {!isMobile && current && (
           <Button
             variant="ghost"
@@ -195,7 +227,7 @@ export function Notes() {
       {sorted.length > 0 && (
         <div className="flex items-start gap-8">
           {/* The list stays where it is while a long note scrolls past it. */}
-          <div className="w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto">
+          <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
             <label className="mb-3 flex h-8 items-center gap-2 rounded-lg bg-muted px-2.5 text-muted-foreground max-md:h-10">
               <SearchIcon className="size-4 shrink-0" />
               <input
@@ -243,8 +275,12 @@ export function Notes() {
           {!isMobile && current && (
             // As long as the note is: the page scrolls, not a box inside it.
             // Held to a readable line length.
-            <div className="min-w-0 max-w-3xl flex-1">
-              <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
+            <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
+              {reading ? (
+                <NoteDocument text={current.text} />
+              ) : (
+                <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
+              )}
             </div>
           )}
         </div>
@@ -253,59 +289,36 @@ export function Notes() {
   )
 }
 
-// A note reads as formatted Markdown. A click on it (not on a link) edits
-// the plain text, and leaving the field shows it formatted again. A note
-// just made, or one with nothing in it yet, opens for typing.
+// The note's text, always ready for typing. It grows with the text, so a
+// long note scrolls with the page instead of inside a box of its own.
 function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; onChange: (text: string) => void }) {
-  const [editing, setEditing] = useState(focused || isBlank(note.text))
   const field = useRef<HTMLTextAreaElement>(null)
-  // The field grows with the text, so a long note scrolls with the page
-  // instead of inside a box of its own.
   useLayoutEffect(() => {
     const el = field.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-  }, [note.text, editing])
-  if (editing) {
-    return (
-      <textarea
-        ref={field}
-        autoFocus
-        aria-label="Note"
-        value={note.text}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={() => !isBlank(note.text) && setEditing(false)}
-        onKeyDown={(event) => {
-          // Escape ends editing, as leaving the field does.
-          if (event.key === 'Escape' && !isBlank(note.text)) {
-            event.preventDefault()
-            setEditing(false)
-          }
-        }}
-        placeholder="Write it down… Markdown works: # Title, - list, **bold**"
-        className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent font-mono text-[14px] leading-relaxed outline-none placeholder:font-sans placeholder:text-faint max-md:text-base"
-      />
-    )
-  }
+  }, [note.text])
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label="Edit note"
-      onClick={(event) => {
-        if (!(event.target as Element).closest('a, input')) setEditing(true)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          setEditing(true)
-        }
-      }}
-      className="note-md min-h-[50svh] w-full cursor-text pb-16 text-[15px] leading-relaxed outline-none max-md:text-base"
-    >
-      <Markdown options={MARKDOWN}>{note.text}</Markdown>
-    </div>
+    <textarea
+      ref={field}
+      autoFocus={focused}
+      aria-label="Note"
+      value={note.text}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder="Write it down…"
+      className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent pb-16 text-[15px] leading-relaxed outline-none placeholder:text-faint max-md:text-base"
+    />
+  )
+}
+
+// The note shown formatted, as a document to read. Markdown: # headings,
+// lists, **bold**, links and so on.
+function NoteDocument({ text }: { text: string }) {
+  return (
+    <article className="note-md pb-16 text-[15px] leading-relaxed max-md:text-base">
+      <Markdown options={MARKDOWN}>{text}</Markdown>
+    </article>
   )
 }
 
@@ -317,7 +330,6 @@ function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
       title={href}
       onClick={(event) => {
         event.preventDefault()
-        event.stopPropagation()
         if (href && /^https?:\/\//i.test(href)) openLink(href)
       }}
     >
