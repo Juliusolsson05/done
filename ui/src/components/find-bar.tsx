@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { occurrences, step } from '@/lib/find'
 import { play } from '@/lib/sounds'
 
@@ -113,10 +114,10 @@ export function FindBar() {
     <div
       ref={bar}
       role="search"
-      className="fixed top-3 right-5 z-50 flex items-center gap-1 rounded-xl border bg-background/95 py-1 pr-1 pl-3 shadow-lg backdrop-blur-md max-md:top-[calc(env(safe-area-inset-top)+0.5rem)] max-md:right-3 max-md:left-3"
+      className="fixed top-3 right-5 z-50 flex items-center gap-1 rounded-xl border bg-popover py-1 pr-1 pl-3 text-popover-foreground shadow-lg max-md:top-[calc(env(safe-area-inset-top)+0.5rem)] max-md:right-3 max-md:left-3"
     >
       <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-      <input
+      <Input
         ref={field}
         autoFocus
         value={query}
@@ -137,7 +138,10 @@ export function FindBar() {
         }}
         placeholder="Find on this page"
         aria-label="Find on this page"
-        className="h-8 w-52 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground max-md:flex-1 max-md:text-base"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        className="w-52 border-0 px-1 shadow-none focus-visible:ring-0 max-md:flex-1"
       />
       <span className="w-14 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {query.trim() ? (ranges.length ? `${at + 1} of ${ranges.length}` : 'None') : ''}

@@ -6,9 +6,13 @@ import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
+import { ProjectDot } from '@/components/marks'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { play } from '@/lib/sounds'
@@ -19,7 +23,7 @@ import { cn } from '@/lib/utils'
 const QUIET_MS = 500
 
 export function Notes() {
-  const { ui } = useApp()
+  const { ui, data } = useApp()
   const isMobile = useIsMobile()
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
@@ -112,6 +116,16 @@ export function Notes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, notes !== null])
 
+  // "New note" pressed on a project's page: a note started in that project.
+  const newIn = ui.view.kind === 'notes' ? ui.view.newIn : undefined
+  const startedIn = useRef<object | null>(null)
+  useEffect(() => {
+    if (newIn === undefined || notes === null || startedIn.current === ui.view) return
+    startedIn.current = ui.view
+    void create(newIn)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newIn, notes !== null, ui.view])
+
   // On a wide screen a note is always open when there is one: the one asked
   // for if any, otherwise the newest.
   useEffect(() => {
@@ -135,12 +149,12 @@ export function Notes() {
     setOpenId(id)
   }
 
-  const create = async () => {
+  const create = async (projectId: number | null = null) => {
     setReading(false)
     leave(openId)
     try {
       await queue.current
-      const note = await saveNote({ text: '', updatedAt: Date.now() })
+      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
       setOpenId(note.id)
@@ -152,10 +166,25 @@ export function Notes() {
 
   const type = (text: string) => {
     if (openId === null) return
-    const note = { id: openId, text, updatedAt: Date.now() }
+    const was = latest.current?.find((n) => n.id === openId)
+    const note = { id: openId, text, updatedAt: Date.now(), projectId: was?.projectId ?? null }
     setNotes((all) => all && all.map((n) => (n.id === openId ? note : n)))
     if (pending.current) clearTimeout(pending.current.timer)
     pending.current = { note, timer: setTimeout(flush, QUIET_MS) }
+  }
+
+  // Puts the open note in a project, or takes it out of one. Saved at once.
+  const moveTo = (projectId: number | null) => {
+    const was = latest.current?.find((n) => n.id === openId)
+    if (!was) return
+    if (pending.current) {
+      clearTimeout(pending.current.timer)
+      pending.current = null
+    }
+    const note = { ...was, projectId }
+    play('confirm')
+    setNotes((all) => all && all.map((n) => (n.id === note.id ? note : n)))
+    write(note)
   }
 
   const remove = (note: Note) => {
@@ -197,6 +226,26 @@ export function Notes() {
     now,
   )
 
+  const projectPicker = current && (
+    <Select value={String(current.projectId ?? 'none')} onValueChange={(value) => moveTo(value === 'none' ? null : Number(value))}>
+      <SelectTrigger size="sm" aria-label="Project" className="h-8 border-0 text-muted-foreground shadow-none hover:bg-accent">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">
+          <ProjectDot id={null} />
+          No project
+        </SelectItem>
+        {data.projects.map((p) => (
+          <SelectItem key={p.id} value={String(p.id)}>
+            <ProjectDot id={p.id} />
+            {p.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+
   const readToggle = current && !isBlank(current.text) && (
     <Button
       variant={reading ? 'secondary' : 'ghost'}
@@ -221,6 +270,7 @@ export function Notes() {
             Notes
           </Button>
           <div className="ml-auto flex gap-1">
+            {projectPicker}
             {readToggle}
             <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete note" onClick={() => remove(current)}>
               <Trash2Icon />
@@ -239,6 +289,7 @@ export function Notes() {
   return (
     <div>
       <ViewHeader title="Notes">
+        {!isMobile && projectPicker}
         {!isMobile && readToggle}
         {!isMobile && current && (
           <Button
@@ -252,7 +303,7 @@ export function Notes() {
             <Trash2Icon />
           </Button>
         )}
-        <HeaderButton onClick={() => void create()}>
+        <HeaderButton onClick={() => void create(null)}>
           <PlusIcon />
           New note
         </HeaderButton>
@@ -262,9 +313,9 @@ export function Notes() {
         <div className="flex items-start gap-8">
           {/* The list stays where it is while a long note scrolls past it. */}
           <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
-            <label className="mb-3 flex h-8 items-center gap-2 rounded-lg bg-muted px-2.5 text-muted-foreground max-md:h-10">
-              <SearchIcon className="size-4 shrink-0" />
-              <input
+            <div className="relative mb-4">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -274,32 +325,40 @@ export function Notes() {
                     setQuery('')
                   }
                 }}
-                placeholder="Search"
+                placeholder="Search notes"
                 aria-label="Search notes"
-                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground max-md:text-base [&::-webkit-search-cancel-button]:hidden"
+                className="pl-8 [&::-webkit-search-cancel-button]:hidden"
               />
-            </label>
+            </div>
             {groups.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No notes match</p>}
             {groups.map((group) => (
               <section key={group.label} className="mb-3">
-                <h2 className="px-3 pb-1 text-xs font-medium text-faint">{group.label}</h2>
-                <ul aria-label={group.label}>
+                <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
+                <ul aria-label={group.label} className="flex flex-col gap-0.5">
                   {group.notes.map((note) => (
                     <li key={note.id}>
-                      <button
-                        type="button"
+                      <Button
+                        variant={note.id === openId ? 'secondary' : 'ghost'}
                         onClick={() => open(note.id)}
                         aria-current={note.id === openId ? 'true' : undefined}
-                        className={cn(
-                          'flex w-full flex-col items-start rounded-lg px-3 py-2 text-left max-md:rounded-none max-md:border-b max-md:py-3',
-                          note.id === openId ? 'bg-accent' : 'hover:bg-accent/60',
-                        )}
+                        className="h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal max-md:py-3"
                       >
-                        <span data-findable className={cn('w-full truncate text-sm font-medium', isBlank(note.text) && 'text-muted-foreground')}>
+                        <span
+                          data-findable
+                          className={cn('w-full truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                        >
                           {titleOf(note.text)}
                         </span>
-                        <span className="text-xs text-muted-foreground">{whenText(note.updatedAt, now)}</span>
-                      </button>
+                        <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
+                          {whenText(note.updatedAt, now)}
+                          {note.projectId != null && (
+                            <>
+                              <ProjectDot id={note.projectId} className="size-1.5" />
+                              <span className="truncate">{projectName(data.projects, note.projectId)}</span>
+                            </>
+                          )}
+                        </span>
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -357,7 +416,7 @@ function NoteDocument({ text, onEdit }: { text: string; onEdit: () => void }) {
         if (!(event.target as Element).closest('a')) onEdit()
       }}
       data-findable
-      className="note-md cursor-text pb-16 text-[15px] leading-relaxed max-md:text-base"
+      className={cn(DOCUMENT, 'cursor-text pb-16 text-[15px] leading-relaxed max-md:text-base')}
     >
       <Markdown options={MARKDOWN}>{text}</Markdown>
     </article>
@@ -379,6 +438,17 @@ function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
     </a>
   )
 }
+
+// How the formatted document looks, with the theme's own tokens.
+const DOCUMENT = cn(
+  '[&>*+*]:mt-2.5 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold',
+  '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-6 [&_li>ul]:mt-1 [&_li>ol]:mt-1',
+  '[&_li:has(>input)]:-ml-5 [&_li:has(>input)]:list-none [&_input]:mr-2 [&_input]:align-middle',
+  '[&_a]:underline [&_a]:decoration-muted-foreground/50 [&_a]:underline-offset-2 hover:[&_a]:decoration-foreground',
+  '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_hr]:border-border',
+  '[&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left',
+)
 
 // Raw HTML in a note stays text: a note is for writing, not for markup that
 // could run in the app.

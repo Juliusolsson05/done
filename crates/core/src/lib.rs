@@ -143,6 +143,10 @@ pub struct Note {
     /// Milliseconds since 1970, set by the window that saved it. The list
     /// shows the most recently changed note first.
     pub updated_at: i64,
+    /// The project it belongs to, if any. A note outlives its project, like
+    /// a task does, and is then simply not in one.
+    #[serde(default)]
+    pub project_id: Option<i64>,
 }
 
 /// A note as a window sends it: without an id it is a new note.
@@ -153,6 +157,8 @@ pub struct SaveNote {
     pub id: Option<i64>,
     pub text: String,
     pub updated_at: i64,
+    #[serde(default)]
+    pub project_id: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -321,6 +327,15 @@ impl Store {
             "CREATE TABLE IF NOT EXISTS note (id INTEGER PRIMARY KEY, text TEXT NOT NULL, updated_at INTEGER NOT NULL)",
             [],
         )?;
+        // A note in a project. Added here for files whose notes came first.
+        let has_note_project: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('note') WHERE name = 'project_id'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_note_project {
+            conn.execute("ALTER TABLE note ADD COLUMN project_id INTEGER REFERENCES project(id) ON DELETE SET NULL", [])?;
+        }
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -395,9 +410,9 @@ impl Store {
     /// Every note, the most recently changed first.
     pub fn notes(&self) -> Result<Vec<Note>, Error> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, text, updated_at FROM note ORDER BY updated_at DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id FROM note ORDER BY updated_at DESC, id DESC")?;
         let notes = stmt
-            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)? }))?
+            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(notes)
     }
@@ -412,18 +427,21 @@ impl Store {
         let id = match note.id {
             Some(id) => {
                 conn.execute(
-                    "INSERT INTO note (id, text, updated_at) VALUES (?1, ?2, ?3)
-                     ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-                    params![id, note.text, note.updated_at],
+                    "INSERT INTO note (id, text, updated_at, project_id) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at, project_id = excluded.project_id",
+                    params![id, note.text, note.updated_at, note.project_id],
                 )?;
                 id
             }
             None => {
-                conn.execute("INSERT INTO note (text, updated_at) VALUES (?1, ?2)", params![note.text, note.updated_at])?;
+                conn.execute(
+                    "INSERT INTO note (text, updated_at, project_id) VALUES (?1, ?2, ?3)",
+                    params![note.text, note.updated_at, note.project_id],
+                )?;
                 conn.last_insert_rowid()
             }
         };
-        Ok(Note { id, text: note.text, updated_at: note.updated_at })
+        Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id })
     }
 
     pub fn delete_note(&self, id: i64) -> Result<(), Error> {
@@ -850,7 +868,7 @@ mod tests {
     }
 
     fn note(id: Option<i64>, text: &str, at: i64) -> SaveNote {
-        SaveNote { id, text: text.into(), updated_at: at }
+        SaveNote { id, text: text.into(), updated_at: at, project_id: None }
     }
 
     #[test]
@@ -873,7 +891,7 @@ mod tests {
         s.delete_note(n.id).unwrap();
         assert!(s.notes().unwrap().is_empty());
         s.save_note(note(Some(n.id), "Funds", 1)).unwrap();
-        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1 }]);
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None }]);
     }
 
     #[test]
@@ -881,5 +899,15 @@ mod tests {
         let s = store();
         s.save_note(note(None, "Funds", 1)).unwrap();
         assert_eq!(s.state("2026-11-20").unwrap().rev, 0);
+    }
+
+    #[test]
+    fn a_note_keeps_its_project_and_outlives_it() {
+        let s = store();
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0 }], ..Default::default() }).unwrap();
+        let n = s.save_note(SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: Some(1) }).unwrap();
+        assert_eq!(s.notes().unwrap()[0].project_id, Some(1));
+        s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None }]);
     }
 }

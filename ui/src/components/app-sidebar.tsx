@@ -26,6 +26,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Countdown } from '@/components/focus-view'
@@ -89,7 +90,10 @@ export function AppSidebar() {
     // from the bar at the bottom); in a window it can be put away with the
     // button at the page's top left, or Cmd+B.
     <Sidebar collapsible="offcanvas" className="select-none">
-      <SidebarHeader className="px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">done</SidebarHeader>
+      <SidebarHeader className="flex-row items-center justify-between px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">
+        done
+        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title="Hide sidebar (⌘B)" />
+      </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>

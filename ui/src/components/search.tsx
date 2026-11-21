@@ -62,6 +62,9 @@ export function SearchDialog() {
             onKeyDown={onKeyDown}
             placeholder="Search tasks, notes and projects"
             aria-label="Search"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             className="h-12 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
           />
         </label>

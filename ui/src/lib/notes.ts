@@ -7,6 +7,8 @@ export interface Note {
   text: string
   // Milliseconds since 1970. The list shows the most recently changed first.
   updatedAt: number
+  // The project it belongs to, if any.
+  projectId?: number | null
 }
 
 // What a window sends to save a note: without an id it is a new one.
@@ -14,6 +16,7 @@ export interface SaveNote {
   id?: number
   text: string
   updatedAt: number
+  projectId?: number | null
 }
 
 // The first line with something on it names the note in the list, without

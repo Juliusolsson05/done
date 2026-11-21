@@ -1,5 +1,6 @@
 // Inbox, Today, Upcoming and a project: the views that are a list of tasks.
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { NotebookPenIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -9,7 +10,9 @@ import { TaskEditor } from '@/components/task-editor'
 import { TaskRow } from '@/components/task-row'
 import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
+import { loadNotes } from '@/lib/backend'
 import { fullDay, TODAY } from '@/lib/days'
+import { byNewest, isBlank, titleOf, whenText, type Note } from '@/lib/notes'
 import { tagOf } from '@/lib/quick-add'
 import { play } from '@/lib/sounds'
 import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
@@ -102,14 +105,14 @@ const EMPTY: Record<string, [string, string]> = {
 }
 
 export function ListView() {
-  const { data, ui, rename, askDelete, closeAll, removeProject } = useApp()
+  const { data, ui, rename, askDelete, closeAll, removeProject, openView } = useApp()
   const view = ui.view
   const list = sections(view, data.tasks, TODAY)
   const count = list.reduce((n, s) => n + s.tasks.length, 0)
   const addUnderSection = list.some((s) => s.addHere)
   const empty =
     view.kind === 'project'
-      ? ['No tasks in this project yet', `Add one below, or type #${tagOf(projectName(data.projects, view.id))} when adding a task anywhere.`]
+      ? ['No tasks in this project yet', `Add one below, or type @${tagOf(projectName(data.projects, view.id))} when adding a task anywhere.`]
       : EMPTY[view.kind]
   const hasGoal = view.kind === 'today' && goalTask(data.tasks, TODAY) !== undefined
 
@@ -129,6 +132,10 @@ export function ListView() {
             </>
           ) : (
             <>
+              <HeaderButton onClick={() => openView({ kind: 'notes', newIn: view.id })}>
+                <NotebookPenIcon />
+                New note
+              </HeaderButton>
               <HeaderButton onClick={rename}>Rename</HeaderButton>
               <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
             </>
@@ -163,7 +170,45 @@ export function ListView() {
           </section>
         ))}
         {view.kind === 'upcoming' && <AddRow />}
+        {view.kind === 'project' && <ProjectNotes projectId={view.id} />}
       </div>
     </div>
+  )
+}
+
+// A project's notes, under its tasks. Clicking one opens it in Notes.
+function ProjectNotes({ projectId }: { projectId: number }) {
+  const { openView } = useApp()
+  const [notes, setNotes] = useState<Note[]>([])
+  useEffect(() => {
+    let current = true
+    loadNotes().then(
+      (all) => current && setNotes(all.filter((n) => n.projectId === projectId && !isBlank(n.text)).sort(byNewest)),
+      () => undefined,
+    )
+    return () => {
+      current = false
+    }
+  }, [projectId])
+  if (notes.length === 0) return null
+  const now = Date.now()
+  return (
+    <section>
+      <h3 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">Notes</h3>
+      {notes.map((note) => (
+        <button
+          key={note.id}
+          type="button"
+          onClick={() => openView({ kind: 'notes', id: note.id })}
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-muted max-md:py-2.5"
+        >
+          <NotebookPenIcon className="size-4 shrink-0 text-faint" />
+          <span data-findable className="min-w-0 flex-1 truncate">
+            {titleOf(note.text)}
+          </span>
+          <span className="shrink-0 text-xs text-faint">{whenText(note.updatedAt, now)}</span>
+        </button>
+      ))}
+    </section>
   )
 }

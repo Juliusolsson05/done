@@ -40,16 +40,16 @@ function sidebarWasOpen(): boolean {
 
 // Puts the sidebar away and brings it back; so does Cmd+B. Fixed to the
 // page's top left corner, so it stays in reach however far a page is scrolled.
+// With the sidebar put away, the button to bring it back sits inside the
+// page's top left corner and stays there as the page scrolls. (While the
+// sidebar shows, its own header has the button.)
 function SidebarToggle() {
-  const { open } = useSidebar()
+  const { open, isMobile } = useSidebar()
+  if (open || isMobile) return null
   return (
-    <SidebarTrigger
-      className={cn(
-        'fixed top-3.5 z-20 text-faint transition-[left] duration-200 ease-linear hover:text-muted-foreground max-md:hidden',
-        open ? 'left-[calc(var(--sidebar-width)+0.5rem)]' : 'left-4',
-      )}
-      title="Sidebar (⌘B)"
-    />
+    <div className="sticky top-0 z-20 h-0">
+      <SidebarTrigger className="-mt-6 -ml-6 text-muted-foreground" title="Show sidebar (⌘B)" />
+    </div>
   )
 }
 

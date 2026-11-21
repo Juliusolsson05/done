@@ -110,13 +110,15 @@ fn tools() -> Value {
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is Markdown text that is not a task; its first line is its title.",
+        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title.",
           "inputSchema": { "type": "object", "properties": {
               "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." } } } },
-        { "name": "add_note", "description": "Add a note, written in Markdown. Put a short title on the first line, as a # heading.",
-          "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] } },
-        { "name": "update_note", "description": "Replace a note's whole text. To add to it, send its current text with the addition.",
-          "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" } }, "required": ["id", "text"] } },
+        { "name": "add_note", "description": "Add a note. Put a short title on the first line.",
+          "inputSchema": { "type": "object", "properties": { "text": { "type": "string" },
+              "project": { "type": "string", "description": "The name of an existing project the note belongs to." } }, "required": ["text"] } },
+        { "name": "update_note", "description": "Change a note. text replaces the whole text: to add to it, send its current text with the addition. project moves it to a project, or null takes it out of one. Fields left out stay as they are.",
+          "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" },
+              "project": { "type": ["string", "null"], "description": "The name of an existing project, or null for none." } }, "required": ["id"] } },
         { "name": "delete_note", "description": "Delete a note for good.", "inputSchema": id_only },
         { "name": "time_sheet", "description": "One day's focus blocks from the time sheet: what was focused on, when, planned against actual minutes, and the totals.",
           "inputSchema": { "type": "object", "properties": {
@@ -234,8 +236,25 @@ fn title_of(text: &str) -> String {
     "New note".to_string()
 }
 
-fn describe_note(note: &Note) -> Value {
-    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "updatedAt": note.updated_at })
+fn describe_note(note: &Note, projects: &[Project]) -> Value {
+    let project = note.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
+    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "updatedAt": note.updated_at })
+}
+
+/// The projects, for naming a note's project and finding one by its name.
+fn current_state(store: &Store) -> Result<State, String> {
+    let today = store.today().map_err(|e| e.to_string())?;
+    store.state(&today).map_err(|e| e.to_string())
+}
+
+/// The project an agent named for a note: Some(None) for an explicit null,
+/// None when it said nothing about the project.
+fn note_project(args: &Value, state: &State) -> Result<Option<Option<i64>>, String> {
+    match args.get("project") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(v) => Ok(Some(Some(project_named(state, v.as_str().unwrap_or(""))?))),
+    }
 }
 
 fn note_text(args: &Value) -> Result<String, String> {
@@ -398,7 +417,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let found: Vec<Note> = store.notes().map_err(|e| e.to_string())?.into_iter()
                 .filter(|n| { let text = n.text.to_lowercase(); words.iter().all(|w| text.contains(w.as_str())) })
                 .collect();
-            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(describe_note).collect();
+            let state = current_state(store)?;
+            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects)).collect();
             let more = found.len().saturating_sub(NOTES_LISTED);
             Ok(if more > 0 { json!({ "notes": notes, "notListed": more }) } else { json!({ "notes": notes }) })
         }
@@ -424,14 +444,18 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         }
         "add_note" => {
             let text = note_text(args)?;
-            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms() }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note))
+            let state = current_state(store)?;
+            let project_id = note_project(args, &state)?.flatten();
+            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id }).map_err(|e| e.to_string())?;
+            Ok(describe_note(&note, &state.projects))
         }
         "update_note" => {
             let note = existing_note(store, args)?;
-            let text = note_text(args)?;
-            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms() }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note))
+            let state = current_state(store)?;
+            let text = if args.get("text").is_some() { note_text(args)? } else { note.text.clone() };
+            let project_id = note_project(args, &state)?.unwrap_or(note.project_id);
+            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id }).map_err(|e| e.to_string())?;
+            Ok(describe_note(&note, &state.projects))
         }
         "delete_note" => {
             let note = existing_note(store, args)?;
@@ -586,9 +610,9 @@ mod tests {
     #[test]
     fn an_agent_can_search_notes_and_is_told_what_was_left_out() {
         let store = Store::open(Path::new(":memory:")).unwrap();
-        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1 }).unwrap();
+        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1, project_id: None }).unwrap();
         for i in 0..25 {
-            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i }).unwrap();
+            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i, project_id: None }).unwrap();
         }
         let replies = talk(&store, &[tool(1, "list_notes", json!({ "search": "ALPHA seed" })), tool(2, "list_notes", json!({}))]);
         let found = said(&replies[0]);
@@ -639,5 +663,27 @@ mod tests {
         assert_eq!(sheet["blocks"][0]["plannedMinutes"], 25);
         assert_eq!(sheet["focusedMinutes"], 28);
         assert_eq!(sheet["blocks"][0]["from"].as_str().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn a_note_can_belong_to_a_project_and_be_moved_out_of_it() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[
+            tool(1, "add_project", json!({ "name": "Hop" })),
+            tool(2, "add_note", json!({ "text": "# Seed funds", "project": "hop" })),
+        ]);
+        let added = said(&replies[1]);
+        assert_eq!(added["project"], "Hop");
+        let id = added["id"].as_i64().unwrap();
+        let replies = talk(&store, &[
+            tool(3, "update_note", json!({ "id": id, "text": "# Seed funds\nAlpha" })),
+            tool(4, "update_note", json!({ "id": id, "project": null })),
+            tool(5, "add_note", json!({ "text": "x", "project": "Nope" })),
+        ]);
+        // Changing the text keeps the project; null takes it out.
+        assert_eq!(said(&replies[0])["project"], "Hop");
+        assert_eq!(said(&replies[1])["project"], Value::Null);
+        assert_eq!(said(&replies[1])["text"], "# Seed funds\nAlpha");
+        assert_eq!(replies[2]["result"]["isError"], true);
     }
 }
