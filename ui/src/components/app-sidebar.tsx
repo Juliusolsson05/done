@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   CalendarDaysIcon,
+  CircleCheckIcon,
   CalendarIcon,
   ChartGanttIcon,
   ClipboardListIcon,
@@ -115,8 +116,6 @@ export function AppSidebar() {
             {nav('upcoming', 'Upcoming', CalendarDaysIcon, count.upcoming)}
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
-            {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
-            {nav('timesheet', 'Time sheet', ClipboardListIcon)}
             {nav('notes', 'Notes', NotebookPenIcon)}
           </SidebarMenu>
         </SidebarGroup>
@@ -141,6 +140,15 @@ export function AppSidebar() {
               </SidebarMenuItem>
             ))}
             {ui.newProject && <NewProject />}
+          </SidebarMenu>
+        </SidebarGroup>
+        {/* Less used, so below the projects: focusing, the record of it, and what is done. */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-faint">Extras</SidebarGroupLabel>
+          <SidebarMenu>
+            {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
+            {nav('timesheet', 'Time sheet', ClipboardListIcon)}
+            {nav('completed', 'Completed', CircleCheckIcon)}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

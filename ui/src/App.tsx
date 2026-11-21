@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { AppMenu, menuTargetOf, type MenuTarget } from '@/components/app-menu'
 import { AppSidebar } from '@/components/app-sidebar'
 import { Board } from '@/components/board'
+import { Completed } from '@/components/completed'
 import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
 import { MobileBar } from '@/components/mobile-bar'
@@ -129,7 +130,7 @@ export default function App() {
       setUi((u) => ({
         ...u,
         ...CLOSED,
-        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
+        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
         adding: true,
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
@@ -354,6 +355,7 @@ export default function App() {
         '6': { kind: 'focus' },
         '7': { kind: 'timesheet' },
         '8': { kind: 'notes' },
+        '9': { kind: 'completed' },
       }
       if (views[event.key]) app.openView(views[event.key])
       // Space pauses and resumes; during a reminder Space or Enter continues.
@@ -426,8 +428,9 @@ export default function App() {
                   {view.kind === 'focus' && <FocusView />}
                   {view.kind === 'timesheet' && <TimeSheet />}
                   {view.kind === 'notes' && <Notes />}
+                  {view.kind === 'completed' && <Completed />}
                   {view.kind === 'settings' && <Settings />}
-                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
+                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'completed' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
                 <SearchDialog />
