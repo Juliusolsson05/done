@@ -12,9 +12,10 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { carryDismissed, dismissOnBackspace, type Dismissed } from '@/lib/date-phrases'
 import { describeDay, spellDay, TODAY } from '@/lib/days'
-import { readLine } from '@/lib/quick-add'
+import { projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/quick-add'
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
+import { cn } from '@/lib/utils'
 
 function QuickAdd() {
   const { data, ui, update, closeAll } = useApp()
@@ -23,6 +24,8 @@ function QuickAdd() {
   const [dismissed, setDismissed] = useState<Dismissed[]>([])
   const inputRef = useFocus()
   const mirrorRef = useRef<HTMLDivElement>(null)
+  // Where the caret is, for suggesting a project while "@" is typed.
+  const [caret, setCaret] = useState(0)
   // What a new task gets when the typed line does not say: the view you are in.
   const read = readLine(
     text,
@@ -34,6 +37,11 @@ function QuickAdd() {
     },
     dismissed,
   )
+
+  const suggestion = suggestProjects(text, caret, data.projects)
+  // The date and the project, marked in the field where they were typed.
+  const project = projectSpan(text, data.projects)
+  const marks = [read.date && { start: read.date.start, end: read.date.end }, project].filter((m): m is { start: number; end: number } => !!m).sort((a, b) => a.start - b.start)
 
   // A long line scrolls inside the field; the highlight behind it has to
   // scroll with it. Done after every render as well as on scroll, because
@@ -49,6 +57,16 @@ function QuickAdd() {
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Tab takes the suggested project: "@ha" becomes "@hackathons.team ".
+    if (event.key === 'Tab' && !event.shiftKey && suggestion) {
+      event.preventDefault()
+      const taken = takeSuggestion(text, suggestion, suggestion.projects[0])
+      play('confirm')
+      type(taken.text)
+      setCaret(taken.caret)
+      requestAnimationFrame(() => inputRef.current?.setSelectionRange(taken.caret, taken.caret))
+      return
+    }
     // Only the plain key: Option and Command Backspace delete a word or the
     // line, and a key pressed while composing belongs to the input method.
     if (event.key !== 'Backspace' || event.metaKey || event.altKey || event.ctrlKey || event.nativeEvent.isComposing) return
@@ -82,7 +100,7 @@ function QuickAdd() {
               marked on a copy of the line lying exactly behind the field: same
               type, same padding, never wrapped, scrolled with it. Only the
               mark shows; the copy's text is transparent. */}
-          {read.date && (
+          {marks.length > 0 && (
             <div
               ref={mirrorRef}
               aria-hidden
@@ -92,29 +110,66 @@ function QuickAdd() {
                   the same room here a line scrolled to its end would sit a
                   couple of pixels off. */}
               <span className="pr-1">
-                {text.slice(0, read.date.start)}
-                {/* The ring is the mark's breathing room. It is a shadow, so
-                    unlike padding it cannot move the text off the field's. */}
-                <span data-date-phrase className="rounded-sm bg-primary/15 ring-2 ring-primary/15">
-                  {text.slice(read.date.start, read.date.end)}
-                </span>
-                {text.slice(read.date.end)}
+                {marks.map((mark, i) => (
+                  <span key={mark.start}>
+                    {text.slice(i === 0 ? 0 : marks[i - 1].end, mark.start)}
+                    {/* The ring is the mark's breathing room. It is a shadow, so
+                        unlike padding it cannot move the text off the field's. */}
+                    <span data-date-phrase={mark === project ? undefined : ''} className="rounded-sm bg-primary/15 ring-2 ring-primary/15">
+                      {text.slice(mark.start, mark.end)}
+                    </span>
+                  </span>
+                ))}
+                {text.slice(marks[marks.length - 1].end)}
               </span>
             </div>
           )}
           <Input
             ref={inputRef}
             value={text}
-            onChange={(e) => type(e.target.value)}
+            onChange={(e) => {
+              type(e.target.value)
+              setCaret(e.target.selectionStart ?? e.target.value.length)
+            }}
             onKeyDown={onKeyDown}
             onScroll={followScroll}
-            onSelect={followScroll}
+            onSelect={(e) => {
+              followScroll()
+              setCaret(e.currentTarget.selectionStart ?? 0)
+            }}
             autoComplete="off"
             placeholder="What needs doing?"
             aria-label="New task"
             className="relative border-0 px-0 text-base font-medium placeholder:font-normal placeholder:text-faint focus-visible:ring-0 md:text-base"
           />
         </div>
+        {/* The projects an "@" could be, the first taken with Tab. */}
+        {suggestion && (
+          <div className="flex flex-wrap items-center gap-1 text-xs" aria-live="polite">
+            {suggestion.projects.slice(0, 5).map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const taken = takeSuggestion(text, suggestion, p)
+                  play('confirm')
+                  type(taken.text)
+                  setCaret(taken.caret)
+                  requestAnimationFrame(() => {
+                    inputRef.current?.focus()
+                    inputRef.current?.setSelectionRange(taken.caret, taken.caret)
+                  })
+                }}
+                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
+              >
+                <ProjectDot id={p.id} />
+                {p.name}
+                {i === 0 && <Kbd className="ml-1 h-4 px-1 text-[10px] max-md:hidden">Tab</Kbd>}
+              </button>
+            ))}
+          </div>
+        )}
         {/* What was read out of the line, shown as it is typed. */}
         <div className="flex min-h-6 flex-wrap items-center gap-1 text-xs text-faint">
           {!text.trim() ? (
@@ -122,7 +177,7 @@ function QuickAdd() {
               'The one thing that has to happen today'
             ) : (
               <>
-                Try: <span className="text-muted-foreground">call the bank tomorrow p1 #home</span>
+                Try: <span className="text-muted-foreground">call the bank tomorrow p1 @home</span>
               </>
             )
           ) : (
