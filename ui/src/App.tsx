@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { Toaster } from '@/components/ui/sonner'
 import { AppMenu, menuTargetOf, type MenuTarget } from '@/components/app-menu'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -28,6 +28,27 @@ import { cn } from '@/lib/utils'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false }
 const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete
+
+// Whether the sidebar was showing when the app was last open. The sidebar
+// writes this cookie itself each time it is put away or brought back.
+function sidebarWasOpen(): boolean {
+  return !document.cookie.split('; ').includes('sidebar_state=false')
+}
+
+// Puts the sidebar away and brings it back; so does Cmd+B. Fixed to the
+// page's top left corner, so it stays in reach however far a page is scrolled.
+function SidebarToggle() {
+  const { open } = useSidebar()
+  return (
+    <SidebarTrigger
+      className={cn(
+        'fixed top-3.5 z-20 text-faint transition-[left] duration-200 ease-linear hover:text-muted-foreground max-md:hidden',
+        open ? 'left-[calc(var(--sidebar-width)+0.5rem)]' : 'left-4',
+      )}
+      title="Sidebar (⌘B)"
+    />
+  )
+}
 
 function storedZoom(): number {
   try {
@@ -328,7 +349,7 @@ export default function App() {
             off for everything inside it, which only the sidebar wants. */}
         <ContextMenuTrigger asChild className="select-auto">
           <div>
-            <SidebarProvider className="md:h-svh" onContextMenu={onContextMenu}>
+            <SidebarProvider className="md:h-svh" defaultOpen={sidebarWasOpen()} onContextMenu={onContextMenu}>
               <AppSidebar />
               {/* In a window the content is a sheet lying on the sidebar. On a
                   phone it is the whole screen, edge to edge, kept clear of
@@ -338,8 +359,11 @@ export default function App() {
                   'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
                   'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+1.25rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+6rem)]',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
+                  // With the sidebar put away the sheet keeps its margin on the left too.
+                  'md:peer-data-[state=collapsed]:ml-2',
                 )}
               >
+                <SidebarToggle />
                 <div
                   key={view.kind === 'project' ? view.id : view.kind}
                   className={cn('animate-enter', (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col')}

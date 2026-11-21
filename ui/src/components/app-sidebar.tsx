@@ -64,7 +64,7 @@ function NewProject() {
 
 export function AppSidebar() {
   const { data, info, ui, focus, openView: open, newProject } = useApp()
-  const { isMobile, setOpenMobile } = useSidebar()
+  const { setOpenMobile } = useSidebar()
   const count = counts(data.tasks, TODAY)
   // On a phone the sidebar lies over the page, so choosing a view puts it away.
   const openView = (view: View) => {
@@ -85,8 +85,9 @@ export function AppSidebar() {
 
   return (
     // On a phone the sidebar is a sheet that slides in over the page (opened
-    // from the bar at the bottom); in a window it is always there.
-    <Sidebar collapsible={isMobile ? 'offcanvas' : 'none'} className="select-none">
+    // from the bar at the bottom); in a window it can be put away with the
+    // button at the page's top left, or Cmd+B.
+    <Sidebar collapsible="offcanvas" className="select-none">
       <SidebarHeader className="px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">done</SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

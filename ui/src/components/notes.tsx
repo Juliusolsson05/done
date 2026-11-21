@@ -1,7 +1,7 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'markdown-to-jsx/react'
 import { ChevronLeftIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -156,7 +156,7 @@ export function Notes() {
   // On a phone: the open note alone, with a way back to the list.
   if (isMobile && current) {
     return (
-      <div className="flex min-h-[70svh] flex-col">
+      <div>
         <div className="mb-3 flex items-center">
           <Button variant="ghost" size="sm" className="-ml-2.5 text-primary" onClick={() => open(null)}>
             <ChevronLeftIcon />
@@ -172,8 +172,20 @@ export function Notes() {
   }
 
   return (
-    <div className="max-w-5xl">
+    <div>
       <ViewHeader title="Notes">
+        {!isMobile && current && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-destructive"
+            aria-label="Delete note"
+            title="Delete note"
+            onClick={() => remove(current)}
+          >
+            <Trash2Icon />
+          </Button>
+        )}
         <HeaderButton onClick={() => void create()}>
           <PlusIcon />
           New note
@@ -181,8 +193,9 @@ export function Notes() {
       </ViewHeader>
       {notes && notes.length === 0 && <p className="py-10 text-sm text-muted-foreground">No notes yet. New note starts one.</p>}
       {sorted.length > 0 && (
-        <div className="flex gap-6">
-          <div className="w-full shrink-0 md:w-60">
+        <div className="flex items-start gap-8">
+          {/* The list stays where it is while a long note scrolls past it. */}
+          <div className="w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto">
             <label className="mb-3 flex h-8 items-center gap-2 rounded-lg bg-muted px-2.5 text-muted-foreground max-md:h-10">
               <SearchIcon className="size-4 shrink-0" />
               <input
@@ -228,14 +241,10 @@ export function Notes() {
             ))}
           </div>
           {!isMobile && current && (
-            <div className="flex min-h-[60svh] min-w-0 flex-1 flex-col">
+            // As long as the note is: the page scrolls, not a box inside it.
+            // Held to a readable line length.
+            <div className="min-w-0 max-w-3xl flex-1">
               <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
-              <div className="mt-2 flex justify-end">
-                <HeaderButton danger onClick={() => remove(current)}>
-                  <Trash2Icon />
-                  Delete
-                </HeaderButton>
-              </div>
             </div>
           )}
         </div>
@@ -249,9 +258,19 @@ export function Notes() {
 // just made, or one with nothing in it yet, opens for typing.
 function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; onChange: (text: string) => void }) {
   const [editing, setEditing] = useState(focused || isBlank(note.text))
+  const field = useRef<HTMLTextAreaElement>(null)
+  // The field grows with the text, so a long note scrolls with the page
+  // instead of inside a box of its own.
+  useLayoutEffect(() => {
+    const el = field.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [note.text, editing])
   if (editing) {
     return (
       <textarea
+        ref={field}
         autoFocus
         aria-label="Note"
         value={note.text}
@@ -265,7 +284,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
           }
         }}
         placeholder="Write it down… Markdown works: # Title, - list, **bold**"
-        className="min-h-0 w-full flex-1 resize-none bg-transparent font-mono text-[14px] leading-relaxed outline-none placeholder:font-sans placeholder:text-faint max-md:text-base"
+        className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent font-mono text-[14px] leading-relaxed outline-none placeholder:font-sans placeholder:text-faint max-md:text-base"
       />
     )
   }
@@ -283,7 +302,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
           setEditing(true)
         }
       }}
-      className="note-md min-h-0 w-full flex-1 cursor-text text-[15px] leading-relaxed outline-none max-md:text-base"
+      className="note-md min-h-[50svh] w-full cursor-text pb-16 text-[15px] leading-relaxed outline-none max-md:text-base"
     >
       <Markdown options={MARKDOWN}>{note.text}</Markdown>
     </div>
