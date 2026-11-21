@@ -269,3 +269,13 @@
   padding: 0.25em 0.6em;
   text-align: left;
 }
+
+/* Find on the page (Cmd+F): every match, and the one it is at. */
+::highlight(find) {
+  background-color: color-mix(in oklab, #facc15 45%, transparent);
+  color: inherit;
+}
+::highlight(find-current) {
+  background-color: #fb923c;
+  color: #000;
+}

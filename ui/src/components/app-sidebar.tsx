@@ -8,6 +8,7 @@ import {
   InboxIcon,
   PlusIcon,
   NotebookPenIcon,
+  SearchIcon,
   SlidersHorizontalIcon,
   TimerIcon,
   type LucideIcon,
@@ -63,7 +64,7 @@ function NewProject() {
 }
 
 export function AppSidebar() {
-  const { data, info, ui, focus, openView: open, newProject } = useApp()
+  const { data, info, ui, focus, openView: open, newProject, search } = useApp()
   const { setOpenMobile } = useSidebar()
   const count = counts(data.tasks, TODAY)
   // On a phone the sidebar lies over the page, so choosing a view puts it away.
@@ -92,6 +93,19 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => {
+                  setOpenMobile(false)
+                  search()
+                }}
+                className={ROW}
+              >
+                <SearchIcon className="text-muted-foreground" />
+                <span>Search</span>
+              </SidebarMenuButton>
+              <SidebarMenuBadge className={cn('font-normal text-faint max-md:hidden', BADGE)}>⌘K</SidebarMenuBadge>
+            </SidebarMenuItem>
             {nav('inbox', 'Inbox', InboxIcon, count.inbox)}
             {nav('today', 'Today', CalendarIcon, count.today, count.late)}
             {nav('upcoming', 'Upcoming', CalendarDaysIcon, count.upcoming)}

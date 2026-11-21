@@ -13,6 +13,8 @@ import { MobileQuickAdd } from '@/components/quick-add'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog } from '@/components/task-editor'
+import { FindBar } from '@/components/find-bar'
+import { SearchDialog } from '@/components/search'
 import { TimeSheet } from '@/components/time-sheet'
 import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
@@ -26,8 +28,8 @@ import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/sto
 import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
-const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false }
-const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete
+const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
+const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
 
 // Whether the sidebar was showing when the app was last open. The sidebar
 // writes this cookie itself each time it is put away or brought back.
@@ -129,6 +131,19 @@ export default function App() {
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
     edit: (id) => setUi((u) => ({ ...u, ...CLOSED, editing: id })),
+    search: () => setUi((u) => ({ ...u, ...CLOSED, searching: true })),
+    reveal(hit) {
+      if (hit.kind === 'project') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'project', id: hit.id } }))
+      if (hit.kind === 'note') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'notes', id: hit.id } }))
+      // A subtask is edited from the task it is under, in that task's list.
+      const found = data.tasks.find((t) => t.id === hit.id)
+      const task = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
+      if (!task) return closeAll()
+      const view: View = task.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: task.projectId }
+      // A finished task is not in the list any more, so its list is shown without an editor.
+      setUi((u) => ({ ...u, ...CLOSED, view, editing: task.done ? null : task.id }))
+      if (!task.done) notice(task.id)
+    },
     newProject: () => setUi((u) => ({ ...u, ...CLOSED, newProject: true })),
     rename: () => setUi((u) => ({ ...u, ...CLOSED, renaming: true })),
     askDelete: () => setUi((u) => ({ ...u, ...CLOSED, confirmDelete: true })),
@@ -207,7 +222,7 @@ export default function App() {
   // may change the page then. Reads only refs, so set-up-once listeners can call it.
   const busy = () => {
     const { ui } = latest.current
-    return ui.adding || ui.editing !== null || ui.newProject || ui.renaming || dragging.current || menuOpen.current
+    return ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.searching || dragging.current || menuOpen.current
   }
 
   // Keeping in step. An agent, another window or the web app may change the
@@ -277,6 +292,13 @@ export default function App() {
     }
     const onKey = (event: KeyboardEvent) => {
       const app = latest.current
+      // Cmd+K (Ctrl+K elsewhere): search the whole app, from anywhere.
+      // Cmd+F is find on the page, handled by the find bar.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        app.search()
+        return
+      }
       if (event.key === 'Escape') {
         // A menu, dialog or select that was open has already taken this
         // Escape for itself and marked it handled.
@@ -377,6 +399,8 @@ export default function App() {
                   {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
+                <SearchDialog />
+                <FindBar />
               </SidebarInset>
               <MobileQuickAdd />
               <MobileBar />

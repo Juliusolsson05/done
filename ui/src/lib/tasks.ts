@@ -33,7 +33,9 @@ export interface Data {
 }
 
 export type View =
-  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'notes' | 'settings' }
+  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'settings' }
+  // A note id opens that note.
+  | { kind: 'notes'; id?: number }
   | { kind: 'project'; id: number }
 
 export const PRIORITY_NAME: Record<number, string> = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }

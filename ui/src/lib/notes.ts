@@ -1,5 +1,6 @@
 // Notes: free text that is not a task, such as a list jotted down in the
 // middle of a conversation. Kept apart from the tasks and their revision.
+import { matchesQuery } from '@/lib/search'
 
 export interface Note {
   id: number
@@ -42,22 +43,8 @@ export const isBlank = (text: string): boolean => text.trim() === ''
 // Newest change first, as the list shows them.
 export const byNewest = (a: Note, b: Note): number => b.updatedAt - a.updatedAt || b.id - a.id
 
-// Letters as they are compared in a search: lower case, without accents, so
-// "fjord" finds "Fjörd".
-const fold = (text: string): string =>
-  text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-
 // Every word of the query appears somewhere in the note. An empty query matches all.
-export function matches(note: Note, query: string): boolean {
-  const text = fold(note.text)
-  return fold(query)
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((word) => text.includes(word))
-}
+export const matches = (note: Note, query: string): boolean => matchesQuery(note.text, query)
 
 export interface DateGroup {
   label: string

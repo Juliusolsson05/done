@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { useApp } from '@/lib/app-context'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { play } from '@/lib/sounds'
@@ -17,6 +18,7 @@ import { cn } from '@/lib/utils'
 const QUIET_MS = 500
 
 export function Notes() {
+  const { ui } = useApp()
   const isMobile = useIsMobile()
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
@@ -66,7 +68,16 @@ export function Notes() {
   const reread = () => {
     // Never under your hands: a note being typed is not replaced.
     if (pending.current) return
-    loadNotes().then(setNotes, () => setNotes((all) => all ?? []))
+    loadNotes().then(
+      (all) => {
+        // An empty note left behind (the app was closed while it was open) is
+        // cleared away, as leaving it would have done.
+        const empty = all.filter((n) => isBlank(n.text) && n.id !== openRef.current)
+        for (const n of empty) void deleteNote(n.id).catch(() => undefined)
+        setNotes(all.filter((n) => !empty.includes(n)))
+      },
+      () => setNotes((all) => all ?? []),
+    )
   }
 
   useEffect(() => {
@@ -90,10 +101,22 @@ export function Notes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, notes, isMobile])
 
-  // On a wide screen a note is always open when there is one.
+  // A note asked for from elsewhere (the search) is opened once it is here.
+  const asked = ui.view.kind === 'notes' ? ui.view.id : undefined
   useEffect(() => {
-    if (!isMobile && openId === null && notes && notes.length > 0) setOpenId(notes[0].id)
-  }, [isMobile, openId, notes])
+    if (asked !== undefined && notes?.some((n) => n.id === asked)) {
+      setQuery('')
+      open(asked)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked, notes !== null])
+
+  // On a wide screen a note is always open when there is one: the one asked
+  // for if any, otherwise the newest.
+  useEffect(() => {
+    if (isMobile || openId !== null || !notes || notes.length === 0) return
+    setOpenId(asked !== undefined && notes.some((n) => n.id === asked) ? asked : [...notes].sort(byNewest)[0].id)
+  }, [isMobile, openId, notes, asked])
 
   useEffect(() => {
     if (!reading) return
@@ -169,15 +192,15 @@ export function Notes() {
 
   const readToggle = current && !isBlank(current.text) && (
     <Button
-      variant="ghost"
-      size="icon-sm"
+      variant={reading ? 'secondary' : 'ghost'}
+      size="sm"
       className={reading ? 'text-foreground' : 'text-muted-foreground'}
-      aria-label={reading ? 'Back to writing' : 'View as document'}
       aria-pressed={reading}
-      title={reading ? 'Back to writing (Esc)' : 'View as document'}
+      title={reading ? 'Back to writing (Esc, or click the text)' : 'Read it as a formatted document'}
       onClick={() => setReading((r) => !r)}
     >
       {reading ? <PenLineIcon /> : <BookOpenIcon />}
+      {reading ? 'Edit' : 'Read'}
     </Button>
   )
 
@@ -197,7 +220,11 @@ export function Notes() {
             </Button>
           </div>
         </div>
-        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />}
+        {reading ? (
+          <NoteDocument text={current.text} onEdit={() => setReading(false)} />
+        ) : (
+          <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
+        )}
       </div>
     )
   }
@@ -277,7 +304,7 @@ export function Notes() {
             // Held to a readable line length.
             <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
               {reading ? (
-                <NoteDocument text={current.text} />
+                <NoteDocument text={current.text} onEdit={() => setReading(false)} />
               ) : (
                 <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
               )}
@@ -314,9 +341,16 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
 
 // The note shown formatted, as a document to read. Markdown: # headings,
 // lists, **bold**, links and so on.
-function NoteDocument({ text }: { text: string }) {
+// A click on the text (not on a link) goes back to writing.
+function NoteDocument({ text, onEdit }: { text: string; onEdit: () => void }) {
   return (
-    <article className="note-md pb-16 text-[15px] leading-relaxed max-md:text-base">
+    <article
+      title="Click to edit"
+      onClick={(event) => {
+        if (!(event.target as Element).closest('a')) onEdit()
+      }}
+      className="note-md cursor-text pb-16 text-[15px] leading-relaxed max-md:text-base"
+    >
       <Markdown options={MARKDOWN}>{text}</Markdown>
     </article>
   )
