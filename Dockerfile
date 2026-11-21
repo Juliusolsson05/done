@@ -8,7 +8,9 @@ RUN npm ci
 COPY ui/ ./
 RUN npm run build
 
-FROM rust:1-slim AS server
+# Bookworm, the same Debian as the image it runs in below: built on a newer one,
+# the program asks for a C runtime the running image does not have.
+FROM rust:1-slim-bookworm AS server
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
