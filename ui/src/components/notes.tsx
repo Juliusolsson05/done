@@ -243,7 +243,7 @@ export function Notes() {
       size="sm"
       className={reading ? 'text-foreground' : 'text-muted-foreground'}
       aria-pressed={reading}
-      title={reading ? 'Back to writing (Esc)' : 'Read it as a formatted document'}
+      aria-label={reading ? 'Back to writing' : 'Read as a document'}
       onClick={() => setReading((r) => !r)}
     >
       {reading ? <PenLineIcon /> : <BookOpenIcon />}
@@ -284,7 +284,6 @@ export function Notes() {
             size="icon-sm"
             className="text-muted-foreground hover:text-destructive"
             aria-label="Delete note"
-            title="Delete note"
             onClick={() => remove(current)}
           >
             <Trash2Icon />
@@ -389,7 +388,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
       {links.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {links.map((href) => (
-            <Button key={href} variant="outline" size="xs" title={href} onClick={() => openLink(href)} className="font-normal text-muted-foreground">
+            <Button key={href} variant="outline" size="xs" onClick={() => openLink(href)} className="font-normal text-muted-foreground">
               <ExternalLinkIcon />
               {label(href)}
             </Button>
@@ -400,7 +399,6 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
         ref={field}
         autoFocus={focused}
         aria-label="Note"
-        title="⌘-click a link to open it"
         value={note.text}
         onChange={(event) => onChange(event.target.value)}
         // Cmd-click on an address opens it, as in a code editor; a plain
@@ -437,7 +435,6 @@ function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
   return (
     <a
       href={href}
-      title={href}
       onClick={(event) => {
         event.preventDefault()
         if (href && /^https?:\/\//i.test(href)) openLink(href)
