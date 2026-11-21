@@ -26,7 +26,7 @@ import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subs
 import { play } from '@/lib/sounds'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
 import { forgetLast, undoLast } from '@/lib/undo'
-import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
+import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
@@ -134,7 +134,10 @@ export default function App() {
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
     edit: (id) => setUi((u) => ({ ...u, ...CLOSED, editing: id })),
-    search: () => setUi((u) => ({ ...u, ...CLOSED, searching: true })),
+    search: () => {
+      play('open')
+      setUi((u) => ({ ...u, ...CLOSED, searching: true }))
+    },
     reveal(hit) {
       if (hit.kind === 'project') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'project', id: hit.id } }))
       if (hit.kind === 'note') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'notes', id: hit.id } }))
@@ -166,9 +169,7 @@ export default function App() {
     completeSound(id) {
       const task = data.tasks.find((t) => t.id === id)
       if (!task || task.done) return
-      // Today's goal, or the last thing left in Today, gets the fuller sound.
-      const big = task.goalDay === TODAY || (ui.view.kind === 'today' && clearsToday(data.tasks, id, TODAY))
-      play(big ? 'completeBig' : 'complete')
+      play(finishesBig(data.tasks, id, ui.view, TODAY) ? 'completeBig' : 'complete')
     },
     complete(id, heard = false) {
       if (data.tasks.find((t) => t.id === id)?.done) return
@@ -299,11 +300,15 @@ export default function App() {
       event.preventDefault()
       latest.current.setZoom(step === undefined ? 1 : latest.current.zoom + step)
     }
-    const onKey = (event: KeyboardEvent) => {
+    // Cmd+K and Cmd+Z, taken before anything else on the page can see them:
+    // in the Mac app's web view a key with Cmd that reaches the page late can
+    // be lost to the app's menus.
+    const onCommandKey = (event: KeyboardEvent) => {
       const app = latest.current
+      const command = (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey
       // Cmd+Z: undo the last thing done, anywhere. In a text field it is
       // left to the field, which undoes the typing.
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+      if (command && event.code === 'KeyZ') {
         const inField = event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')
         if (inField) return
         event.preventDefault()
@@ -313,13 +318,16 @@ export default function App() {
         }
         return
       }
-      // Cmd+K (Ctrl+K elsewhere): search the whole app, from anywhere.
-      // Cmd+F is find on the page, handled by the find bar.
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+      // Cmd+K, or Option+K: search the whole app, from anywhere. Matched on
+      // the key's place, since Option+K types a character of its own.
+      const optionOnly = event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey
+      if ((command || optionOnly) && event.code === 'KeyK') {
         event.preventDefault()
         app.search()
-        return
       }
+    }
+    const onKey = (event: KeyboardEvent) => {
+      const app = latest.current
       if (event.key === 'Escape') {
         // A menu, dialog or select that was open has already taken this
         // Escape for itself and marked it handled.
@@ -357,9 +365,11 @@ export default function App() {
       }
     }
     document.addEventListener('keydown', onZoomKey, true)
+    document.addEventListener('keydown', onCommandKey, true)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('keydown', onZoomKey, true)
+      document.removeEventListener('keydown', onCommandKey, true)
       document.removeEventListener('keydown', onKey)
     }
   }, [])

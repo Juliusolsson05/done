@@ -139,6 +139,21 @@ export function clearsToday(all: Task[], id: number, today: Day): boolean {
   return due.length === 1 && due[0].id === id
 }
 
+// Whether finishing this task earns the fuller sound: it is today's goal,
+// it leaves the list being looked at empty (Today, Inbox, a project), it is
+// the last open subtask of its task, or it is a round 5th thing done today.
+export function finishesBig(all: Task[], id: number, view: View, today: Day): boolean {
+  const task = all.find((t) => t.id === id)
+  if (!task || task.done) return false
+  if (task.goalDay === today) return true
+  if (task.parentId != null) return all.filter((t) => t.parentId === task.parentId && !t.done).length === 1
+  if (view.kind === 'today' && clearsToday(all, id, today)) return true
+  const listed = view.kind === 'inbox' || view.kind === 'project' ? sections(view, all, today).flatMap((s) => s.tasks) : []
+  if (listed.length === 1 && listed[0].id === id) return true
+  const doneToday = all.filter((t) => t.done && t.doneDay === today && t.parentId == null).length
+  return (doneToday + 1) % 5 === 0
+}
+
 export type LaneKey = 'todo' | 'doing' | 'done'
 export const laneOf = (task: Task): LaneKey => (task.done ? 'done' : task.status === 'doing' ? 'doing' : 'todo')
 export function lanes(all: Task[], today: Day): Record<LaneKey, Task[]> {

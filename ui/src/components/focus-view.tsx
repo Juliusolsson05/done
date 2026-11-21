@@ -217,7 +217,7 @@ function Running({ session }: { session: Session }) {
   const paused = session.endsAt === null
   const finishTask = () => {
     const id = session.taskId
-    endFocus()
+    endFocus(false)
     // It may have been deleted, or finished elsewhere, while the clock ran.
     if (id !== null && data.tasks.some((t) => t.id === id)) complete(id)
   }

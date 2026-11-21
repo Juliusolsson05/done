@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { occurrences, step } from '@/lib/find'
+import { play } from '@/lib/sounds'
 
 // The page: everything right of the sidebar.
 const pageRoot = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]')
@@ -54,7 +55,10 @@ export function FindBar() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
-        setOpen(true)
+        setOpen((was) => {
+          if (!was) play('open')
+          return true
+        })
         // Pressed again while open: select what is there, ready to type over.
         requestAnimationFrame(() => field.current?.select())
       }

@@ -6,7 +6,7 @@
 // reasoned, and the limits below are what keeps a later change from making
 // a sound loud, long or shrill.
 
-export type SoundName = 'complete' | 'completeBig' | 'add' | 'reopen' | 'delete' | 'undo' | 'drop' | 'confirm' | 'error'
+export type SoundName = 'complete' | 'completeBig' | 'focusStart' | 'focusDone' | 'open' | 'add' | 'reopen' | 'delete' | 'undo' | 'drop' | 'confirm' | 'error'
 
 export interface Note {
   hz: number
@@ -54,7 +54,7 @@ export function pitch(step: number): number {
   return C5 * 2 ** (semitones / 12)
 }
 const [E4, G4, A4] = [pitch(-3), pitch(-2), pitch(-1)]
-const [G5, C6, E6, G6] = [pitch(3), pitch(5), pitch(7), pitch(8)]
+const [D5, G5, C6, E6, G6, C7] = [pitch(1), pitch(3), pitch(5), pitch(7), pitch(8), pitch(10)]
 
 // ---------- Momentum ----------
 
@@ -94,6 +94,20 @@ const SOUNDS: Record<Exclude<SoundName, 'complete'>, Note[]> = {
   // The fuller reward: the C major chord from G5 up to G6, each note a little
   // louder than the last so it opens rather than hammers.
   completeBig: [sine(G5, 0, 0.12, 0.11), sine(C6, 0.07, 0.12, 0.12), sine(E6, 0.14, 0.12, 0.13), sine(G6, 0.21, 0.26, 0.15), sine(G6 * 2, 0.21, 0.12, 0.025)],
+  // A focus block begins: a soft swell from C5 up an octave, under a held G5.
+  // Rising and calm, the sound of settling in rather than of an alarm.
+  focusStart: [{ ...sine(C5, 0, 0.22, 0.09), slideTo: C6 }, sine(G5, 0.06, 0.18, 0.06)],
+  // A focus block run to its end: the biggest reward there is, the chord
+  // climbing a step further than finishing a task does, to C7.
+  focusDone: [
+    sine(C6, 0, 0.12, 0.1),
+    sine(E6, 0.08, 0.12, 0.11),
+    sine(G6, 0.16, 0.12, 0.12),
+    sine(C7, 0.24, 0.26, 0.15),
+    sine(D5, 0.24, 0.24, 0.05),
+  ],
+  // Something opens (search, find): the faintest tick, so a keypress is felt.
+  open: [sine(E6, 0, 0.04, 0.045)],
   // A pop: a very short slide up a fifth.
   add: [{ ...sine(C5, 0, 0.07, 0.12), slideTo: G5 }],
   // The chime backwards and softer: C6 down to G5.
@@ -122,7 +136,7 @@ export function plan(name: SoundName, on: boolean, streak: Streak | null, now: n
   }
   // The fuller reward is always the same chord, but it is still a completion
   // and keeps a run going.
-  if (name === 'completeBig') return { notes: SOUNDS.completeBig, streak: nextStreak(streak, now) }
+  if (name === 'completeBig' || name === 'focusDone') return { notes: SOUNDS[name], streak: nextStreak(streak, now) }
   return { notes: SOUNDS[name], streak }
 }
 

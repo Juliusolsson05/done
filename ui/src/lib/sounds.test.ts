@@ -22,6 +22,9 @@ import {
 const NAMES = Object.keys({
   complete: 1,
   completeBig: 1,
+  focusStart: 1,
+  focusDone: 1,
+  open: 1,
   add: 1,
   reopen: 1,
   delete: 1,
@@ -121,7 +124,7 @@ describe.each(everySound)('limits: %s', (name, notes) => {
   it('makes a sound', () => expect(notes.length).toBeGreaterThan(0))
 
   it('is short', () => {
-    expect(lengthOf(notes)).toBeLessThanOrEqual(name === 'completeBig' ? MAX_BIG_LENGTH : MAX_LENGTH)
+    expect(lengthOf(notes)).toBeLessThanOrEqual(name === 'completeBig' || name === 'focusDone' ? MAX_BIG_LENGTH : MAX_LENGTH)
   })
 
   it('is quiet', () => {
@@ -145,7 +148,7 @@ describe.each(everySound)('limits: %s', (name, notes) => {
 })
 
 describe('nothing is louder than completing', () => {
-  it.each(NAMES.filter((n) => n !== 'complete' && n !== 'completeBig'))('%s', (name) => {
+  it.each(NAMES.filter((n) => n !== 'complete' && n !== 'completeBig' && n !== 'focusDone'))('%s', (name) => {
     const loudest = (notes: Note[]) => Math.max(...notes.map((n) => n.gain))
     expect(loudest(plan(name, true, null, 0).notes)).toBeLessThan(loudest(plan('complete', true, null, 0).notes))
   })
