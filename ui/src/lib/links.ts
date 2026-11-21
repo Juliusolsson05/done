@@ -44,3 +44,18 @@ export function label(href: string): string {
     return href
   }
 }
+
+// The address the text has at `at` (a caret position), if it is inside one:
+// what a Cmd-click in a note being written opens.
+export function linkAt(text: string, at: number): string | null {
+  let start = 0
+  for (const part of linkParts(text)) {
+    const end = start + part.text.length
+    if (part.href && at >= start && at <= end) return part.href
+    start = end
+  }
+  return null
+}
+
+// Every address in the text, once each, in the order they appear.
+export const linksIn = (text: string): string[] => [...new Set(linkParts(text).flatMap((p) => (p.href ? [p.href] : [])))]

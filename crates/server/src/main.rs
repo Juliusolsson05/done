@@ -75,6 +75,17 @@ struct Day {
     day: String,
 }
 
+/// How many finished tasks the Completed page shows.
+const FINISHED_LISTED: i64 = 300;
+
+async fn finished(State(store): State<Arc<Store>>) -> Response {
+    reply(store.finished(FINISHED_LISTED))
+}
+
+async fn cloud_finished(State(cloud): State<Cloud>, session: Session) -> Response {
+    answer(cloud.accounts.read(&session.sub, |s| s.finished(FINISHED_LISTED)).await)
+}
+
 async fn entries(State(store): State<Arc<Store>>, Query(q): Query<Day>) -> Response {
     reply(store.entries(&q.day))
 }
@@ -161,6 +172,7 @@ fn local(store: Arc<Store>) -> Router {
         .route("/api/state", get(state))
         .route("/api/sync", post(sync))
         .route("/api/entries", get(entries).post(record_entry))
+        .route("/api/finished", get(finished))
         .route("/api/entries/delete", post(delete_entry))
         .route("/api/notes", get(notes).post(save_note))
         .route("/api/notes/delete", post(delete_note))
@@ -184,6 +196,7 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/state", get(cloud_state))
         .route("/api/sync", post(cloud_sync))
         .route("/api/entries", get(cloud_entries).post(cloud_record_entry))
+        .route("/api/finished", get(cloud_finished))
         .route("/api/entries/delete", post(cloud_delete_entry))
         .route("/api/notes", get(cloud_notes).post(cloud_save_note))
         .route("/api/notes/delete", post(cloud_delete_note))

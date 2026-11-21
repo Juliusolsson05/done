@@ -3,6 +3,7 @@ import { createContext, useContext, type CSSProperties, type RefObject } from 'r
 import type { Info } from '@/lib/backend'
 import type { Day } from '@/lib/days'
 import type { Session } from '@/lib/focus'
+import type { Hit } from '@/lib/search'
 import { colorIndex, type Data, type Project, type View } from '@/lib/tasks'
 
 // What is on screen right now. Not saved: a reload always starts in Today.
@@ -15,6 +16,8 @@ export interface Ui {
   newProject: boolean
   renaming: boolean
   confirmDelete: boolean
+  // The search over the whole app (Cmd+F) is open.
+  searching: boolean
   tlStart: Day
   // What the Focus view offers before a session starts: the task chosen (its
   // id as text, or 'none'; null until something is chosen, which offers
@@ -39,6 +42,9 @@ export interface App {
   add(): void
   addGoal(): void
   edit(id: number): void
+  search(): void
+  // Show what a search found: a project's list, a task open in its list, or a note.
+  reveal(hit: Hit): void
   closeAll(): void
   newProject(): void
   rename(): void

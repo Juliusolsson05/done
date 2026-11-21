@@ -26,7 +26,7 @@ function SubtaskRow({ task }: { task: Task }) {
           onClick={() => edit(task.id)}
           className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
         >
-          <span className={cn('wrap-anywhere', task.done && 'text-faint line-through')}>{task.title}</span>
+          <span data-findable className={cn('wrap-anywhere', task.done && 'text-faint line-through')}>{task.title}</span>
         </Button>
         {/* Not cut to one line as on a task's row: for a subtask the notes
             are the point, the few words that say what the line is about. */}

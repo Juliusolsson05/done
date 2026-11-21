@@ -192,3 +192,15 @@
     user-select: none;
   }
 }
+
+
+/* Find on the page (Cmd+F): every match, and the one it is at. */
+/* Tailwind cannot address a highlight, so these two stay here. */
+::highlight(find) {
+  background-color: color-mix(in oklab, var(--primary) 18%, transparent);
+  color: inherit;
+}
+::highlight(find-current) {
+  background-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  color: var(--foreground);
+}

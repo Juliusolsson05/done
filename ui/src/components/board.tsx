@@ -52,7 +52,7 @@ function BoardCard({ task, dragged, onDrag }: { task: Task; dragged: boolean; on
             (done || leaving) && 'text-faint line-through',
           )}
         >
-          <span className="wrap-anywhere">{task.title}</span>
+          <span data-findable className="wrap-anywhere">{task.title}</span>
         </Button>
         {(task.goalDay === TODAY || task.due !== null || task.projectId !== null) && (
           <div className="flex flex-wrap items-center gap-x-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">

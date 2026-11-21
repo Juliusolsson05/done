@@ -1,4 +1,4 @@
-// Reading a typed line: "call the bank tomorrow p1 #home".
+// Reading a typed line: "call the bank tomorrow p1 @home" (or #home).
 import { findDate, type Dismissed, type Phrase } from '@/lib/date-phrases'
 import type { Day } from '@/lib/days'
 import type { Project } from '@/lib/tasks'
@@ -36,6 +36,52 @@ function without(text: string, phrase: Phrase): string {
   return before + (/^[.,;:!?)\]]/.test(after) ? '' : ' ') + after
 }
 
+// "@hop" or "#hop": the project whose tag is this or starts with it.
+function projectOfWord(word: string, projects: Project[]): Project | undefined {
+  if (word.length < 2 || (word[0] !== '#' && word[0] !== '@')) return undefined
+  const tag = word.slice(1).toLowerCase()
+  return projects.find((x) => tagOf(x.name) === tag) ?? projects.find((x) => tagOf(x.name).startsWith(tag))
+}
+
+// Where in the line the project was written, for marking it in the field as
+// the date is: the first "@word" or "#word" naming a project.
+export function projectSpan(text: string, projects: Project[]): { start: number; end: number } | null {
+  for (const m of text.matchAll(/[@#]\S+/g)) {
+    // Only at the start of a word: an address like a@b.com is not a project.
+    if (m.index > 0 && !/\s/.test(text[m.index - 1])) continue
+    if (projectOfWord(m[0], projects)) return { start: m.index, end: m.index + m[0].length }
+  }
+  return null
+}
+
+export interface Suggestion {
+  // The part of the line Tab replaces: the "@" and what follows it, up to the caret.
+  start: number
+  end: number
+  projects: Project[]
+}
+
+// While a word starting with "@" or "#" is being typed, the projects it could
+// be: all of them for a bare "@", otherwise those whose tag starts with it.
+// None once the word is already a whole tag.
+export function suggestProjects(text: string, caret: number, projects: Project[]): Suggestion | null {
+  const before = text.slice(0, caret)
+  const m = /(?:^|\s)([@#])(\S*)$/.exec(before)
+  if (!m || /^\S/.test(text.slice(caret))) return null
+  const typed = m[2].toLowerCase()
+  if (projects.some((p) => tagOf(p.name) === typed)) return null
+  const found = projects.filter((p) => tagOf(p.name).startsWith(typed))
+  if (!found.length) return null
+  return { start: caret - typed.length - 1, end: caret, projects: found }
+}
+
+// The line with the suggestion taken: "@hop " in place of what was typed.
+export function takeSuggestion(text: string, suggestion: Suggestion, project: Project): { text: string; caret: number } {
+  const word = '@' + tagOf(project.name) + ' '
+  const after = text.slice(suggestion.end).replace(/^ /, '')
+  return { text: text.slice(0, suggestion.start) + word + after, caret: suggestion.start + word.length }
+}
+
 // The date is the last date phrase in the line that was not dismissed (see
 // date-phrases.ts). Only the first priority and the first known #project are
 // taken out as well; everything else stays in the title as typed.
@@ -51,9 +97,8 @@ export function parseQuickAdd(text: string, projects: Project[], today: Day, dis
       priority = Number(p[1])
       continue
     }
-    if (projectId === null && w.length > 1 && w[0] === '#') {
-      const tag = w.slice(1)
-      const match = projects.find((x) => tagOf(x.name) === tag) ?? projects.find((x) => tagOf(x.name).startsWith(tag))
+    if (projectId === null) {
+      const match = projectOfWord(w, projects)
       if (match) {
         projectId = match.id
         continue

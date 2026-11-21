@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   CalendarDaysIcon,
+  CircleCheckIcon,
   CalendarIcon,
   ChartGanttIcon,
   ClipboardListIcon,
@@ -8,6 +9,7 @@ import {
   InboxIcon,
   PlusIcon,
   NotebookPenIcon,
+  SearchIcon,
   SlidersHorizontalIcon,
   TimerIcon,
   type LucideIcon,
@@ -25,6 +27,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Countdown } from '@/components/focus-view'
@@ -40,7 +43,9 @@ import { cn } from '@/lib/utils'
 type BuiltIn = Exclude<View['kind'], 'project'>
 
 // On a phone a row is tall enough to hit with a thumb.
-const ROW = 'max-md:h-11 max-md:pr-9 max-md:text-base'
+// A row with a count beside it keeps room for the count, so a long name is
+// cut short before it, never under it.
+const ROW = 'group-has-data-[sidebar=menu-badge]/menu-item:pr-8 max-md:h-11 max-md:pr-9 max-md:text-base'
 // The count sits in the middle of the taller row.
 const BADGE = 'max-md:top-3 max-md:text-sm'
 
@@ -63,8 +68,8 @@ function NewProject() {
 }
 
 export function AppSidebar() {
-  const { data, info, ui, focus, openView: open, newProject } = useApp()
-  const { isMobile, setOpenMobile } = useSidebar()
+  const { data, info, ui, focus, openView: open, newProject, search } = useApp()
+  const { setOpenMobile } = useSidebar()
   const count = counts(data.tasks, TODAY)
   // On a phone the sidebar lies over the page, so choosing a view puts it away.
   const openView = (view: View) => {
@@ -85,19 +90,34 @@ export function AppSidebar() {
 
   return (
     // On a phone the sidebar is a sheet that slides in over the page (opened
-    // from the bar at the bottom); in a window it is always there.
-    <Sidebar collapsible={isMobile ? 'offcanvas' : 'none'} className="select-none">
-      <SidebarHeader className="px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">done</SidebarHeader>
+    // from the bar at the bottom); in a window it can be put away with the
+    // button at the page's top left, or Cmd+B.
+    <Sidebar collapsible="offcanvas" className="select-none">
+      <SidebarHeader className="flex-row items-center justify-between px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">
+        done
+        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title="Hide sidebar (⌘B)" />
+      </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => {
+                  setOpenMobile(false)
+                  search()
+                }}
+                className={ROW}
+              >
+                <SearchIcon className="text-muted-foreground" />
+                <span>Search</span>
+              </SidebarMenuButton>
+              <SidebarMenuBadge className={cn('font-normal text-faint max-md:hidden', BADGE)}>⌘K</SidebarMenuBadge>
+            </SidebarMenuItem>
             {nav('inbox', 'Inbox', InboxIcon, count.inbox)}
             {nav('today', 'Today', CalendarIcon, count.today, count.late)}
             {nav('upcoming', 'Upcoming', CalendarDaysIcon, count.upcoming)}
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
-            {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
-            {nav('timesheet', 'Time sheet', ClipboardListIcon)}
             {nav('notes', 'Notes', NotebookPenIcon)}
           </SidebarMenu>
         </SidebarGroup>
@@ -122,6 +142,15 @@ export function AppSidebar() {
               </SidebarMenuItem>
             ))}
             {ui.newProject && <NewProject />}
+          </SidebarMenu>
+        </SidebarGroup>
+        {/* Less used, so below the projects: focusing, the record of it, and what is done. */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-faint">Extras</SidebarGroupLabel>
+          <SidebarMenu>
+            {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
+            {nav('timesheet', 'Time sheet', ClipboardListIcon)}
+            {nav('completed', 'Completed', CircleCheckIcon)}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

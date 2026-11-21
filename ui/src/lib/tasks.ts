@@ -33,7 +33,9 @@ export interface Data {
 }
 
 export type View =
-  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'notes' | 'settings' }
+  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'completed' | 'settings' }
+  // A note id opens that note; `newIn` starts a new note in that project.
+  | { kind: 'notes'; id?: number; newIn?: number }
   | { kind: 'project'; id: number }
 
 export const PRIORITY_NAME: Record<number, string> = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }
@@ -86,7 +88,7 @@ export interface Section {
 
 export function sections(view: View, all: Task[], today: Day): Section[] {
   const tasks = openTasks(all)
-  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'notes' || view.kind === 'settings') return []
+  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'completed' || view.kind === 'notes' || view.kind === 'settings') return []
   if (view.kind === 'inbox') return [{ tasks: tasks.filter((t) => t.projectId === null).sort(byPriority) }]
   if (view.kind === 'project') return [{ tasks: tasks.filter((t) => t.projectId === view.id).sort(byPriority) }]
   if (view.kind === 'today') {
@@ -135,6 +137,21 @@ export function counts(all: Task[], today: Day): Counts {
 export function clearsToday(all: Task[], id: number, today: Day): boolean {
   const due = openTasks(all).filter((t) => t.due !== null && t.due <= today)
   return due.length === 1 && due[0].id === id
+}
+
+// Whether finishing this task earns the fuller sound: it is today's goal,
+// it leaves the list being looked at empty (Today, Inbox, a project), it is
+// the last open subtask of its task, or it is a round 5th thing done today.
+export function finishesBig(all: Task[], id: number, view: View, today: Day): boolean {
+  const task = all.find((t) => t.id === id)
+  if (!task || task.done) return false
+  if (task.goalDay === today) return true
+  if (task.parentId != null) return all.filter((t) => t.parentId === task.parentId && !t.done).length === 1
+  if (view.kind === 'today' && clearsToday(all, id, today)) return true
+  const listed = view.kind === 'inbox' || view.kind === 'project' ? sections(view, all, today).flatMap((s) => s.tasks) : []
+  if (listed.length === 1 && listed[0].id === id) return true
+  const doneToday = all.filter((t) => t.done && t.doneDay === today && t.parentId == null).length
+  return (doneToday + 1) % 5 === 0
 }
 
 export type LaneKey = 'todo' | 'doing' | 'done'

@@ -5,7 +5,7 @@ import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
-import type { Data } from '@/lib/tasks'
+import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
 
@@ -90,6 +90,11 @@ export const recordEntry = (entry: NewEntry): Promise<Entry> =>
   local ? local.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
 export const deleteEntry = (id: number): Promise<void> =>
   local ? local.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
+
+// Finished tasks for the Completed page: more than a window keeps (it only
+// has today's), the most recently finished first.
+export const loadFinished = (): Promise<Task[]> =>
+  local ? local.core.invoke<Task[]>('finished') : get('/api/finished').then((r) => answer<Task[]>(r))
 
 // Notes, through calls of their own like the time sheet: typing a note never
 // waits for, or upsets, the tasks file's revision.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseQuickAdd, readLine } from '@/lib/quick-add'
+import { parseQuickAdd, projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/quick-add'
 
 // 13 November 2026 is a Friday.
 const today = '2026-11-13'
@@ -151,5 +151,36 @@ describe('readLine', () => {
       date: null,
     })
     expect(readLine('water plants next friday', projects, today, { due: null, projectId: null }, dismissed).due).toBeNull()
+  })
+})
+
+describe('projects written with @', () => {
+  it('reads @project like #project and takes it out of the title', () => {
+    expect(parse('fix 2 UI issues @home')).toMatchObject({ title: 'fix 2 UI issues', projectId: 7 })
+    expect(parse('ship it @side')).toMatchObject({ title: 'ship it', projectId: 8 })
+  })
+  it('leaves an email address and an unknown @ alone', () => {
+    expect(parse('mail bob@home.com')).toMatchObject({ title: 'mail bob@home.com', projectId: null })
+    expect(parse('ping @nobody')).toMatchObject({ title: 'ping @nobody', projectId: null })
+  })
+  it('says where the project was written', () => {
+    expect(projectSpan('fix it @home today', projects)).toEqual({ start: 7, end: 12 })
+    expect(projectSpan('a@home', projects)).toBeNull()
+  })
+})
+
+describe('suggesting a project', () => {
+  it('offers every project for a bare @, and the matching ones as more is typed', () => {
+    expect(suggestProjects('fix it @', 8, projects)?.projects.map((p) => p.id)).toEqual(projects.map((p) => p.id))
+    expect(suggestProjects('fix it @si', 10, projects)).toMatchObject({ start: 7, end: 10, projects: [{ id: 8 }] })
+  })
+  it('offers nothing once the tag is whole, or outside an @ word', () => {
+    expect(suggestProjects('fix it @home', 12, projects)).toBeNull()
+    expect(suggestProjects('fix it', 6, projects)).toBeNull()
+    expect(suggestProjects('mail bob@ho', 11, projects)).toBeNull()
+  })
+  it('completes the word with Tab', () => {
+    const s = suggestProjects('fix it @si now', 10, projects)!
+    expect(takeSuggestion('fix it @si now', s, s.projects[0])).toEqual({ text: 'fix it @side-project now', caret: 21 })
   })
 })

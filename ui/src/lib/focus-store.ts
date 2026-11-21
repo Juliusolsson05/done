@@ -1,6 +1,7 @@
 // The focus session this window is running. Kept apart from the tasks: it is
 // a few minutes of state for one window, remembered in the browser's storage
 // so it survives a reload, and never saved to the tasks file.
+import { play } from '@/lib/sounds'
 import { recordEntry, showInMenuBar } from '@/lib/backend'
 import {
   dismiss,
@@ -232,11 +233,18 @@ function set(next: Session | null) {
   for (const listener of listeners) listener()
 }
 
-export const startFocus = (task: Task | null, minutes: number): void => set(start(task, minutes, Date.now(), reminders))
+export const startFocus = (task: Task | null, minutes: number): void => {
+  play('focusStart')
+  set(start(task, minutes, Date.now(), reminders))
+}
 export const toggleFocus = (): void => set(session && toggle(session, Date.now()))
 // Every way a session ends (Stop, Close, Finish task, the menu bar's Stop)
 // comes through here, so every one of them is written to the time sheet.
-export function endFocus(): void {
+// A block run all the way to its end is rewarded as it is closed; one
+// stopped early is not. `reward` false when something else is about to make
+// its own sound (Finish task plays the completion).
+export function endFocus(reward: unknown = true): void {
+  if (reward !== false && timeIsUp()) play('focusDone')
   const ending = session
   set(null)
   record(ending)
@@ -246,6 +254,7 @@ export function endFocus(): void {
 export function startNext(tasks: Task[]): void {
   const [block, ...rest] = upNext
   if (!block) return
+  play(timeIsUp() ? 'focusDone' : 'focusStart')
   const ending = session
   setUpNext(rest)
   set(startBlock(block, tasks, Date.now(), reminders))

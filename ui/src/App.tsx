@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { Toaster } from '@/components/ui/sonner'
 import { AppMenu, menuTargetOf, type MenuTarget } from '@/components/app-menu'
 import { AppSidebar } from '@/components/app-sidebar'
 import { Board } from '@/components/board'
+import { Completed } from '@/components/completed'
 import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
 import { MobileBar } from '@/components/mobile-bar'
@@ -13,6 +14,8 @@ import { MobileQuickAdd } from '@/components/quick-add'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog } from '@/components/task-editor'
+import { FindBar } from '@/components/find-bar'
+import { SearchDialog } from '@/components/search'
 import { TimeSheet } from '@/components/time-sheet'
 import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
@@ -23,11 +26,33 @@ import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
-import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
+import { forgetLast, undoLast } from '@/lib/undo'
+import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
-const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false }
-const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete
+const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
+const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
+
+// Whether the sidebar was showing when the app was last open. The sidebar
+// writes this cookie itself each time it is put away or brought back.
+function sidebarWasOpen(): boolean {
+  return !document.cookie.split('; ').includes('sidebar_state=false')
+}
+
+// Puts the sidebar away and brings it back; so does Cmd+B. Fixed to the
+// page's top left corner, so it stays in reach however far a page is scrolled.
+// With the sidebar put away, the button to bring it back sits inside the
+// page's top left corner and stays there as the page scrolls. (While the
+// sidebar shows, its own header has the button.)
+function SidebarToggle() {
+  const { open, isMobile } = useSidebar()
+  if (open || isMobile) return null
+  return (
+    <div className="sticky top-0 z-20 h-0">
+      <SidebarTrigger className="-mt-6 -ml-6 text-muted-foreground" title="Show sidebar (⌘B)" />
+    </div>
+  )
+}
 
 function storedZoom(): number {
   try {
@@ -65,7 +90,9 @@ export default function App() {
     const onUndo = () => {
       if (!undo) return
       play('undo')
-      change(undo)
+      // The same step Cmd+Z would undo; it is done here instead.
+      forgetLast()
+      change(undo, false)
     }
     toast(text, { id: 'said', duration: 5000, action: undo ? { label: 'Undo', onClick: onUndo } : undefined })
   }
@@ -103,11 +130,33 @@ export default function App() {
       setUi((u) => ({
         ...u,
         ...CLOSED,
-        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
+        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
         adding: true,
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
     edit: (id) => setUi((u) => ({ ...u, ...CLOSED, editing: id })),
+    search: () => {
+      play('open')
+      setUi((u) => ({ ...u, ...CLOSED, searching: true }))
+    },
+    reveal(hit) {
+      if (hit.kind === 'project') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'project', id: hit.id } }))
+      if (hit.kind === 'note') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'notes', id: hit.id } }))
+      // A subtask is edited from the task it is under, in that task's list.
+      const found = data.tasks.find((t) => t.id === hit.id)
+      const task = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
+      if (!task) return closeAll()
+      const view: View = task.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: task.projectId }
+      // Shown in its list, marked for a moment, and not opened for editing:
+      // it can be ticked off, or clicked to edit, right there.
+      // Already on the page you are looking at: stay there.
+      const shown = document.querySelector(`[data-task="${task.id}"]`) !== null
+      setUi((u) => ({ ...u, ...CLOSED, view: shown ? u.view : view }))
+      notice(task.id)
+      const bringIntoView = () =>
+        (document.querySelector(`[data-task="${hit.id}"]`) ?? document.querySelector(`[data-task="${task.id}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      requestAnimationFrame(() => requestAnimationFrame(bringIntoView))
+    },
     newProject: () => setUi((u) => ({ ...u, ...CLOSED, newProject: true })),
     rename: () => setUi((u) => ({ ...u, ...CLOSED, renaming: true })),
     askDelete: () => setUi((u) => ({ ...u, ...CLOSED, confirmDelete: true })),
@@ -121,9 +170,7 @@ export default function App() {
     completeSound(id) {
       const task = data.tasks.find((t) => t.id === id)
       if (!task || task.done) return
-      // Today's goal, or the last thing left in Today, gets the fuller sound.
-      const big = task.goalDay === TODAY || (ui.view.kind === 'today' && clearsToday(data.tasks, id, TODAY))
-      play(big ? 'completeBig' : 'complete')
+      play(finishesBig(data.tasks, id, ui.view, TODAY) ? 'completeBig' : 'complete')
     },
     complete(id, heard = false) {
       if (data.tasks.find((t) => t.id === id)?.done) return
@@ -186,7 +233,7 @@ export default function App() {
   // may change the page then. Reads only refs, so set-up-once listeners can call it.
   const busy = () => {
     const { ui } = latest.current
-    return ui.adding || ui.editing !== null || ui.newProject || ui.renaming || dragging.current || menuOpen.current
+    return ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.searching || dragging.current || menuOpen.current
   }
 
   // Keeping in step. An agent, another window or the web app may change the
@@ -254,6 +301,32 @@ export default function App() {
       event.preventDefault()
       latest.current.setZoom(step === undefined ? 1 : latest.current.zoom + step)
     }
+    // Cmd+K and Cmd+Z, taken before anything else on the page can see them:
+    // in the Mac app's web view a key with Cmd that reaches the page late can
+    // be lost to the app's menus.
+    const onCommandKey = (event: KeyboardEvent) => {
+      const app = latest.current
+      const command = (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey
+      // Cmd+Z: undo the last thing done, anywhere. In a text field it is
+      // left to the field, which undoes the typing.
+      if (command && event.code === 'KeyZ') {
+        const inField = event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')
+        if (inField) return
+        event.preventDefault()
+        if (undoLast()) {
+          play('undo')
+          toast('Undone', { id: 'said', duration: 2000 })
+        }
+        return
+      }
+      // Cmd+K, or Option+K: search the whole app, from anywhere. Matched on
+      // the key's place, since Option+K types a character of its own.
+      const optionOnly = event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey
+      if ((command || optionOnly) && event.code === 'KeyK') {
+        event.preventDefault()
+        app.search()
+      }
+    }
     const onKey = (event: KeyboardEvent) => {
       const app = latest.current
       if (event.key === 'Escape') {
@@ -282,6 +355,7 @@ export default function App() {
         '6': { kind: 'focus' },
         '7': { kind: 'timesheet' },
         '8': { kind: 'notes' },
+        '9': { kind: 'completed' },
       }
       if (views[event.key]) app.openView(views[event.key])
       // Space pauses and resumes; during a reminder Space or Enter continues.
@@ -293,9 +367,11 @@ export default function App() {
       }
     }
     document.addEventListener('keydown', onZoomKey, true)
+    document.addEventListener('keydown', onCommandKey, true)
     document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('keydown', onZoomKey, true)
+      document.removeEventListener('keydown', onCommandKey, true)
       document.removeEventListener('keydown', onKey)
     }
   }, [])
@@ -328,7 +404,7 @@ export default function App() {
             off for everything inside it, which only the sidebar wants. */}
         <ContextMenuTrigger asChild className="select-auto">
           <div>
-            <SidebarProvider className="md:h-svh" onContextMenu={onContextMenu}>
+            <SidebarProvider className="md:h-svh" defaultOpen={sidebarWasOpen()} onContextMenu={onContextMenu}>
               <AppSidebar />
               {/* In a window the content is a sheet lying on the sidebar. On a
                   phone it is the whole screen, edge to edge, kept clear of
@@ -338,8 +414,11 @@ export default function App() {
                   'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
                   'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+1.25rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+6rem)]',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
+                  // With the sidebar put away the sheet keeps its margin on the left too.
+                  'md:peer-data-[state=collapsed]:ml-2',
                 )}
               >
+                <SidebarToggle />
                 <div
                   key={view.kind === 'project' ? view.id : view.kind}
                   className={cn('animate-enter', (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col')}
@@ -349,10 +428,13 @@ export default function App() {
                   {view.kind === 'focus' && <FocusView />}
                   {view.kind === 'timesheet' && <TimeSheet />}
                   {view.kind === 'notes' && <Notes />}
+                  {view.kind === 'completed' && <Completed />}
                   {view.kind === 'settings' && <Settings />}
-                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
+                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'completed' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
+                <SearchDialog />
+                <FindBar />
               </SidebarInset>
               <MobileQuickAdd />
               <MobileBar />

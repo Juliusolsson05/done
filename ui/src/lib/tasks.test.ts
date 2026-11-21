@@ -7,6 +7,7 @@ import {
   deleteProject,
   deleteTask,
   dragBar,
+  finishesBig,
   lanes,
   markDone,
   markOpen,
@@ -98,7 +99,10 @@ describe('sections', () => {
 
 describe('counts', () => {
   it('counts overdue in Today and flags it', () => {
-    const c = counts([task(1, { due: today }), task(2, { due: '2026-11-10' }), task(3, { due: '2026-11-14' }), task(4, { due: today, done: true })], today)
+    const c = counts(
+      [task(1, { due: today }), task(2, { due: '2026-11-10' }), task(3, { due: '2026-11-14' }), task(4, { due: today, done: true })],
+      today,
+    )
     expect(c.today).toBe(2)
     expect(c.upcoming).toBe(1)
     expect(c.late).toBe(true)
@@ -217,7 +221,16 @@ describe('deleting', () => {
 
 describe('new projects', () => {
   it('takes the first colour nobody is using, and its id from nextId', () => {
-    const next = addProject(data([], [{ id: 1, name: 'A', color: 0 }, { id: 2, name: 'B', color: 2 }]), 'C')
+    const next = addProject(
+      data(
+        [],
+        [
+          { id: 1, name: 'A', color: 0 },
+          { id: 2, name: 'B', color: 2 },
+        ],
+      ),
+      'C',
+    )
     expect(next.projects.at(-1)).toEqual({ id: 100, name: 'C', color: 1 })
     expect(next.nextId).toBe(101)
   })
@@ -279,5 +292,37 @@ describe('subtasks', () => {
     // A task added while the toast was up does not shift what is restored.
     const later = { ...removed.data, tasks: [...removed.data.tasks, task(10)] }
     expect(ids(removed.undo(later).tasks)).toEqual([1, 2, 3, 4, 9, 10])
+  })
+})
+
+describe('finishesBig', () => {
+  const t = (id: number, more: Partial<Task> = {}): Task => ({
+    id,
+    title: 'T' + id,
+    notes: '',
+    projectId: null,
+    start: null,
+    due: null,
+    priority: 4,
+    ...more,
+  })
+  const day = '2026-11-21'
+  it('for the last open subtask of a task, not the one before', () => {
+    const all = [t(1), t(2, { parentId: 1 }), t(3, { parentId: 1 })]
+    expect(finishesBig(all, 2, { kind: 'today' }, day)).toBe(false)
+    const one = [t(1), t(2, { parentId: 1, done: true, doneDay: day }), t(3, { parentId: 1 })]
+    expect(finishesBig(one, 3, { kind: 'today' }, day)).toBe(true)
+  })
+  it('for the last task in the Inbox or a project being looked at', () => {
+    expect(finishesBig([t(1), t(2, { projectId: 9 })], 1, { kind: 'inbox' }, day)).toBe(true)
+    expect(finishesBig([t(1), t(2)], 1, { kind: 'inbox' }, day)).toBe(false)
+  })
+  it('for every 5th task finished today', () => {
+    const done = [1, 2, 3, 4].map((id) => t(id, { done: true, doneDay: day }))
+    expect(finishesBig([...done, t(5), t(6)], 5, { kind: 'upcoming' }, day)).toBe(true)
+    expect(finishesBig([...done.slice(1), t(5), t(6)], 5, { kind: 'upcoming' }, day)).toBe(false)
+  })
+  it("for today's goal", () => {
+    expect(finishesBig([t(1, { goalDay: day }), t(2)], 1, { kind: 'upcoming' }, day)).toBe(true)
   })
 })

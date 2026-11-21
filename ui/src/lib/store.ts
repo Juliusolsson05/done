@@ -4,6 +4,7 @@ import { BROWSER_INFO, loadInfo, loadState, sync, type Info } from '@/lib/backen
 import { changeSet, picture, type Picture } from '@/lib/changes'
 import { TODAY } from '@/lib/days'
 import type { Data } from '@/lib/tasks'
+import { recordChange } from '@/lib/undo'
 
 export interface Snapshot {
   data: Data
@@ -44,10 +45,13 @@ export async function load() {
 }
 
 // The interface changes its data first and saves after, so nothing waits on
-// the disk. Saves run one at a time, in order.
-export function change(fn: (data: Data) => Data) {
-  set({ data: fn(snapshot.data) })
+// the disk. Saves run one at a time, in order. Every change can be undone
+// with Cmd+Z, except an undo itself (`record` false).
+export function change(fn: (data: Data) => Data, record = true) {
+  const before = snapshot.data
+  set({ data: fn(before) })
   pending = pending.then(push)
+  if (record && snapshot.data !== before) recordChange(before, snapshot.data, (undo) => change(undo, false))
 }
 
 async function push() {

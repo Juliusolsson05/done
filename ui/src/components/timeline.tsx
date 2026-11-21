@@ -70,7 +70,7 @@ function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | 
         <span data-grip="start" className="absolute inset-y-0 left-0 w-2 cursor-ew-resize" />
         <PriorityDot priority={task.priority} />
         {/* A bar too short for its title shows the title beside it, in full. */}
-        <span className={cn('pointer-events-none', !fits && 'absolute top-1/2 left-full ml-2 -translate-y-1/2 font-normal')}>{task.title}</span>
+        <span data-findable className={cn('pointer-events-none', !fits && 'absolute top-1/2 left-full ml-2 -translate-y-1/2 font-normal')}>{task.title}</span>
         <span data-grip="end" className="absolute inset-y-0 right-0 w-2 cursor-ew-resize" />
       </div>
     )
@@ -100,7 +100,7 @@ function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | 
           onClick={() => edit(task.id)}
           className={cn('h-auto min-w-0 flex-1 justify-start rounded-none p-0 font-normal hover:bg-transparent', leaving && 'text-faint line-through')}
         >
-          <span className="truncate">{task.title}</span>
+          <span data-findable className="truncate">{task.title}</span>
         </Button>
       </div>
       <div className="relative shrink-0 overflow-hidden" style={{ width: DAYS * DAY_WIDTH }}>

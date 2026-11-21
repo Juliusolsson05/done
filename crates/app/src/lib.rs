@@ -6,7 +6,7 @@
 //! `main.rs` starts it. What only a Mac has (the menu bar, updating itself,
 //! a window that hides instead of closing) is compiled only there.
 
-use done_core::{Change, Entry, NewEntry, Note, SaveNote, State, Store, Synced};
+use done_core::{Change, Entry, NewEntry, Note, SaveNote, State, Store, Synced, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 #[cfg(desktop)]
@@ -217,6 +217,14 @@ fn sync(store: tauri::State<Store>, change: Change) -> Result<Synced, String> {
 }
 
 #[tauri::command]
+fn finished(store: tauri::State<Store>) -> Result<Vec<Task>, String> {
+    store.finished(FINISHED_LISTED).map_err(|e| e.to_string())
+}
+
+/// How many finished tasks the Completed page shows.
+const FINISHED_LISTED: i64 = 300;
+
+#[tauri::command]
 fn entries(store: tauri::State<Store>, day: String) -> Result<Vec<Entry>, String> {
     store.entries(&day).map_err(|e| e.to_string())
 }
@@ -317,7 +325,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, info, restart, focus_set, open_in_browser]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, info, restart, focus_set, open_in_browser]);
 
     #[cfg(desktop)]
     let builder = builder
