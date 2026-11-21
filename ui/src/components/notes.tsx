@@ -12,6 +12,7 @@ import { useApp } from '@/lib/app-context'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { play } from '@/lib/sounds'
+import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
 
 // How long typing has to pause before the note is written.
@@ -166,6 +167,13 @@ export function Notes() {
     setNotes((all) => all && all.filter((n) => n.id !== note.id))
     setOpenId(null)
     queue.current = queue.current.then(() => deleteNote(note.id))
+    // Saved again under its own id, so it comes back as it was.
+    const bringBack = () => {
+      write(note)
+      setNotes((all) => [note, ...(all ?? []).filter((n) => n.id !== note.id)])
+      setOpenId(note.id)
+    }
+    recordStep(bringBack)
     toast('Note deleted', {
       id: 'said',
       duration: 5000,
@@ -173,10 +181,9 @@ export function Notes() {
         label: 'Undo',
         onClick: () => {
           play('undo')
-          // Saved again under its own id, so it comes back as it was.
-          write(note)
-          setNotes((all) => [note, ...(all ?? []).filter((n) => n.id !== note.id)])
-          setOpenId(note.id)
+          // The same step Cmd+Z would undo; it is done here instead.
+          forgetLast()
+          bringBack()
         },
       },
     })
@@ -288,7 +295,7 @@ export function Notes() {
                           note.id === openId ? 'bg-accent' : 'hover:bg-accent/60',
                         )}
                       >
-                        <span className={cn('w-full truncate text-sm font-medium', isBlank(note.text) && 'text-muted-foreground')}>
+                        <span data-findable className={cn('w-full truncate text-sm font-medium', isBlank(note.text) && 'text-muted-foreground')}>
                           {titleOf(note.text)}
                         </span>
                         <span className="text-xs text-muted-foreground">{whenText(note.updatedAt, now)}</span>
@@ -349,6 +356,7 @@ function NoteDocument({ text, onEdit }: { text: string; onEdit: () => void }) {
       onClick={(event) => {
         if (!(event.target as Element).closest('a')) onEdit()
       }}
+      data-findable
       className="note-md cursor-text pb-16 text-[15px] leading-relaxed max-md:text-base"
     >
       <Markdown options={MARKDOWN}>{text}</Markdown>

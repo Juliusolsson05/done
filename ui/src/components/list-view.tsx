@@ -56,7 +56,7 @@ function GoalBlock() {
         {task.done ? 'Today’s goal, done' : 'Today’s goal'}
       </div>
       {task.done ? (
-        <div className="p-2 text-lg font-semibold tracking-tight text-faint line-through">{task.title}</div>
+        <div data-findable className="p-2 text-lg font-semibold tracking-tight text-faint line-through">{task.title}</div>
       ) : (
         <>
           <TaskRow task={task} goal />

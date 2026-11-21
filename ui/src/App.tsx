@@ -25,6 +25,7 @@ import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
 import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
+import { forgetLast, undoLast } from '@/lib/undo'
 import { clearsToday, deleteProject, deleteTask, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -88,7 +89,9 @@ export default function App() {
     const onUndo = () => {
       if (!undo) return
       play('undo')
-      change(undo)
+      // The same step Cmd+Z would undo; it is done here instead.
+      forgetLast()
+      change(undo, false)
     }
     toast(text, { id: 'said', duration: 5000, action: undo ? { label: 'Undo', onClick: onUndo } : undefined })
   }
@@ -140,9 +143,15 @@ export default function App() {
       const task = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
       if (!task) return closeAll()
       const view: View = task.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: task.projectId }
-      // A finished task is not in the list any more, so its list is shown without an editor.
-      setUi((u) => ({ ...u, ...CLOSED, view, editing: task.done ? null : task.id }))
-      if (!task.done) notice(task.id)
+      // Shown in its list, marked for a moment, and not opened for editing:
+      // it can be ticked off, or clicked to edit, right there.
+      // Already on the page you are looking at: stay there.
+      const shown = document.querySelector(`[data-task="${task.id}"]`) !== null
+      setUi((u) => ({ ...u, ...CLOSED, view: shown ? u.view : view }))
+      notice(task.id)
+      const bringIntoView = () =>
+        (document.querySelector(`[data-task="${hit.id}"]`) ?? document.querySelector(`[data-task="${task.id}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      requestAnimationFrame(() => requestAnimationFrame(bringIntoView))
     },
     newProject: () => setUi((u) => ({ ...u, ...CLOSED, newProject: true })),
     rename: () => setUi((u) => ({ ...u, ...CLOSED, renaming: true })),
@@ -292,6 +301,18 @@ export default function App() {
     }
     const onKey = (event: KeyboardEvent) => {
       const app = latest.current
+      // Cmd+Z: undo the last thing done, anywhere. In a text field it is
+      // left to the field, which undoes the typing.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
+        const inField = event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')
+        if (inField) return
+        event.preventDefault()
+        if (undoLast()) {
+          play('undo')
+          toast('Undone', { id: 'said', duration: 2000 })
+        }
+        return
+      }
       // Cmd+K (Ctrl+K elsewhere): search the whole app, from anywhere.
       // Cmd+F is find on the page, handled by the find bar.
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {

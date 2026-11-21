@@ -79,6 +79,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
           className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
         >
           <span
+            data-findable
             className={cn(
               'wrap-anywhere transition-colors',
               goal && 'text-lg font-semibold tracking-tight',

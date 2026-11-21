@@ -1,5 +1,5 @@
-// Find on the page, Cmd+F: what is typed is marked wherever it shows on the
-// current page, Enter goes to the next match and Shift+Enter to the one
+// Find on the page, Cmd+F: what is typed is marked wherever it shows in the
+// titles and descriptions of the tasks and notes on the current page, Enter goes to the next match and Shift+Enter to the one
 // before, Escape closes. Marked with the browser's own highlights, so the
 // page itself is never changed. Search over everything is Cmd+K.
 import { useEffect, useRef, useState } from 'react'
@@ -21,7 +21,9 @@ function rangesFor(query: string, bar: HTMLElement | null): Range[] {
     acceptNode(node) {
       const parent = node.parentElement
       if (!parent || (bar && bar.contains(parent))) return NodeFilter.FILTER_REJECT
-      if (parent.closest('script, style, textarea, input, [aria-hidden="true"]')) return NodeFilter.FILTER_REJECT
+      // Only what a task or note says: its title and description, not the
+      // page's headings, dates or buttons.
+      if (!parent.closest('[data-findable]')) return NodeFilter.FILTER_REJECT
       // Only text that can be seen.
       if (parent.checkVisibility ? !parent.checkVisibility() : parent.offsetParent === null) return NodeFilter.FILTER_REJECT
       return NodeFilter.FILTER_ACCEPT
