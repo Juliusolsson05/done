@@ -133,6 +133,28 @@ pub struct NewEntry {
     pub focused_ms: i64,
 }
 
+/// A note: free text that is not a task, such as a list jotted down in the
+/// middle of a conversation. The first line serves as its title.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub id: i64,
+    pub text: String,
+    /// Milliseconds since 1970, set by the window that saved it. The list
+    /// shows the most recently changed note first.
+    pub updated_at: i64,
+}
+
+/// A note as a window sends it: without an id it is a new note.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveNote {
+    #[serde(default)]
+    pub id: Option<i64>,
+    pub text: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug)]
 pub enum Error {
     /// Someone else (another window, or the other app) saved first. The caller
@@ -294,6 +316,11 @@ impl Store {
              );
              CREATE INDEX IF NOT EXISTS entry_day ON entry (day);",
         )?;
+        // Notes, gained the same way by a file made before them.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS note (id INTEGER PRIMARY KEY, text TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+            [],
+        )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -362,6 +389,46 @@ impl Store {
     pub fn delete_entry(&self, id: i64) -> Result<(), Error> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM entry WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Every note, the most recently changed first.
+    pub fn notes(&self) -> Result<Vec<Note>, Error> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, text, updated_at FROM note ORDER BY updated_at DESC, id DESC")?;
+        let notes = stmt
+            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)? }))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(notes)
+    }
+
+    /// Writes a note, new or not. Apart from `sync` and its revision, like the
+    /// time sheet: typing a note must never make a task's save fail as stale.
+    /// Two windows editing one note keep whichever saved last. A note saved
+    /// with the id of one that was deleted comes back as it was, which is
+    /// what Undo does.
+    pub fn save_note(&self, note: SaveNote) -> Result<Note, Error> {
+        let conn = self.conn.lock().unwrap();
+        let id = match note.id {
+            Some(id) => {
+                conn.execute(
+                    "INSERT INTO note (id, text, updated_at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
+                    params![id, note.text, note.updated_at],
+                )?;
+                id
+            }
+            None => {
+                conn.execute("INSERT INTO note (text, updated_at) VALUES (?1, ?2)", params![note.text, note.updated_at])?;
+                conn.last_insert_rowid()
+            }
+        };
+        Ok(Note { id, text: note.text, updated_at: note.updated_at })
+    }
+
+    pub fn delete_note(&self, id: i64) -> Result<(), Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM note WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -773,5 +840,39 @@ mod tests {
         assert_eq!(again.rev, 1);
         assert_eq!(again.tasks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), vec!["Call the bank"]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn note(id: Option<i64>, text: &str, at: i64) -> SaveNote {
+        SaveNote { id, text: text.into(), updated_at: at }
+    }
+
+    #[test]
+    fn a_note_is_kept_and_the_last_changed_comes_first() {
+        let s = store();
+        let funds = s.save_note(note(None, "Seed funds\nAlpha\nBeta", 1)).unwrap();
+        let other = s.save_note(note(None, "Gift ideas", 2)).unwrap();
+        assert_eq!(s.notes().unwrap().iter().map(|n| n.id).collect::<Vec<_>>(), vec![other.id, funds.id]);
+        s.save_note(note(Some(funds.id), "Seed funds\nAlpha\nBeta\nGamma", 3)).unwrap();
+        let notes = s.notes().unwrap();
+        assert_eq!(notes[0].id, funds.id);
+        assert_eq!(notes[0].text, "Seed funds\nAlpha\nBeta\nGamma");
+        assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn a_deleted_note_comes_back_when_saved_with_its_id() {
+        let s = store();
+        let n = s.save_note(note(None, "Funds", 1)).unwrap();
+        s.delete_note(n.id).unwrap();
+        assert!(s.notes().unwrap().is_empty());
+        s.save_note(note(Some(n.id), "Funds", 1)).unwrap();
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1 }]);
+    }
+
+    #[test]
+    fn saving_a_note_does_not_move_the_tasks_revision() {
+        let s = store();
+        s.save_note(note(None, "Funds", 1)).unwrap();
+        assert_eq!(s.state("2026-11-20").unwrap().rev, 0);
     }
 }

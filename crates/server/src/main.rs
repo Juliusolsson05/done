@@ -20,7 +20,7 @@ use axum::{
 };
 use accounts::{Accounts, Failure, Files};
 use auth::{Cloud, Session};
-use done_core::{Change, Error, NewEntry, Store};
+use done_core::{Change, Error, NewEntry, SaveNote, Store};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -94,7 +94,19 @@ async fn delete_entry(State(store): State<Arc<Store>>, Json(q): Json<Id>) -> Res
     reply(store.delete_entry(q.id).map(|()| serde_json::json!({})))
 }
 
-// The same five calls as the local ones above, each for the signed-in
+async fn notes(State(store): State<Arc<Store>>) -> Response {
+    reply(store.notes())
+}
+
+async fn save_note(State(store): State<Arc<Store>>, Json(note): Json<SaveNote>) -> Response {
+    reply(store.save_note(note))
+}
+
+async fn delete_note(State(store): State<Arc<Store>>, Json(q): Json<Id>) -> Response {
+    reply(store.delete_note(q.id).map(|()| serde_json::json!({})))
+}
+
+// The same calls as the local ones above, each for the signed-in
 // account's own file. The account comes from the session and from nowhere
 // else: no call takes an account id, so none can be pointed at another's.
 fn answer<T: Serialize>(result: Result<T, Failure>) -> Response {
@@ -129,6 +141,18 @@ async fn cloud_delete_entry(State(cloud): State<Cloud>, session: Session, Json(q
     answer(cloud.accounts.write(&session.sub, |s| s.delete_entry(q.id).map(|()| serde_json::json!({}))).await)
 }
 
+async fn cloud_notes(State(cloud): State<Cloud>, session: Session) -> Response {
+    answer(cloud.accounts.read(&session.sub, |s| s.notes()).await)
+}
+
+async fn cloud_save_note(State(cloud): State<Cloud>, session: Session, Json(note): Json<SaveNote>) -> Response {
+    answer(cloud.accounts.write(&session.sub, |s| s.save_note(note)).await)
+}
+
+async fn cloud_delete_note(State(cloud): State<Cloud>, session: Session, Json(q): Json<Id>) -> Response {
+    answer(cloud.accounts.write(&session.sub, |s| s.delete_note(q.id).map(|()| serde_json::json!({}))).await)
+}
+
 fn local(store: Arc<Store>) -> Router {
     Router::new()
         .route("/", get(|| async { Html(UI) }))
@@ -138,6 +162,8 @@ fn local(store: Arc<Store>) -> Router {
         .route("/api/sync", post(sync))
         .route("/api/entries", get(entries).post(record_entry))
         .route("/api/entries/delete", post(delete_entry))
+        .route("/api/notes", get(notes).post(save_note))
+        .route("/api/notes/delete", post(delete_note))
         .layer(middleware::from_fn(local_only))
         .with_state(store)
 }
@@ -159,6 +185,8 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/sync", post(cloud_sync))
         .route("/api/entries", get(cloud_entries).post(cloud_record_entry))
         .route("/api/entries/delete", post(cloud_delete_entry))
+        .route("/api/notes", get(cloud_notes).post(cloud_save_note))
+        .route("/api/notes/delete", post(cloud_delete_note))
         .layer(for_the_apps())
         .with_state(cloud)
 }
