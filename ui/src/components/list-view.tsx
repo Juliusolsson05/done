@@ -105,7 +105,7 @@ const EMPTY: Record<string, [string, string]> = {
 }
 
 export function ListView() {
-  const { data, ui, rename, askDelete, closeAll, removeProject, openView } = useApp()
+  const { data, ui, rename, askDelete, closeAll, removeProject } = useApp()
   const view = ui.view
   const list = sections(view, data.tasks, TODAY)
   const count = list.reduce((n, s) => n + s.tasks.length, 0)
@@ -132,10 +132,6 @@ export function ListView() {
             </>
           ) : (
             <>
-              <HeaderButton onClick={() => openView({ kind: 'notes', newIn: view.id })}>
-                <NotebookPenIcon />
-                New note
-              </HeaderButton>
               <HeaderButton onClick={rename}>Rename</HeaderButton>
               <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
             </>
