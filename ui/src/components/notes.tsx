@@ -327,7 +327,7 @@ export function Notes() {
                 }}
                 placeholder="Search notes"
                 aria-label="Search notes"
-                className="pl-8 [&::-webkit-search-cancel-button]:hidden"
+                className="border-transparent bg-muted pl-8 shadow-none focus-visible:border-transparent focus-visible:bg-muted/70 focus-visible:ring-0 dark:bg-muted [&::-webkit-search-cancel-button]:hidden"
               />
             </div>
             {groups.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No notes match</p>}
@@ -338,10 +338,13 @@ export function Notes() {
                   {group.notes.map((note) => (
                     <li key={note.id}>
                       <Button
-                        variant={note.id === openId ? 'secondary' : 'ghost'}
+                        variant="ghost"
                         onClick={() => open(note.id)}
                         aria-current={note.id === openId ? 'true' : undefined}
-                        className="h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal max-md:py-3"
+                        className={cn(
+                          'h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal max-md:py-3',
+                          note.id === openId && 'bg-primary/10 hover:bg-primary/10',
+                        )}
                       >
                         <span
                           data-findable
