@@ -6,7 +6,7 @@
 //! `main.rs` starts it. What only a Mac has (the menu bar, updating itself,
 //! a window that hides instead of closing) is compiled only there.
 
-use done_core::{Change, Entry, NewEntry, State, Store, Synced};
+use done_core::{Change, Entry, NewEntry, Note, SaveNote, State, Store, Synced};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 #[cfg(desktop)]
@@ -232,6 +232,21 @@ fn delete_entry(store: tauri::State<Store>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn notes(store: tauri::State<Store>) -> Result<Vec<Note>, String> {
+    store.notes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_note(store: tauri::State<Store>, note: SaveNote) -> Result<Note, String> {
+    store.save_note(note).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_note(store: tauri::State<Store>, id: i64) -> Result<(), String> {
+    store.delete_note(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
     Info {
         version: app.package_info().version.to_string(),
@@ -302,7 +317,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, info, restart, focus_set, open_in_browser]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, info, restart, focus_set, open_in_browser]);
 
     #[cfg(desktop)]
     let builder = builder

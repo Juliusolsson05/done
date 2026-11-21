@@ -7,6 +7,7 @@ import {
   Columns3Icon,
   InboxIcon,
   PlusIcon,
+  NotebookPenIcon,
   SlidersHorizontalIcon,
   TimerIcon,
   type LucideIcon,
@@ -97,6 +98,7 @@ export function AppSidebar() {
             {nav('board', 'Board', Columns3Icon)}
             {nav('focus', 'Focus', TimerIcon, focus && <Countdown session={focus} />)}
             {nav('timesheet', 'Time sheet', ClipboardListIcon)}
+            {nav('notes', 'Notes', NotebookPenIcon)}
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>

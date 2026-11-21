@@ -10,6 +10,7 @@ import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
 import { MobileBar } from '@/components/mobile-bar'
 import { MobileQuickAdd } from '@/components/quick-add'
+import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog } from '@/components/task-editor'
 import { TimeSheet } from '@/components/time-sheet'
@@ -97,12 +98,12 @@ export default function App() {
     say,
     setZoom,
     openView: (view: View) => setUi((u) => ({ ...u, ...CLOSED, view })),
-    // Settings, Focus and the time sheet have no list to add to, so adding from there goes to Inbox.
+    // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
       setUi((u) => ({
         ...u,
         ...CLOSED,
-        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' ? { kind: 'inbox' } : u.view,
+        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
         adding: true,
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
@@ -280,6 +281,7 @@ export default function App() {
         '5': { kind: 'board' },
         '6': { kind: 'focus' },
         '7': { kind: 'timesheet' },
+        '8': { kind: 'notes' },
       }
       if (views[event.key]) app.openView(views[event.key])
       // Space pauses and resumes; during a reminder Space or Enter continues.
@@ -346,8 +348,9 @@ export default function App() {
                   {view.kind === 'board' && <Board />}
                   {view.kind === 'focus' && <FocusView />}
                   {view.kind === 'timesheet' && <TimeSheet />}
+                  {view.kind === 'notes' && <Notes />}
                   {view.kind === 'settings' && <Settings />}
-                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'settings' && <ListView />}
+                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
               </SidebarInset>

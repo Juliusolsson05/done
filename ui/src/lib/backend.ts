@@ -6,6 +6,7 @@ import type { Day } from '@/lib/days'
 import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import type { Data } from '@/lib/tasks'
+import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
 
 // What the desktop app knows about itself: its version, where its program is
@@ -89,6 +90,13 @@ export const recordEntry = (entry: NewEntry): Promise<Entry> =>
   local ? local.core.invoke<Entry>('record_entry', { entry }) : post<Entry>('/api/entries', entry)
 export const deleteEntry = (id: number): Promise<void> =>
   local ? local.core.invoke<void>('delete_entry', { id }) : post<unknown>('/api/entries/delete', { id }).then(() => undefined)
+
+// Notes, through calls of their own like the time sheet: typing a note never
+// waits for, or upsets, the tasks file's revision.
+export const loadNotes = (): Promise<Note[]> => (local ? local.core.invoke<Note[]>('notes') : get('/api/notes').then((r) => answer<Note[]>(r)))
+export const saveNote = (note: SaveNote): Promise<Note> => (local ? local.core.invoke<Note>('save_note', { note }) : post<Note>('/api/notes', note))
+export const deleteNote = (id: number): Promise<void> =>
+  local ? local.core.invoke<void>('delete_note', { id }) : post<unknown>('/api/notes/delete', { id }).then(() => undefined)
 
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
