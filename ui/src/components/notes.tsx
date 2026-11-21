@@ -3,7 +3,7 @@
 // open note on the right; on a phone one at a time.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'markdown-to-jsx/react'
-import { BookOpenIcon, ChevronLeftIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
+import { label, linkAt, linksIn } from '@/lib/links'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
@@ -395,16 +396,41 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [note.text])
+  const links = linksIn(note.text)
   return (
-    <textarea
-      ref={field}
-      autoFocus={focused}
-      aria-label="Note"
-      value={note.text}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder="Write it down…"
-      className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent pb-16 text-[15px] leading-relaxed outline-none placeholder:text-faint max-md:text-base"
-    />
+    <>
+      {/* The note's links, to open with one click while writing. */}
+      {links.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {links.map((href) => (
+            <Button key={href} variant="outline" size="xs" title={href} onClick={() => openLink(href)} className="font-normal text-muted-foreground">
+              <ExternalLinkIcon />
+              {label(href)}
+            </Button>
+          ))}
+        </div>
+      )}
+      <textarea
+        ref={field}
+        autoFocus={focused}
+        aria-label="Note"
+        title="⌘-click a link to open it"
+        value={note.text}
+        onChange={(event) => onChange(event.target.value)}
+        // Cmd-click on an address opens it, as in a code editor; a plain
+        // click places the caret as usual.
+        onClick={(event) => {
+          if (!(event.metaKey || event.ctrlKey)) return
+          const href = linkAt(note.text, event.currentTarget.selectionStart)
+          if (href) {
+            event.preventDefault()
+            openLink(href)
+          }
+        }}
+        placeholder="Write it down…"
+        className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent pb-16 text-[15px] leading-relaxed outline-none placeholder:text-faint max-md:text-base"
+      />
+    </>
   )
 }
 

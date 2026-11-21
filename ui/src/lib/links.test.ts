@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { label, linkParts } from '@/lib/links'
+import { label, linkAt, linkParts, linksIn } from '@/lib/links'
 
 describe('linkParts', () => {
   it('leaves text without an address as it is', () => {
@@ -43,5 +43,19 @@ describe('label', () => {
 
   it('shows an address it cannot read as written', () => {
     expect(label('https://')).toBe('https://')
+  })
+})
+
+describe('linkAt', () => {
+  const text = 'buy it at https://www.bestbuy.com/site/x today'
+  it('finds the address the caret is inside, and nothing outside one', () => {
+    expect(linkAt(text, 20)).toBe('https://www.bestbuy.com/site/x')
+    expect(linkAt(text, 3)).toBeNull()
+  })
+})
+
+describe('linksIn', () => {
+  it('lists each address once, in order', () => {
+    expect(linksIn('a https://x.com b www.y.com c https://x.com')).toEqual(['https://x.com', 'https://www.y.com'])
   })
 })
