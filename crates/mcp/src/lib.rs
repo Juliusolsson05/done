@@ -8,7 +8,7 @@
 //! The protocol is small enough here (five methods) that it is written out
 //! rather than pulled in as a framework.
 
-use done_core::{Change, Error, Project, State, Store, Task};
+use done_core::{Change, Error, Note, Project, SaveNote, State, Store, Task};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
@@ -109,6 +109,13 @@ fn tools() -> Value {
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+        { "name": "list_notes", "description": "List the notes on the Notes page, the most recently changed first. A note is free text that is not a task; its first line is its title.",
+          "inputSchema": { "type": "object", "properties": {} } },
+        { "name": "add_note", "description": "Add a note. Put a short title on the first line.",
+          "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] } },
+        { "name": "update_note", "description": "Replace a note's whole text. To add to it, send its current text with the addition.",
+          "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" } }, "required": ["id", "text"] } },
+        { "name": "delete_note", "description": "Delete a note for good.", "inputSchema": id_only },
     ])
 }
 
@@ -201,6 +208,32 @@ fn change(store: &Store, edit: impl Fn(&State, &str) -> Result<(Change, Value), 
         }
     }
     Err("done is being changed elsewhere right now. Try again.".into())
+}
+
+/// The first line with something on it, as the Notes page shows it.
+fn title_of(text: &str) -> String {
+    text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("New note").to_string()
+}
+
+fn describe_note(note: &Note) -> Value {
+    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "updatedAt": note.updated_at })
+}
+
+fn note_text(args: &Value) -> Result<String, String> {
+    let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+    if text.trim().is_empty() {
+        return Err("A note needs some text.".into());
+    }
+    Ok(text.to_string())
+}
+
+fn existing_note(store: &Store, args: &Value) -> Result<Note, String> {
+    let id = args.get("id").and_then(Value::as_i64).ok_or("Give the note's id, from list_notes.")?;
+    store.notes().map_err(|e| e.to_string())?.into_iter().find(|n| n.id == id).ok_or_else(|| format!("There is no note {id}. list_notes gives the ids."))
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
@@ -317,6 +350,27 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let project = Project { id: state.next_id, name: name.clone(), color };
             Ok((Change { projects: vec![project], ..Default::default() }, json!({ "created": name })))
         }),
+        "list_notes" => {
+            let notes = store.notes().map_err(|e| e.to_string())?;
+            let notes: Vec<Value> = notes.iter().map(describe_note).collect();
+            Ok(json!({ "notes": notes }))
+        }
+        "add_note" => {
+            let text = note_text(args)?;
+            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms() }).map_err(|e| e.to_string())?;
+            Ok(describe_note(&note))
+        }
+        "update_note" => {
+            let note = existing_note(store, args)?;
+            let text = note_text(args)?;
+            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms() }).map_err(|e| e.to_string())?;
+            Ok(describe_note(&note))
+        }
+        "delete_note" => {
+            let note = existing_note(store, args)?;
+            store.delete_note(note.id).map_err(|e| e.to_string())?;
+            Ok(json!({ "deleted": title_of(&note.text) }))
+        }
         _ => Err(format!("There is no tool called \"{name}\".")),
     }
 }
@@ -435,5 +489,30 @@ mod tests {
         assert_eq!(replies[3]["error"]["code"], -32601);
         // Nothing was saved by any of them.
         assert!(store.state(&store.today().unwrap()).unwrap().tasks.is_empty());
+    }
+
+    #[test]
+    fn an_agent_can_write_down_a_note_the_app_lists() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[tool(1, "add_note", json!({ "text": "Seed round funds\nAlpha Ventures\nBeta Capital" }))]);
+        let added = said(&replies[0]);
+        let id = added["id"].as_i64().unwrap();
+        assert_eq!(added["title"], "Seed round funds");
+
+        let replies = talk(&store, &[
+            tool(2, "update_note", json!({ "id": id, "text": "Seed round funds\nAlpha Ventures\nBeta Capital\nGamma Seed" })),
+            tool(3, "list_notes", json!({})),
+            tool(4, "add_note", json!({ "text": "  " })),
+            tool(5, "update_note", json!({ "id": id + 99, "text": "x" })),
+            tool(6, "delete_note", json!({ "id": id })),
+        ]);
+        let listed = said(&replies[1]);
+        assert_eq!(listed["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["notes"][0]["text"], "Seed round funds\nAlpha Ventures\nBeta Capital\nGamma Seed");
+        // A blank note and an unknown id are refused in words an agent can act on.
+        assert_eq!(replies[2]["result"]["isError"], true);
+        assert_eq!(replies[3]["result"]["isError"], true);
+        assert_eq!(said(&replies[4])["deleted"], "Seed round funds");
+        assert!(store.notes().unwrap().is_empty());
     }
 }
