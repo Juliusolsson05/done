@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byNewest, groupByDate, isBlank, matches, titleOf } from './notes'
+import { byNewest, groupByDate, isBlank, keepLineBreaks, matches, titleOf } from './notes'
 
 describe('titleOf', () => {
   it('is the first line with something on it, trimmed', () => {
@@ -67,5 +67,15 @@ describe('groupByDate', () => {
       ['September', [6]],
       ['2024', [1]],
     ])
+  })
+})
+
+describe('keepLineBreaks', () => {
+  it('turns a single new line into a break, and leaves paragraphs, code and tables alone', () => {
+    expect(keepLineBreaks('Funds\nSequoia\nBenchmark\n\nNext')).toBe('Funds\\\nSequoia\\\nBenchmark\n\nNext')
+    expect(keepLineBreaks('```\na\nb\n```')).toBe('```\na\nb\n```')
+    expect(keepLineBreaks('| a | b |\n| - | - |\n| 1 | 2 |')).toBe('| a | b |\n| - | - |\n| 1 | 2 |')
+    expect(keepLineBreaks('1. Sequoia\n2. Benchmark\n- a\n- b')).toBe('1. Sequoia\n2. Benchmark\n- a\n- b')
+    expect(keepLineBreaks('# Title\n*20 Nov*\nPlan only')).toBe('# Title\n*20 Nov*\\\nPlan only')
   })
 })

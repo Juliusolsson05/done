@@ -1,7 +1,7 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -14,7 +14,7 @@ import { ProjectDot } from '@/components/marks'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
-import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
+import { byNewest, groupByDate, isBlank, keepLineBreaks, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { label, linkAt, linksIn } from '@/lib/links'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
@@ -243,7 +243,7 @@ export function Notes() {
       size="sm"
       className={reading ? 'text-foreground' : 'text-muted-foreground'}
       aria-pressed={reading}
-      title={reading ? 'Back to writing (Esc, or click the text)' : 'Read it as a formatted document'}
+      title={reading ? 'Back to writing (Esc)' : 'Read it as a formatted document'}
       onClick={() => setReading((r) => !r)}
     >
       {reading ? <PenLineIcon /> : <BookOpenIcon />}
@@ -268,11 +268,7 @@ export function Notes() {
             </Button>
           </div>
         </div>
-        {reading ? (
-          <NoteDocument text={current.text} onEdit={() => setReading(false)} />
-        ) : (
-          <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
-        )}
+        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />}
       </div>
     )
   }
@@ -364,7 +360,7 @@ export function Notes() {
             // Held to a readable line length.
             <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
               {reading ? (
-                <NoteDocument text={current.text} onEdit={() => setReading(false)} />
+                <NoteDocument text={current.text} />
               ) : (
                 <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
               )}
@@ -418,7 +414,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
           }
         }}
         placeholder="Write it down…"
-        className="block min-h-[50svh] w-full resize-none overflow-hidden bg-transparent pb-16 text-[15px] leading-relaxed outline-none placeholder:text-faint max-md:text-base"
+        className="block min-h-[50svh] w-full max-w-[68ch] resize-none overflow-hidden bg-transparent pb-24 text-[16px] leading-7 outline-none placeholder:text-faint max-md:text-[17px]"
       />
     </>
   )
@@ -426,18 +422,12 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
 
 // The note shown formatted, as a document to read. Markdown: # headings,
 // lists, **bold**, links and so on.
-// A click on the text (not on a link) goes back to writing.
-function NoteDocument({ text, onEdit }: { text: string; onEdit: () => void }) {
+function NoteDocument({ text }: { text: string }) {
+  // Reading only: clicking or selecting text never switches to writing, so a
+  // passage can be selected and copied. Edit or Esc goes back.
   return (
-    <article
-      title="Click to edit"
-      onClick={(event) => {
-        if (!(event.target as Element).closest('a')) onEdit()
-      }}
-      data-findable
-      className={cn(DOCUMENT, 'cursor-text pb-16 text-[15px] leading-relaxed max-md:text-base')}
-    >
-      <Markdown options={MARKDOWN}>{text}</Markdown>
+    <article data-findable className={cn(DOCUMENT, 'pt-1 pb-24')}>
+      <Markdown options={MARKDOWN}>{keepLineBreaks(text)}</Markdown>
     </article>
   )
 }
@@ -459,16 +449,34 @@ function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
 }
 
 // How the formatted document looks, with the theme's own tokens.
+// How the formatted document reads. Set for reading, not for density: a
+// generous line height, room between paragraphs and list items, clear space
+// above each heading, and a line length the eye can follow back.
 const DOCUMENT = cn(
-  '[&>*+*]:mt-2.5 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold',
-  '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-6 [&_li>ul]:mt-1 [&_li>ol]:mt-1',
-  '[&_li:has(>input)]:-ml-5 [&_li:has(>input)]:list-none [&_input]:mr-2 [&_input]:align-middle',
-  '[&_a]:underline [&_a]:decoration-muted-foreground/50 [&_a]:underline-offset-2 hover:[&_a]:decoration-foreground',
-  '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em] [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
-  '[&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_hr]:border-border',
-  '[&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left',
+  'max-w-[68ch] text-[16px] leading-7 text-foreground/90 max-md:text-[17px]',
+  // Blocks: a paragraph's worth of space between them.
+  '[&>*+*]:mt-4',
+  // Headings: space above sets each section apart; little below ties it to its text.
+  '[&_h1]:text-[1.65rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-foreground',
+  '[&_h2]:text-[1.2rem] [&_h2]:leading-snug [&_h2]:font-semibold [&_h2]:text-foreground [&>h2:not(:first-child)]:mt-9',
+  '[&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-foreground [&>h3:not(:first-child)]:mt-7',
+  '[&>h1+*]:mt-3 [&>h2+*]:mt-2.5 [&>h3+*]:mt-2',
+  '[&_strong]:font-semibold [&_strong]:text-foreground [&_em]:text-muted-foreground',
+  // Lists: each item gets its own line of air; the markers stay quiet.
+  '[&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-7 [&_li]:pl-1 [&_li+li]:mt-2 [&_li]:marker:text-muted-foreground',
+  '[&_li>ul]:mt-2 [&_li>ol]:mt-2',
+  '[&_li:has(>input)]:-ml-6 [&_li:has(>input)]:list-none [&_input]:mr-2.5 [&_input]:align-middle',
+  '[&_a]:underline [&_a]:decoration-muted-foreground/40 [&_a]:underline-offset-[3px] hover:[&_a]:decoration-foreground',
+  '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]',
+  '[&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:leading-6 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
+  '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-8 [&_hr]:border-border',
+  // Tables: light lines, a quiet header, room in each cell.
+  '[&_table]:w-full [&_table]:border-collapse [&_table]:text-[15px] [&_th]:border-b [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-medium [&_th]:text-muted-foreground',
+  '[&_td]:border-b [&_td]:border-border/60 [&_td]:px-3 [&_td]:py-2',
 )
 
 // Raw HTML in a note stays text: a note is for writing, not for markup that
 // could run in the app.
-const MARKDOWN = { disableParsingRawHTML: true, forceBlock: true, overrides: { a: NoteLink } }
+// No wrapper element: the blocks sit right in the article, so its spacing
+// rules (paragraphs, space above headings) reach them.
+const MARKDOWN = { disableParsingRawHTML: true, forceBlock: true, wrapper: Fragment, overrides: { a: NoteLink } }
