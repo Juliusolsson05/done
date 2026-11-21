@@ -192,3 +192,80 @@
     user-select: none;
   }
 }
+
+/* A note shown as Markdown. Quiet: headings a step up, lists indented, code
+   in the mono face. Only what a jotted note uses. */
+.note-md > * + * {
+  margin-top: 0.6em;
+}
+.note-md h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.note-md h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.note-md h3 {
+  font-weight: 600;
+}
+.note-md ul {
+  list-style: disc;
+  padding-left: 1.4em;
+}
+.note-md ol {
+  list-style: decimal;
+  padding-left: 1.6em;
+}
+.note-md li > ul,
+.note-md li > ol {
+  margin-top: 0.2em;
+}
+.note-md li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.3em;
+}
+.note-md input[type='checkbox'] {
+  margin-right: 0.45em;
+  vertical-align: -0.1em;
+}
+.note-md a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+.note-md code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--muted);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+}
+.note-md pre {
+  background: var(--muted);
+  border-radius: 8px;
+  padding: 0.7em 0.9em;
+  overflow-x: auto;
+}
+.note-md pre code {
+  background: none;
+  padding: 0;
+}
+.note-md blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.8em;
+  color: var(--muted-foreground);
+}
+.note-md hr {
+  border-color: var(--border);
+}
+.note-md table {
+  border-collapse: collapse;
+}
+.note-md th,
+.note-md td {
+  border: 1px solid var(--border);
+  padding: 0.25em 0.6em;
+  text-align: left;
+}

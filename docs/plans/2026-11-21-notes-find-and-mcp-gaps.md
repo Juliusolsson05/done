@@ -2,7 +2,7 @@
 
 Fixes #29.
 Branch `feat/notes-find` · Worktree `../done-wt/notes-find` · Base `origin/main` @ c7946b9 (2026-11-21)
-Status: building; the owner asked for it to be built and previewed before merging, as with Notes.
+Status: built; waiting for the owner to look at the local preview before merging.
 
 ## Outcome
 
@@ -11,6 +11,8 @@ Status: building; the owner asked for it to be built and previewed before mergin
 - the list grouped under quiet date headings: Today, Yesterday, Previous 7 Days, Previous 30 Days, then each month ("October"), then each older year.
 
 Nothing else: no filter menu, no sort options, no tags.
+
+**Markdown** (asked for during the build): a note reads as formatted Markdown and a click edits its plain text. A `# Title` first line is listed as "Title".
 
 **MCP.** Close the gaps an agent hits in daily use, while staying a small set of task-shaped tools (11 → 13).
 
@@ -33,6 +35,16 @@ Nothing else: no filter menu, no sort options, no tags.
   - `matches(note, query): boolean`: every word of the query appears somewhere in the text, case and accents ignored; an empty query matches all.
   - `groupByDate(notes, now): { label: string; notes: Note[] }[]`: newest first, using the headings above, with only non-empty groups.
 - `ui/src/components/notes.tsx`: a search field at the top of the list column ("Search", a magnifier icon, Esc clears it), and the list shows `groupByDate(sorted.filter(matches))` with a small muted heading per group. With a query and no matches: "No notes match". Opening a note keeps the search. On a phone the field sits above the list the same way.
+
+### Markdown
+
+- Package: `markdown-to-jsx` 9.10.6, exact. It has no dependencies, is maintained (published 2026-11-06), builds React elements (no HTML strings), and adds about 32 KB gzipped. `react-markdown` was not picked because it brings 11 unified/remark packages; `marked` because it outputs an HTML string and would need a sanitizer; `snarkdown` because it has not been updated since 2022.
+- Options: `disableParsingRawHTML` (raw HTML stays text), `forceBlock`, links overridden to open in the browser through `openLink` (http and https only).
+- `NoteText`: rendered when the note has text; a click (not on a link or checkbox) or Enter edits; blur or Escape shows it rendered again; a new or empty note opens for typing. The editor uses the mono face so the Markdown reads as source.
+- `titleOf` (interface) and `title_of` (MCP) drop a leading `#`–`######` and a closing `#` run, so `# Funds` is "Funds" and `#hashtag` stays as it is.
+- Styles: `.note-md` in `ui/src/index.css`, only what a jotted note uses (headings, lists, task lists, links, code, quote, rule, table).
+
+Ruling: checkboxes in a task list show but do not toggle from the rendered note. Ticking one rewrites the text and would need its own small parser step. Cost if wrong: you tick it by editing `[ ]` to `[x]`.
 
 ### MCP (`crates/mcp/src/lib.rs`)
 
@@ -59,3 +71,9 @@ Ruling: no new search tool for tasks. Agents filter the list they get, and a sec
 ## Out of scope
 
 Tags, pinning, sorting options, folders; project rename or delete over MCP; starting focus over MCP; MCP against a hosted account (noted above as the next real gap).
+
+## Execution notes
+
+- Plan vs built: Notes interface, Markdown, MCP MATCH. One DRIFT, found in the preview and fixed: a search that hid the open note left it showing on the right; the first match now opens instead (wide screens; on a phone the list shows alone anyway).
+- Verified: typecheck, 416 interface tests, build; `cargo test -p done-core -p done-mcp -p done-server` (18 + 8 + 17). Local web app on a copy of the owner's tasks file with ten example notes from today to 2025: headings Today, Yesterday, Previous 7 Days, Previous 30 Days, October, September, 2025; "seed" narrows to two, "seed fjord" to one; a Markdown note renders headings, a numbered list, bold and italics, task-list checkboxes, a link and a quote, and a click shows its source with Escape returning to the rendered note.
+- Not checked here: the phone layout; the packaged apps.

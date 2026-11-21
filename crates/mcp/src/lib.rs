@@ -98,24 +98,29 @@ fn tools() -> Value {
     json!([
         { "name": "list_tasks", "description": "List open tasks, with today's date. Finished tasks are not listed. Each task carries its subtasks, including the ones already done.",
           "inputSchema": { "type": "object", "properties": {
-              "filter": { "type": "string", "enum": ["all", "today", "upcoming", "inbox"], "description": "today includes overdue tasks. Defaults to all." },
+              "filter": { "type": "string", "enum": ["all", "today", "upcoming", "inbox", "finished_today"], "description": "today includes overdue tasks; finished_today lists what was finished today instead of open tasks. Defaults to all." },
               "project": { "type": "string", "description": "Only tasks in this project." } } } },
         { "name": "add_task", "description": "Add a task, optionally with subtasks, or add one subtask to an existing task.",
           "inputSchema": { "type": "object", "properties": add, "required": ["title"] } },
         { "name": "update_task", "description": "Change a task. Only the fields given are changed.",
           "inputSchema": { "type": "object", "properties": update, "required": ["id"] } },
         { "name": "complete_task", "description": "Mark a task or a subtask as finished. Finishing a task finishes its open subtasks.", "inputSchema": id_only },
+        { "name": "reopen_task", "description": "Put back a task that was finished today, for example one finished by mistake, with the subtasks finished along with it.", "inputSchema": id_only },
         { "name": "delete_task", "description": "Delete a task for good, with its subtasks. Prefer complete_task for work that was done.", "inputSchema": id_only },
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-        { "name": "list_notes", "description": "List the notes on the Notes page, the most recently changed first. A note is free text that is not a task; its first line is its title.",
-          "inputSchema": { "type": "object", "properties": {} } },
-        { "name": "add_note", "description": "Add a note. Put a short title on the first line.",
+        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is Markdown text that is not a task; its first line is its title.",
+          "inputSchema": { "type": "object", "properties": {
+              "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." } } } },
+        { "name": "add_note", "description": "Add a note, written in Markdown. Put a short title on the first line, as a # heading.",
           "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] } },
         { "name": "update_note", "description": "Replace a note's whole text. To add to it, send its current text with the addition.",
           "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" } }, "required": ["id", "text"] } },
         { "name": "delete_note", "description": "Delete a note for good.", "inputSchema": id_only },
+        { "name": "time_sheet", "description": "One day's focus blocks from the time sheet: what was focused on, when, planned against actual minutes, and the totals.",
+          "inputSchema": { "type": "object", "properties": {
+              "day": { "type": "string", "description": "YYYY-MM-DD. Defaults to today." } } } },
     ])
 }
 
@@ -210,9 +215,23 @@ fn change(store: &Store, edit: impl Fn(&State, &str) -> Result<(Change, Value), 
     Err("done is being changed elsewhere right now. Try again.".into())
 }
 
-/// The first line with something on it, as the Notes page shows it.
+/// The first line with something on it, as the Notes page shows it: without
+/// the Markdown that makes it a heading ("# Funds" is "Funds").
 fn title_of(text: &str) -> String {
-    text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("New note").to_string()
+    for line in text.lines() {
+        let line = line.trim();
+        let hashes = line.len() - line.trim_start_matches('#').len();
+        let rest = &line[hashes..];
+        let title = if (1..=6).contains(&hashes) && (rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+            rest.trim().trim_end_matches('#').trim()
+        } else {
+            line
+        };
+        if !title.is_empty() {
+            return title.to_string();
+        }
+    }
+    "New note".to_string()
 }
 
 fn describe_note(note: &Note) -> Value {
@@ -232,6 +251,9 @@ fn existing_note(store: &Store, args: &Value) -> Result<Note, String> {
     store.notes().map_err(|e| e.to_string())?.into_iter().find(|n| n.id == id).ok_or_else(|| format!("There is no note {id}. list_notes gives the ids."))
 }
 
+/// list_notes gives at most this many, newest first, and says how many it left out.
+const NOTES_LISTED: usize = 20;
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
@@ -249,7 +271,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let filter = args.get("filter").and_then(Value::as_str).unwrap_or("all");
             let tasks: Vec<Value> = state.tasks.iter()
                 // Subtasks are listed under their task, never on their own.
-                .filter(|t| !t.done && t.parent_id.is_none())
+                .filter(|t| t.parent_id.is_none() && t.done == (filter == "finished_today"))
                 .filter(|t| project.is_none() || t.project_id == project)
                 .filter(|t| match filter {
                     // Days written YYYY-MM-DD compare correctly as text.
@@ -336,6 +358,26 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             tasks.push(task);
             Ok((Change { tasks, ..Default::default() }, said))
         }),
+        "reopen_task" => change(store, |state, _| {
+            let id = args.get("id").and_then(Value::as_i64).ok_or("Give the task's id.")?;
+            let task = state.tasks.iter().find(|t| t.id == id).ok_or_else(|| {
+                format!("There is no task {id} finished today. Only a task finished today can be put back here; reopen an older one in the app.")
+            })?;
+            if !task.done {
+                return Err(format!("\"{}\" is still open.", task.title));
+            }
+            // As in the app: its subtasks finished the same day come back with it.
+            let tasks: Vec<Task> = state.tasks.iter()
+                .filter(|t| t.id == id || (t.parent_id == Some(id) && t.done && t.done_day == task.done_day))
+                .cloned()
+                .map(|mut t| {
+                    t.done = false;
+                    t.done_day = None;
+                    t
+                })
+                .collect();
+            Ok((Change { tasks, ..Default::default() }, json!({ "reopened": task.title })))
+        }),
         "delete_task" => change(store, |state, _| {
             let task = open_task(state, args)?;
             Ok((Change { delete_tasks: vec![task.id], ..Default::default() }, json!({ "deleted": task.title })))
@@ -351,9 +393,34 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             Ok((Change { projects: vec![project], ..Default::default() }, json!({ "created": name })))
         }),
         "list_notes" => {
-            let notes = store.notes().map_err(|e| e.to_string())?;
-            let notes: Vec<Value> = notes.iter().map(describe_note).collect();
-            Ok(json!({ "notes": notes }))
+            let words: Vec<String> = args.get("search").and_then(Value::as_str).unwrap_or("")
+                .split_whitespace().map(str::to_lowercase).collect();
+            let found: Vec<Note> = store.notes().map_err(|e| e.to_string())?.into_iter()
+                .filter(|n| { let text = n.text.to_lowercase(); words.iter().all(|w| text.contains(w.as_str())) })
+                .collect();
+            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(describe_note).collect();
+            let more = found.len().saturating_sub(NOTES_LISTED);
+            Ok(if more > 0 { json!({ "notes": notes, "notListed": more }) } else { json!({ "notes": notes }) })
+        }
+        "time_sheet" => {
+            let day = match args.get("day").and_then(Value::as_str) {
+                Some(day) => day.to_string(),
+                None => store.today().map_err(|e| e.to_string())?,
+            };
+            let entries = store.entries(&day).map_err(|e| e.to_string())?;
+            let minutes = |ms: i64| (ms + 30_000) / 60_000;
+            let mut blocks = Vec::new();
+            for e in &entries {
+                blocks.push(json!({
+                    "title": e.title, "taskId": e.task_id,
+                    "from": store.clock(e.started_at).map_err(|e| e.to_string())?,
+                    "to": store.clock(e.ended_at).map_err(|e| e.to_string())?,
+                    "plannedMinutes": minutes(e.planned_ms), "focusedMinutes": minutes(e.focused_ms),
+                }));
+            }
+            let planned: i64 = entries.iter().map(|e| e.planned_ms).sum();
+            let focused: i64 = entries.iter().map(|e| e.focused_ms).sum();
+            Ok(json!({ "day": day, "blocks": blocks, "plannedMinutes": minutes(planned), "focusedMinutes": minutes(focused) }))
         }
         "add_note" => {
             let text = note_text(args)?;
@@ -494,7 +561,7 @@ mod tests {
     #[test]
     fn an_agent_can_write_down_a_note_the_app_lists() {
         let store = Store::open(Path::new(":memory:")).unwrap();
-        let replies = talk(&store, &[tool(1, "add_note", json!({ "text": "Seed round funds\nAlpha Ventures\nBeta Capital" }))]);
+        let replies = talk(&store, &[tool(1, "add_note", json!({ "text": "# Seed round funds\nAlpha Ventures\nBeta Capital" }))]);
         let added = said(&replies[0]);
         let id = added["id"].as_i64().unwrap();
         assert_eq!(added["title"], "Seed round funds");
@@ -514,5 +581,63 @@ mod tests {
         assert_eq!(replies[3]["result"]["isError"], true);
         assert_eq!(said(&replies[4])["deleted"], "Seed round funds");
         assert!(store.notes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_agent_can_search_notes_and_is_told_what_was_left_out() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1 }).unwrap();
+        for i in 0..25 {
+            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i }).unwrap();
+        }
+        let replies = talk(&store, &[tool(1, "list_notes", json!({ "search": "ALPHA seed" })), tool(2, "list_notes", json!({}))]);
+        let found = said(&replies[0]);
+        assert_eq!(found["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(found["notes"][0]["title"], "Seed round funds");
+        assert!(found.get("notListed").is_none());
+        let all = said(&replies[1]);
+        assert_eq!(all["notes"].as_array().unwrap().len(), 20);
+        assert_eq!(all["notes"][0]["title"], "Groceries 24");
+        assert_eq!(all["notListed"], 6);
+    }
+
+    #[test]
+    fn a_task_finished_by_mistake_can_be_listed_and_put_back() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[tool(1, "add_task", json!({ "title": "Email Rory", "subtasks": [{ "title": "Draft" }] }))]);
+        let id = said(&replies[0])["id"].as_i64().unwrap();
+        let replies = talk(&store, &[
+            tool(2, "complete_task", json!({ "id": id })),
+            tool(3, "list_tasks", json!({ "filter": "finished_today" })),
+            tool(4, "reopen_task", json!({ "id": id })),
+            tool(5, "reopen_task", json!({ "id": id })),
+            tool(6, "list_tasks", json!({})),
+        ]);
+        let finished = said(&replies[1]);
+        assert_eq!(finished["tasks"][0]["title"], "Email Rory");
+        assert_eq!(said(&replies[2])["reopened"], "Email Rory");
+        // Reopening an open task is refused in words an agent can act on.
+        assert_eq!(replies[3]["result"]["isError"], true);
+        let open = said(&replies[4]);
+        assert_eq!(open["tasks"][0]["title"], "Email Rory");
+        assert_eq!(open["tasks"][0]["subtasks"][0]["done"], false);
+    }
+
+    #[test]
+    fn an_agent_can_read_a_days_time_sheet() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let day = store.today().unwrap();
+        let start = 1_795_000_000_000;
+        store.record(done_core::NewEntry {
+            task_id: None, title: "Deck".into(), day: day.clone(),
+            started_at: start, ended_at: start + 30 * 60_000, planned_ms: 25 * 60_000, focused_ms: 28 * 60_000,
+        }).unwrap();
+        let replies = talk(&store, &[tool(1, "time_sheet", json!({}))]);
+        let sheet = said(&replies[0]);
+        assert_eq!(sheet["day"], day);
+        assert_eq!(sheet["blocks"][0]["title"], "Deck");
+        assert_eq!(sheet["blocks"][0]["plannedMinutes"], 25);
+        assert_eq!(sheet["focusedMinutes"], 28);
+        assert_eq!(sheet["blocks"][0]["from"].as_str().unwrap().len(), 5);
     }
 }

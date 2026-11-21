@@ -432,6 +432,13 @@ impl Store {
         Ok(())
     }
 
+    /// A moment as the Mac's clock shows it, HH:MM. Asked of SQLite for the
+    /// same reason as `today`.
+    pub fn clock(&self, ms: i64) -> Result<String, Error> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.query_row("SELECT strftime('%H:%M', ?1 / 1000, 'unixepoch', 'localtime')", [ms], |r| r.get(0))?)
+    }
+
     /// Today as the Mac sees it, YYYY-MM-DD. Asked of SQLite so that nothing
     /// here needs a date library, and so every caller agrees on the day.
     pub fn today(&self) -> Result<String, Error> {

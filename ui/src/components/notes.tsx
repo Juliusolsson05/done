@@ -1,14 +1,15 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { useEffect, useRef, useState } from 'react'
-import { ChevronLeftIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import Markdown from 'markdown-to-jsx/react'
+import { ChevronLeftIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { deleteNote, loadNotes, saveNote } from '@/lib/backend'
-import { byNewest, isBlank, titleOf, whenText, type Note } from '@/lib/notes'
+import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
+import { byNewest, groupByDate, isBlank, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { play } from '@/lib/sounds'
 import { cn } from '@/lib/utils'
 
@@ -19,6 +20,9 @@ export function Notes() {
   const isMobile = useIsMobile()
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
+  // What is typed in the search field. Kept while notes are opened, so going
+  // through the matches one by one does not lose it.
+  const [query, setQuery] = useState('')
   // The note just made: its field opens with the cursor in it.
   const [fresh, setFresh] = useState<number | null>(null)
   // The note waiting to be written, and its timer. One at a time: switching
@@ -72,6 +76,16 @@ export function Notes() {
     // Set up once; reread and leave read only refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // A search that leaves out the open note opens its first match instead,
+  // so the note on the right is always one of those listed.
+  useEffect(() => {
+    if (isMobile || !notes || !query.trim()) return
+    const found = [...notes].sort(byNewest).filter((n) => matches(n, query))
+    if (found.length > 0 && !found.some((n) => n.id === openId)) open(found[0].id)
+    // Only when the search or the notes change; open reads the latest state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, notes, isMobile])
 
   // On a wide screen a note is always open when there is one.
   useEffect(() => {
@@ -134,6 +148,10 @@ export function Notes() {
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)
   const now = Date.now()
+  const groups = groupByDate(
+    sorted.filter((n) => matches(n, query)),
+    now,
+  )
 
   // On a phone: the open note alone, with a way back to the list.
   if (isMobile && current) {
@@ -148,7 +166,7 @@ export function Notes() {
             <Trash2Icon />
           </Button>
         </div>
-        <NoteText note={current} focused={current.id === fresh} onChange={type} />
+        <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
       </div>
     )
   }
@@ -164,29 +182,54 @@ export function Notes() {
       {notes && notes.length === 0 && <p className="py-10 text-sm text-muted-foreground">No notes yet. New note starts one.</p>}
       {sorted.length > 0 && (
         <div className="flex gap-6">
-          <ul className="w-full shrink-0 md:w-60" aria-label="Notes">
-            {sorted.map((note) => (
-              <li key={note.id}>
-                <button
-                  type="button"
-                  onClick={() => open(note.id)}
-                  aria-current={note.id === openId ? 'true' : undefined}
-                  className={cn(
-                    'flex w-full flex-col items-start rounded-lg px-3 py-2 text-left max-md:border-b max-md:rounded-none max-md:py-3',
-                    note.id === openId ? 'bg-accent' : 'hover:bg-accent/60',
-                  )}
-                >
-                  <span className={cn('w-full truncate text-sm font-medium', isBlank(note.text) && 'text-muted-foreground')}>
-                    {titleOf(note.text)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{whenText(note.updatedAt, now)}</span>
-                </button>
-              </li>
+          <div className="w-full shrink-0 md:w-60">
+            <label className="mb-3 flex h-8 items-center gap-2 rounded-lg bg-muted px-2.5 text-muted-foreground max-md:h-10">
+              <SearchIcon className="size-4 shrink-0" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && query) {
+                    event.preventDefault()
+                    setQuery('')
+                  }
+                }}
+                placeholder="Search"
+                aria-label="Search notes"
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground max-md:text-base [&::-webkit-search-cancel-button]:hidden"
+              />
+            </label>
+            {groups.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No notes match</p>}
+            {groups.map((group) => (
+              <section key={group.label} className="mb-3">
+                <h2 className="px-3 pb-1 text-xs font-medium text-faint">{group.label}</h2>
+                <ul aria-label={group.label}>
+                  {group.notes.map((note) => (
+                    <li key={note.id}>
+                      <button
+                        type="button"
+                        onClick={() => open(note.id)}
+                        aria-current={note.id === openId ? 'true' : undefined}
+                        className={cn(
+                          'flex w-full flex-col items-start rounded-lg px-3 py-2 text-left max-md:rounded-none max-md:border-b max-md:py-3',
+                          note.id === openId ? 'bg-accent' : 'hover:bg-accent/60',
+                        )}
+                      >
+                        <span className={cn('w-full truncate text-sm font-medium', isBlank(note.text) && 'text-muted-foreground')}>
+                          {titleOf(note.text)}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{whenText(note.updatedAt, now)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
           {!isMobile && current && (
             <div className="flex min-h-[60svh] min-w-0 flex-1 flex-col">
-              <NoteText note={current} focused={current.id === fresh} onChange={type} />
+              <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
               <div className="mt-2 flex justify-end">
                 <HeaderButton danger onClick={() => remove(current)}>
                   <Trash2Icon />
@@ -201,17 +244,69 @@ export function Notes() {
   )
 }
 
+// A note reads as formatted Markdown. A click on it (not on a link) edits
+// the plain text, and leaving the field shows it formatted again. A note
+// just made, or one with nothing in it yet, opens for typing.
 function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; onChange: (text: string) => void }) {
+  const [editing, setEditing] = useState(focused || isBlank(note.text))
+  if (editing) {
+    return (
+      <textarea
+        autoFocus
+        aria-label="Note"
+        value={note.text}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => !isBlank(note.text) && setEditing(false)}
+        onKeyDown={(event) => {
+          // Escape ends editing, as leaving the field does.
+          if (event.key === 'Escape' && !isBlank(note.text)) {
+            event.preventDefault()
+            setEditing(false)
+          }
+        }}
+        placeholder="Write it down… Markdown works: # Title, - list, **bold**"
+        className="min-h-0 w-full flex-1 resize-none bg-transparent font-mono text-[14px] leading-relaxed outline-none placeholder:font-sans placeholder:text-faint max-md:text-base"
+      />
+    )
+  }
   return (
-    <textarea
-      autoFocus={focused}
-      // A fresh field per note, so the cursor and undo history do not carry over.
-      key={note.id}
-      aria-label="Note"
-      value={note.text}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder="Write it down…"
-      className="min-h-0 w-full flex-1 resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-faint max-md:text-base"
-    />
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label="Edit note"
+      onClick={(event) => {
+        if (!(event.target as Element).closest('a, input')) setEditing(true)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          setEditing(true)
+        }
+      }}
+      className="note-md min-h-0 w-full flex-1 cursor-text text-[15px] leading-relaxed outline-none max-md:text-base"
+    >
+      <Markdown options={MARKDOWN}>{note.text}</Markdown>
+    </div>
   )
 }
+
+// A link opens in the browser, never inside the app's window.
+function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
+  return (
+    <a
+      href={href}
+      title={href}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (href && /^https?:\/\//i.test(href)) openLink(href)
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+// Raw HTML in a note stays text: a note is for writing, not for markup that
+// could run in the app.
+const MARKDOWN = { disableParsingRawHTML: true, forceBlock: true, overrides: { a: NoteLink } }
