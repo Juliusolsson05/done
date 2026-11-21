@@ -86,3 +86,25 @@ export function groupByDate(notes: Note[], now: number): DateGroup[] {
   }
   return groups
 }
+
+// In a note, Enter means a new line, as it does while writing. Markdown would
+// join two lines into one paragraph, so each line that runs on to another is
+// ended with a hard break first. Code blocks and tables are left as written.
+export function keepLineBreaks(text: string): string {
+  const lines = text.split('\n')
+  let inCode = false
+  return lines
+    .map((line, i) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inCode = !inCode
+        return line
+      }
+      const next = lines[i + 1]
+      const runsOn = next !== undefined && next.trim() !== '' && line.trim() !== ''
+      // Lists, headings, quotes and tables keep their own lines already; a
+      // break added to them could join the next item to this one.
+      const structured = (l: string | undefined) => l !== undefined && /^\s*([-*+]\s|\d+[.)]\s|#|>|\|)/.test(l)
+      return inCode || !runsOn || structured(line) || structured(next) ? line : line.replace(/\s*$/, '') + '\\'
+    })
+    .join('\n')
+}
