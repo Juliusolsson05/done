@@ -117,16 +117,6 @@ export function Notes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, notes !== null])
 
-  // "New note" pressed on a project's page: a note started in that project.
-  const newIn = ui.view.kind === 'notes' ? ui.view.newIn : undefined
-  const startedIn = useRef<object | null>(null)
-  useEffect(() => {
-    if (newIn === undefined || notes === null || startedIn.current === ui.view) return
-    startedIn.current = ui.view
-    void create(newIn)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newIn, notes !== null, ui.view])
-
   // On a wide screen a note is always open when there is one: the one asked
   // for if any, otherwise the newest.
   useEffect(() => {
