@@ -20,7 +20,7 @@ use axum::{
 };
 use accounts::{Accounts, Failure, Files};
 use auth::{Cloud, Session};
-use done_core::{Change, Error, NewEntry, SaveNote, Store};
+use done_core::{Change, Error, NewEntry, Outbox, SaveNote, Store};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -164,6 +164,18 @@ async fn cloud_delete_note(State(cloud): State<Cloud>, session: Session, Json(q)
     answer(cloud.accounts.write(&session.sub, |s| s.delete_note(q.id).map(|()| serde_json::json!({}))).await)
 }
 
+// A device swapping changes with this account's copy: the Mac and iPhone
+// apps keep their own file and meet here every few seconds (see
+// crates/core/src/replica.rs). A round with nothing new to send only reads,
+// so a device checking in does not rewrite the stored file each time.
+async fn cloud_replicate(State(cloud): State<Cloud>, session: Session, Json(outbox): Json<Outbox>) -> Response {
+    if outbox.rows.is_empty() {
+        answer(cloud.accounts.read(&session.sub, |s| s.exchange(&outbox)).await)
+    } else {
+        answer(cloud.accounts.write(&session.sub, |s| s.exchange(&outbox)).await)
+    }
+}
+
 fn local(store: Arc<Store>) -> Router {
     Router::new()
         .route("/", get(|| async { Html(UI) }))
@@ -200,6 +212,7 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/entries/delete", post(cloud_delete_entry))
         .route("/api/notes", get(cloud_notes).post(cloud_save_note))
         .route("/api/notes/delete", post(cloud_delete_note))
+        .route("/api/replicate", post(cloud_replicate))
         .layer(for_the_apps())
         .with_state(cloud)
 }
@@ -516,6 +529,38 @@ mod tests {
 
     async fn exchange(at: &str, code: &str, secret: &str) -> reqwest::Response {
         reqwest::Client::new().post(format!("{at}/auth/exchange")).json(&serde_json::json!({ "code": code, "verifier": secret })).send().await.unwrap()
+    }
+
+    // What the Mac app does every few seconds once signed in: its own file
+    // goes up, and the web app shows the same tasks.
+    #[tokio::test]
+    async fn a_device_swaps_changes_with_its_account() {
+        let (at, google, _kept) = hosted(1).await;
+        google.says(person("1001", "anna@example.com"));
+        let code = code_for_app(&at, "a secret only the app knows").await;
+        let answer: serde_json::Value = exchange(&at, &code, "a secret only the app knows").await.json().await.unwrap();
+        let token = answer["token"].as_str().unwrap();
+
+        let mac = done_core::Store::open(std::path::Path::new(":memory:")).unwrap();
+        mac.sync(Change { rev: 0, tasks: vec![serde_json::from_value(serde_json::json!({ "id": 1, "title": "Email the funds" })).unwrap()], ..Default::default() })
+            .unwrap();
+        let http = reqwest::Client::new();
+        let out = mac.outbox().unwrap();
+        let reply: done_core::Reply =
+            http.post(format!("{at}/api/replicate")).bearer_auth(token).json(&out).send().await.unwrap().json().await.unwrap();
+        mac.inbox(&reply, out.upto).unwrap();
+        let mut web = Browser::new(&at);
+        web.sign_in().await;
+        assert_eq!(web.titles().await, vec!["Email the funds"]);
+        // Nothing new: nothing sent, nothing comes back.
+        let out = mac.outbox().unwrap();
+        assert!(out.rows.is_empty());
+        let reply: done_core::Reply =
+            http.post(format!("{at}/api/replicate")).bearer_auth(token).json(&out).send().await.unwrap().json().await.unwrap();
+        assert!(!mac.inbox(&reply, out.upto).unwrap());
+        // Without a sign-in, no account is reached.
+        let anonymous = http.post(format!("{at}/api/replicate")).json(&out).send().await.unwrap();
+        assert_eq!(anonymous.status(), 401);
     }
 
     #[tokio::test]

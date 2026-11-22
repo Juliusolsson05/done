@@ -25,7 +25,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
-import { change, getSnapshot, load, onLost, refresh, subscribe } from '@/lib/store'
+import { change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } from '@/lib/store'
 import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -248,9 +248,24 @@ export default function App() {
     }
     window.addEventListener('focus', keepInStep)
     const timer = setInterval(keepInStep, 4000)
+    // A signed-in app swaps changes with its account: when it opens, when it
+    // comes back, when the connection does, and every 15 seconds in view.
+    // Never under your hands, for the same reason as above. Edits also go up
+    // by themselves shortly after they are saved (store.ts).
+    const swap = () => {
+      if (document.hidden || busy()) return
+      void replicateNow()
+    }
+    swap()
+    window.addEventListener('focus', swap)
+    window.addEventListener('online', swap)
+    const rounds = setInterval(swap, 15_000)
     return () => {
       window.removeEventListener('focus', keepInStep)
       clearInterval(timer)
+      window.removeEventListener('focus', swap)
+      window.removeEventListener('online', swap)
+      clearInterval(rounds)
     }
   }, [])
 

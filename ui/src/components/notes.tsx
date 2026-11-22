@@ -14,6 +14,7 @@ import { ProjectDot } from '@/components/marks'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
+import { SYNCED } from '@/lib/store'
 import { byNewest, groupByDate, isBlank, keepLineBreaks, matches, titleOf, whenText, type Note } from '@/lib/notes'
 import { label, linkAt, linksIn } from '@/lib/links'
 import { play } from '@/lib/sounds'
@@ -89,8 +90,11 @@ export function Notes() {
   useEffect(() => {
     reread()
     window.addEventListener('focus', reread)
+    // Notes written on another device, arriving by sync.
+    window.addEventListener(SYNCED, reread)
     return () => {
       window.removeEventListener('focus', reread)
+      window.removeEventListener(SYNCED, reread)
       leave(openRef.current)
     }
     // Set up once; reread and leave read only refs.

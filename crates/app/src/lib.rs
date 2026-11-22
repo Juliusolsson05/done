@@ -254,6 +254,19 @@ fn delete_note(store: tauri::State<Store>, id: i64) -> Result<(), String> {
     store.delete_note(id).map_err(|e| e.to_string())
 }
 
+// Keeping this device's file in step with a hosted account. The window
+// does the network part (it holds the sign-in token); these read what to
+// send and take in the answer.
+#[tauri::command]
+fn outbox(store: tauri::State<Store>) -> Result<done_core::Outbox, String> {
+    store.outbox().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn inbox(store: tauri::State<Store>, reply: done_core::Reply, upto: i64) -> Result<bool, String> {
+    store.inbox(&reply, upto).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
     Info {
@@ -325,7 +338,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, info, restart, focus_set, open_in_browser]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser]);
 
     #[cfg(desktop)]
     let builder = builder

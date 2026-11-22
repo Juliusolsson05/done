@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod replica;
+pub use replica::{Gone, Outbox, Reply, Rows, Stamped};
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -336,6 +339,8 @@ impl Store {
         if !has_note_project {
             conn.execute("ALTER TABLE note ADD COLUMN project_id INTEGER REFERENCES project(id) ON DELETE SET NULL", [])?;
         }
+        // Last, once every table exists: what keeping copies in step needs.
+        replica::prepare(&conn)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -357,13 +362,16 @@ impl Store {
         check_entry(&entry)?;
         let conn = self.conn.lock().unwrap();
         let title = entry.title.trim();
+        // A fresh id, not the next number: another device may be writing
+        // its own entries offline at the same time (see replica.rs).
+        let id = replica::fresh_id(&conn)?;
         conn.execute(
-            "INSERT INTO entry (task_id, title, day, started_at, ended_at, planned_ms, focused_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![entry.task_id, title, entry.day, entry.started_at, entry.ended_at, entry.planned_ms, entry.focused_ms],
+            "INSERT INTO entry (id, task_id, title, day, started_at, ended_at, planned_ms, focused_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, entry.task_id, title, entry.day, entry.started_at, entry.ended_at, entry.planned_ms, entry.focused_ms],
         )?;
         Ok(Entry {
-            id: conn.last_insert_rowid(),
+            id,
             task_id: entry.task_id,
             title: title.to_string(),
             day: entry.day,
@@ -434,11 +442,13 @@ impl Store {
                 id
             }
             None => {
+                // Fresh, for the same reason as a time sheet entry's.
+                let id = replica::fresh_id(&conn)?;
                 conn.execute(
-                    "INSERT INTO note (text, updated_at, project_id) VALUES (?1, ?2, ?3)",
-                    params![note.text, note.updated_at, note.project_id],
+                    "INSERT INTO note (id, text, updated_at, project_id) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, note.text, note.updated_at, note.project_id],
                 )?;
-                conn.last_insert_rowid()
+                id
             }
         };
         Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id })
@@ -535,14 +545,13 @@ impl Store {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        // Ids are handed out by the window, so it needs one that no row has,
-        // including the finished tasks it was not sent.
-        let highest: Option<i64> = conn.query_row(
-            "SELECT MAX(m) FROM (SELECT MAX(id) AS m FROM task UNION ALL SELECT MAX(id) FROM project)",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(State { rev, next_id: highest.unwrap_or(0) + 1, projects, tasks })
+        // Ids are handed out by the window, counting up from this one. Taken
+        // from the clock rather than one past the highest id: a phone and a
+        // Mac adding tasks offline would otherwise both pick the same next
+        // number (see replica.rs). A window loads again every few seconds and
+        // gets a new start, so what it adds still sorts after what others added.
+        let next_id = replica::fresh_id(&conn)?;
+        Ok(State { rev, next_id, projects, tasks })
     }
 
     /// Applies one window's changes, all or nothing. Refused as `Stale` when
@@ -751,7 +760,7 @@ mod tests {
         assert_eq!(state.projects, vec![project]);
         assert_eq!(state.tasks[0].title, "Send the invoice");
         assert_eq!(state.tasks[0].project_id, Some(1));
-        assert_eq!(state.next_id, 3);
+        assert!(state.next_id >= replica::SMALL);
     }
 
     #[test]
@@ -777,7 +786,7 @@ mod tests {
         let next_day = s.state("2026-11-13").unwrap();
         assert!(next_day.tasks.is_empty());
         // The hidden task still owns id 1.
-        assert_eq!(next_day.next_id, 2);
+        assert!(next_day.next_id >= replica::SMALL);
     }
 
     #[test]
