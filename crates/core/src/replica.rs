@@ -161,6 +161,10 @@ pub struct Outbox {
     /// This file's counter when the rows were read. Echoed back to `inbox`.
     pub upto: i64,
     pub rows: Rows,
+    /// How many rows were just given new ids. Not sent anywhere useful; the
+    /// window reloads when it is above zero, or it would go on with old ids.
+    #[serde(default)]
+    pub renumbered: usize,
 }
 
 /// What the server answers: what it wrote since `pulled`, and its counter now.
@@ -419,11 +423,12 @@ impl Store {
     pub fn outbox(&self) -> Result<Outbox, Error> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if rekey(&tx)? > 0 {
+        let renumbered = rekey(&tx)?;
+        if renumbered > 0 {
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
         }
         let pushed = meta(&tx, "pushed")?;
-        let out = Outbox { pulled: meta(&tx, "pulled")?, upto: meta(&tx, "seq")?, rows: rows_since(&tx, pushed)? };
+        let out = Outbox { pulled: meta(&tx, "pulled")?, upto: meta(&tx, "seq")?, rows: rows_since(&tx, pushed)?, renumbered };
         tx.commit()?;
         Ok(out)
     }

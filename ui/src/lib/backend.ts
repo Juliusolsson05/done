@@ -114,7 +114,7 @@ export const deleteNote = (id: number): Promise<void> =>
 export const canReplicate = tauri !== undefined && hosted !== null
 export async function replicate(): Promise<boolean> {
   if (!tauri || !hosted) return false
-  const outbox = await tauri.core.invoke<{ upto: number }>('outbox')
+  const outbox = await tauri.core.invoke<{ upto: number; renumbered: number }>('outbox')
   const response = await fetch(at + '/api/replicate', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...who },
@@ -123,7 +123,10 @@ export async function replicate(): Promise<boolean> {
     signal: AbortSignal.timeout(20_000),
   })
   const reply = await answer<unknown>(response)
-  return tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto })
+  const arrived = await tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto })
+  // The first round gives rows counted up on this device new ids; what the
+  // window holds must be loaded again whether or not anything arrived.
+  return arrived || outbox.renumbered > 0
 }
 
 // Both are sent as JSON, like every call that changes something: another
