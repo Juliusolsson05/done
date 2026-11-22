@@ -1,6 +1,6 @@
 // The tasks and projects this window is showing, and keeping them saved.
 // One store for the whole interface; React reads it with useSyncExternalStore.
-import { BROWSER_INFO, loadInfo, loadState, sync, type Info } from '@/lib/backend'
+import { BROWSER_INFO, canReplicate, loadInfo, loadState, replicate, sync, type Info } from '@/lib/backend'
 import { changeSet, picture, type Picture } from '@/lib/changes'
 import { TODAY } from '@/lib/days'
 import type { Data } from '@/lib/tasks'
@@ -64,6 +64,7 @@ async function push() {
     // are not saved yet and must still count as different.
     saved = now
     set({ data: { ...snapshot.data, rev } })
+    replicateSoon()
   } catch (error) {
     // Another window saved first ("stale"), or the save was refused. Either
     // way what is on screen is no longer true, so show what the file holds.
@@ -88,4 +89,40 @@ export function refresh() {
       // Offline for a moment; the next check will try again.
     }
   })
+}
+
+// Keeping a signed-in app in step with its account. Queued with the saves,
+// like `refresh`: a round never runs while a save is half done, and a save
+// made meanwhile waits for it, so nothing typed is overwritten by a reload.
+// Something that arrived reloads the window; notes and the time sheet are
+// told by an event, as they load on their own.
+export const SYNCED = 'done-synced'
+let replicating = false
+export function replicateNow(): Promise<void> {
+  if (!canReplicate || replicating) return Promise.resolve()
+  replicating = true
+  const round = pending.then(async () => {
+    try {
+      if (await replicate()) {
+        await reload()
+        window.dispatchEvent(new Event(SYNCED))
+      }
+    } catch {
+      // No connection, or the server is down: this device goes on by itself
+      // and the next round sends what it missed.
+    } finally {
+      replicating = false
+    }
+  })
+  pending = round
+  return round
+}
+
+// A change goes up a moment after it is saved, so a burst of edits (typing a
+// title, ticking off three tasks) goes as one round.
+let soon: ReturnType<typeof setTimeout> | undefined
+export function replicateSoon() {
+  if (!canReplicate) return
+  clearTimeout(soon)
+  soon = setTimeout(() => void replicateNow(), 1500)
 }

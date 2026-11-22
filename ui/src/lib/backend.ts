@@ -37,9 +37,13 @@ export const isDesktop = tauri !== undefined
 // window loads: signing in or out reloads the window, so it cannot go stale.
 const hosted = tauri ? cloudSession() : null
 // The tasks file on this machine, through the app's own commands. An app
-// that has signed in uses the hosted server instead, like a browser does.
-const local = tauri !== undefined && hosted === null ? tauri : undefined
-// Where /api is: this same server for a browser, the hosted one for an app.
+// always works on its own file, signed in or not, so it keeps working with
+// no connection; a signed-in app keeps that file in step with the account
+// (see `replicate`).
+const local = tauri
+// Where the hosted server is: this same server for a browser, the one the app
+// signed in to for an app. Only account calls and `replicate` go there from
+// an app.
 const at = hosted ? CLOUD_URL : ''
 const who: Record<string, string> = hosted ? { authorization: `Bearer ${hosted.token}` } : {}
 const get = (path: string) => fetch(at + path, { headers: who })
@@ -103,11 +107,32 @@ export const saveNote = (note: SaveNote): Promise<Note> => (local ? local.core.i
 export const deleteNote = (id: number): Promise<void> =>
   local ? local.core.invoke<void>('delete_note', { id }) : post<unknown>('/api/notes/delete', { id }).then(() => undefined)
 
+// One round of keeping a signed-in app's file in step with its account: send
+// what changed here, take in what changed elsewhere. True when something
+// arrived, so the window reloads. Does nothing for a browser or an app that
+// is not signed in.
+export const canReplicate = tauri !== undefined && hosted !== null
+export async function replicate(): Promise<boolean> {
+  if (!tauri || !hosted) return false
+  const outbox = await tauri.core.invoke<{ upto: number }>('outbox')
+  const response = await fetch(at + '/api/replicate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...who },
+    body: JSON.stringify(outbox),
+    // A slow network must not hold up saving: saves wait behind this.
+    signal: AbortSignal.timeout(20_000),
+  })
+  const reply = await answer<unknown>(response)
+  return tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto })
+}
+
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
 export const signOut = async (): Promise<void> => {
   // An app's session is its token: forgetting it is signing out. A browser's
   // is a cookie only the server can take back.
+  // The app keeps its file, with everything synced so far, and goes on
+  // without an account.
   if (hosted) forgetCloudSession()
   else await post<unknown>('/auth/signout', {})
   location.reload()

@@ -66,8 +66,8 @@ function AccountPane() {
     return (
       <Pane title="Account">
         <p className="text-muted-foreground">
-          Your tasks are kept on this device. Sign in to use one list here, on the web and on your phone. The tasks on this device stay as they are
-          and come back when you sign out.
+          Your tasks are kept on this device. Sign in to have the same tasks here, at thedone.app and on your phone. Everything on this device
+          goes up to your account, and it keeps working without a connection.
         </p>
         <Button size="sm" className="self-start" onClick={() => void signIn().catch(() => say('Your browser could not be opened.'))}>
           Sign in with Google
@@ -78,7 +78,10 @@ function AccountPane() {
   const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
   return (
     <Pane title="Account">
-      <p className="text-muted-foreground">Signed in as {account.name ? `${account.name} (${account.email})` : account.email}.</p>
+      <p className="text-muted-foreground">
+        Signed in as {account.name ? `${account.name} (${account.email})` : account.email}.
+        {isDesktop && ' Your tasks stay on this device too and sync every few seconds when there is a connection. Signing out keeps them here.'}
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => void signOut()}>
           Sign out
@@ -113,9 +116,10 @@ export function Settings() {
       <div className="flex flex-col gap-8">
         <AccountPane />
 
-        {/* The built-in MCP server reads the tasks file on this Mac. A hosted
-            account's tasks are not in it, so the instructions would mislead. */}
-        {!account && (
+        {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
+            app keeps that file in step with the account, so it works there
+            too; in the web app there is no file here to read. */}
+        {(!account || isDesktop) && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
