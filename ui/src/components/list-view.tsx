@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ProjectDot } from '@/components/marks'
+import { PhoneHeader } from '@/components/phone'
 import { AddRow } from '@/components/quick-add'
 import { TaskEditor } from '@/components/task-editor'
 import { TaskRow } from '@/components/task-row'
 import { useFocus, useNameField } from '@/hooks/use-focus'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { loadNotes } from '@/lib/backend'
 import { fullDay, TODAY } from '@/lib/days'
@@ -19,6 +21,9 @@ import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
+  const isMobile = useIsMobile()
+  // A phone has iOS's navigation bar and large title instead.
+  if (isMobile) return <PhoneHeader title={title} sub={sub}>{children}</PhoneHeader>
   return (
     // On a phone the heading wraps: the title and what it is about on one
     // line, the view's buttons on the next, where they have room.
@@ -39,6 +44,7 @@ export function HeaderButton({ danger = false, ...props }: { danger?: boolean; o
 // is more important than the others.
 function GoalBlock() {
   const { data, ui, addGoal, focusOn } = useApp()
+  const isMobile = useIsMobile()
   const task = goalTask(data.tasks, TODAY)
   if (!task) {
     return (
@@ -52,7 +58,7 @@ function GoalBlock() {
       </Button>
     )
   }
-  if (ui.editing === task.id) return <TaskEditor task={task} />
+  if (ui.editing === task.id && !isMobile) return <TaskEditor task={task} />
   return (
     <Card className="gap-1 px-2 py-3">
       <div className={cn('px-2 text-xs font-semibold', task.done ? 'text-faint' : 'text-primary')}>
@@ -152,7 +158,12 @@ export function ListView() {
         {list.map((section, i) => (
           <section key={section.heading ?? i}>
             {section.heading && (
-              <h3 className={cn('mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold', section.late ? 'text-overdue' : 'text-muted-foreground')}>
+              <h3
+                className={cn(
+                  'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-1 max-md:text-title max-md:font-bold',
+                  section.late ? 'text-overdue' : 'text-muted-foreground max-md:text-foreground',
+                )}
+              >
                 {section.heading}
                 {section.detail && !section.detail.startsWith(section.heading) && (
                   <span className="font-normal text-faint">{section.detail}</span>

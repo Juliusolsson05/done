@@ -6,6 +6,7 @@
 // reasoned, and the limits below are what keeps a later change from making
 // a sound loud, long or shrill.
 
+import { FEELS, feel } from '@/lib/haptics'
 export type SoundName = 'complete' | 'completeBig' | 'focusStart' | 'focusDone' | 'open' | 'add' | 'reopen' | 'delete' | 'undo' | 'drop' | 'confirm' | 'error'
 
 export interface Note {
@@ -210,6 +211,9 @@ function schedule(notes: Note[]) {
 }
 
 export function play(name: SoundName) {
+  // Felt on an iPhone whether or not sounds are on, as the system's own
+  // apps do: the phone's setting for vibration decides that.
+  feel(FEELS[name])
   const planned = plan(name, on, streak, Date.now())
   streak = planned.streak
   if (planned.notes.length === 0) return

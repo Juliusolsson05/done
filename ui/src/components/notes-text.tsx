@@ -15,7 +15,7 @@ export function NotesText({ notes, onEdit, className }: { notes: string; onEdit:
   }
   return (
     // The title's button is the keyboard way to edit; this click is for the mouse.
-    <span data-findable onClick={onEdit} className={cn('w-full cursor-pointer text-xs text-muted-foreground', className)}>
+    <span data-findable onClick={onEdit} className={cn('w-full cursor-pointer text-xs text-muted-foreground max-md:text-subhead max-md:text-tertiary', className)}>
       {linkParts(notes).map((part, i) =>
         part.href ? (
           <a

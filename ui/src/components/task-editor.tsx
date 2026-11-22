@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
+import { XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -13,6 +14,8 @@ import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
 import { isSubtask, patchTask, PRIORITY_NAME, tidyDates, type Task } from '@/lib/tasks'
+import { describeDay, TODAY, type Day } from '@/lib/days'
+import { cn } from '@/lib/utils'
 
 function EditorForm({ task }: { task: Task }) {
   const { data, update, closeAll, removeTask } = useApp()
@@ -129,5 +132,183 @@ export function TaskEditorDialog({ task }: { task: Task | undefined }) {
         {task && <EditorForm key={task.id} task={task} />}
       </DialogContent>
     </Dialog>
+  )
+}
+
+// On a phone a task opens as a sheet from the bottom, like a reminder's
+// details on iOS: Cancel and Done at the top, the title and notes in one
+// group, then one row per setting. Dates, priority and list use the
+// system's own pickers (a date input and a select show iOS's wheels and
+// calendar), so choosing feels like any other iPhone app.
+export function TaskSheet({ task }: { task: Task | undefined }) {
+  if (!task) return null
+  return <Sheet key={task.id} task={task} />
+}
+
+function Sheet({ task }: { task: Task }) {
+  const { data, update, closeAll, removeTask } = useApp()
+  const [title, setTitle] = useState(task.title)
+  const [notes, setNotes] = useState(task.notes)
+  const [start, setStart] = useState(task.start ?? '')
+  const [due, setDue] = useState(task.due ?? '')
+  const [priority, setPriority] = useState(task.priority)
+  const [projectId, setProjectId] = useState(task.projectId)
+  const [leaving, setLeaving] = useState(false)
+  // Pulled down by the grabber: how far, while the finger is on it.
+  const [pull, setPull] = useState(0)
+  const pullFrom = useRef<number | null>(null)
+
+  // The sheet slides back down before it is gone.
+  const close = (then: () => void) => {
+    setLeaving(true)
+    setTimeout(then, 220)
+  }
+  const done = () => {
+    if (!title.trim()) return
+    const fields = { title: title.trim(), notes, priority, projectId, ...tidyDates(start || null, due || null) }
+    play('confirm')
+    close(() => {
+      update((d) => patchTask(d, task.id, fields))
+      closeAll()
+    })
+  }
+
+  const row = 'flex min-h-11 items-center gap-3 border-b border-border py-1.5 pr-4 last:border-b-0'
+  const value = 'min-w-0 flex-1 appearance-none bg-transparent text-right text-body text-primary outline-none'
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className={cn('absolute inset-0 bg-black/40 transition-opacity duration-200', leaving ? 'opacity-0' : 'animate-in fade-in')} onClick={() => close(closeAll)} />
+      <div
+        role="dialog"
+        aria-label="Details"
+        style={{ transform: pull ? `translateY(${pull}px)` : undefined }}
+        className={cn(
+          'absolute inset-x-0 top-[calc(env(safe-area-inset-top)+0.75rem)] bottom-0 flex flex-col overflow-hidden rounded-t-2xl bg-grouped shadow-2xl',
+          leaving ? 'translate-y-full transition-transform duration-200 ease-in' : !pull && 'animate-rise',
+        )}
+      >
+        <div
+          className="shrink-0 touch-none"
+          onTouchStart={(e) => (pullFrom.current = e.touches[0].clientY)}
+          onTouchMove={(e) => pullFrom.current !== null && setPull(Math.max(0, e.touches[0].clientY - pullFrom.current))}
+          onTouchEnd={() => {
+            pullFrom.current = null
+            if (pull > 120) close(closeAll)
+            else setPull(0)
+          }}
+        >
+          <div className="mx-auto mt-1.5 h-1.25 w-9 rounded-full bg-foreground/20" />
+          <div className="flex h-11 items-center px-4">
+            <button type="button" onClick={() => close(closeAll)} className="text-body text-primary active:opacity-40">
+              Cancel
+            </button>
+            <span className="flex-1 text-center text-body font-semibold">Details</span>
+            <button type="button" onClick={done} disabled={!title.trim()} className="text-body font-semibold text-primary active:opacity-40 disabled:text-tertiary">
+              Done
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+          <div className="overflow-hidden rounded-xl bg-background pl-4">
+            <textarea
+              value={title}
+              // A title is one line of text, however long; Return is Done.
+              onChange={(e) => setTitle(e.target.value.replace(/\n/g, ' '))}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), done())}
+              aria-label="Title"
+              placeholder="Title"
+              rows={1}
+              enterKeyHint="done"
+              className="field-sizing-content w-full resize-none border-b border-border bg-transparent py-2.5 pr-4 text-body outline-none"
+            />
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              aria-label="Notes"
+              placeholder="Notes"
+              rows={3}
+              className="field-sizing-content min-h-20 w-full resize-none bg-transparent py-2.5 pr-4 text-body text-muted-foreground outline-none"
+            />
+          </div>
+          <div className="overflow-hidden rounded-xl bg-background pl-4">
+            <DateRow label="Date" day={due} set={setDue} className={row} />
+            <DateRow label="Starts" day={start} set={setStart} className={row} />
+            <label className={row}>
+              <span className="text-body">Priority</span>
+              <select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className={cn(value, priority === 4 && 'text-tertiary')} dir="rtl">
+                {[4, 3, 2, 1].map((p) => (
+                  <option key={p} value={p}>
+                    {p === 4 ? 'None' : PRIORITY_NAME[p]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* A subtask is shown under its task wherever that is, so it has no list to choose. */}
+            {!isSubtask(task) && (
+              <label className={row}>
+                <span className="text-body">List</span>
+                <select
+                  value={String(projectId ?? 'inbox')}
+                  onChange={(e) => setProjectId(e.target.value === 'inbox' ? null : Number(e.target.value))}
+                  className={value}
+                  dir="rtl"
+                >
+                  <option value="inbox">Inbox</option>
+                  {data.projects.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => close(() => removeTask(task.id))}
+            className="h-11 rounded-xl bg-background text-body text-destructive active:bg-secondary"
+          >
+            Delete Task
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ClearButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Clear"
+      onClick={(e) => {
+        e.preventDefault()
+        onClick()
+      }}
+      className="-mr-1 flex size-6 items-center justify-center rounded-full bg-secondary text-tertiary"
+    >
+      <XIcon className="size-3.5" strokeWidth={3} />
+    </button>
+  )
+}
+
+// A date row: the day in words ("Today", "Sat 22 Nov"), and under it, see-
+// through, the date input that opens iOS's own date picker when tapped.
+function DateRow({ label, day, set, className }: { label: string; day: string; set: (day: string) => void; className: string }) {
+  return (
+    <div className={className}>
+      <span className="text-body">{label}</span>
+      <span className="relative min-w-0 flex-1 text-right text-body text-primary">
+        {day ? describeDay(day as Day, TODAY) : <span className="text-tertiary">None</span>}
+        <input
+          type="date"
+          aria-label={label}
+          value={day}
+          onChange={(e) => set(e.target.value)}
+          className="absolute inset-0 w-full opacity-0"
+        />
+      </span>
+      {day && <ClearButton onClick={() => set('')} />}
+    </div>
   )
 }

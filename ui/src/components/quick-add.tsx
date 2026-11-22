@@ -93,7 +93,7 @@ function QuickAdd() {
   }
 
   return (
-    <Card className="my-1 animate-enter gap-2 p-3 shadow-md">
+    <Card className="my-1 animate-enter gap-2 p-3 shadow-md max-md:rounded-2xl max-md:p-4 max-md:shadow-2xl max-md:ring-0">
       <form onSubmit={submit} className="flex flex-col gap-2">
         <div className="relative">
           {/* A field cannot colour part of its own text, so the date phrase is
@@ -203,15 +203,29 @@ function QuickAdd() {
             </>
           )}
         </div>
-        <Separator />
+        <Separator className="max-md:hidden" />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground max-md:hidden">Enter adds the task and keeps this open</span>
           <span className="flex-1" />
-          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={closeAll}>
-            Close
+          {/* A phone: iOS's plain text buttons, Cancel and a bold Add. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground max-md:h-9 max-md:px-2 max-md:text-body max-md:text-primary max-md:hover:bg-transparent"
+            onClick={closeAll}
+          >
+            <span className="md:hidden">Cancel</span>
+            <span className="max-md:hidden">Close</span>
           </Button>
-          <Button type="submit" size="sm" disabled={!read.title}>
-            Add task
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!read.title}
+            className="max-md:h-9 max-md:rounded-full max-md:px-4 max-md:text-body max-md:font-semibold"
+          >
+            <span className="md:hidden">Add</span>
+            <span className="max-md:hidden">Add task</span>
           </Button>
         </div>
       </form>
@@ -226,7 +240,7 @@ export function MobileQuickAdd() {
   const isMobile = useIsMobile()
   if (!isMobile || !ui.adding) return null
   return (
-    <div className="fixed inset-0 z-50 animate-in bg-black/20 px-3 pt-[calc(env(safe-area-inset-top)+0.5rem)] fade-in" onClick={closeAll}>
+    <div className="fixed inset-0 z-50 animate-in bg-black/40 px-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] fade-in" onClick={closeAll}>
       <div onClick={(event) => event.stopPropagation()}>
         <QuickAdd />
       </div>
