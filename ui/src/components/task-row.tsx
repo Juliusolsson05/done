@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { NotesText } from '@/components/notes-text'
 import { Subtasks } from '@/components/subtasks'
+import { SwipeRow } from '@/components/swipe-row'
 import { TaskEditor } from '@/components/task-editor'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { ProjectDot } from '@/components/marks'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
@@ -52,21 +54,28 @@ export function TaskCheck({ task, checked, onChange, className }: { task: Task; 
 }
 
 export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) {
-  const { data, ui, noticed, edit } = useApp()
+  const { data, ui, noticed, edit, removeTask } = useApp()
   const [leaving, finish] = useFinish(task.id)
   const open = useExpanded(task.id)
-  if (ui.editing === task.id) return <TaskEditor task={task} />
+  const isMobile = useIsMobile()
+  // On a phone the task opens as a sheet over the list (TaskSheet), and the
+  // row stays where it is.
+  if (ui.editing === task.id && !isMobile) return <TaskEditor task={task} />
   const sub = progress(data.tasks, task.id)
 
   const view = ui.view.kind
   // The date is left out where the section heading already says it.
   const showDue = task.due !== null && view !== 'upcoming' && !(view === 'today' && task.due === TODAY)
-  return (
-    <>
+  const row = (
     <div
       data-task={task.id}
       className={cn(
-        'flex items-start gap-2.5 rounded-lg p-2 hover:bg-muted max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-0.5 max-md:px-1 max-md:py-2.5',
+        'flex items-start gap-2.5 rounded-lg p-2 md:hover:bg-muted',
+        // A phone: Reminders' row. The text in iOS's body size, a hairline
+        // under it that starts where the text starts, and the grey of a
+        // row being pressed.
+        'max-md:relative max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-0.5 max-md:rounded-none max-md:px-1 max-md:py-3 max-md:active:bg-secondary',
+        'max-md:after:absolute max-md:after:right-0 max-md:after:bottom-0 max-md:after:left-9.5 max-md:after:h-px max-md:after:bg-border',
         noticed === task.id && 'animate-noticed',
         leaving && 'opacity-0 transition-opacity delay-150 duration-150',
       )}
@@ -76,7 +85,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         <Button
           variant="ghost"
           onClick={() => edit(task.id)}
-          className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-base max-md:leading-snug"
+          className="h-auto w-full min-w-0 justify-start rounded-none p-0 text-left font-normal whitespace-normal hover:bg-transparent max-md:text-body"
         >
           <span
             data-findable
@@ -95,7 +104,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
           it, starting where the title starts: a long title needs the width. */}
       <div
         className={cn(
-          'flex items-center gap-3 pl-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums empty:hidden max-md:basis-full max-md:flex-wrap max-md:pl-8.5 max-md:leading-5',
+          'flex items-center gap-3 pl-4 text-xs whitespace-nowrap text-muted-foreground tabular-nums empty:hidden max-md:basis-full max-md:flex-wrap max-md:pl-8.5 max-md:text-subhead max-md:text-tertiary',
           goal ? 'leading-7' : 'leading-5',
         )}
       >
@@ -125,7 +134,17 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         )}
       </div>
     </div>
-    {open && !leaving && <Subtasks parent={task} />}
+  )
+  return (
+    <>
+      {isMobile ? (
+        <SwipeRow onComplete={finish} onDelete={() => removeTask(task.id)}>
+          {row}
+        </SwipeRow>
+      ) : (
+        row
+      )}
+      {open && !leaving && <Subtasks parent={task} />}
     </>
   )
 }

@@ -70,6 +70,13 @@
   --project-7: #74747d;
   --project-none: #9a9aa3;
   --project: var(--project-none);
+
+  /* A phone's grouped screens (Lists, a task's details): rounded white
+     groups on a light grey ground, as iOS draws its own settings and lists. */
+  --grouped: #f2f2f7;
+  /* iOS's own grey for a label that is not the main one, and for a tab that
+     is not chosen. */
+  --tertiary: #8e8e93;
 }
 
 @theme inline {
@@ -90,6 +97,8 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-faint: var(--faint);
+  --color-grouped: var(--grouped);
+  --color-tertiary: var(--tertiary);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -127,6 +136,41 @@
 }
 
 @theme {
+  /* iOS's text styles, for the phone: a phone app set in the system's own
+     sizes reads as one of its own apps. Body 17, subheadline 15, footnote
+     13, caption 12, headline 17 semibold, title 22, large title 34. */
+  --text-body: 1.0625rem;
+  --text-body--line-height: 1.375rem;
+  --text-subhead: 0.9375rem;
+  --text-subhead--line-height: 1.25rem;
+  --text-footnote: 0.8125rem;
+  --text-footnote--line-height: 1.125rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.75rem;
+  --text-tab: 0.625rem;
+  --text-tab--line-height: 0.75rem;
+  --text-large-title: 2.125rem;
+  --text-large-title--line-height: 2.5625rem;
+
+  /* A phone pushes a screen in from the right, as iOS does. */
+  --animate-push: push 0.32s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  /* A sheet rises from the bottom. */
+  --animate-rise: rise 0.38s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+
+  @keyframes push {
+    from {
+      transform: translateX(30%);
+      opacity: 0.4;
+    }
+  }
+  @keyframes rise {
+    from {
+      transform: translateY(100%);
+    }
+  }
+
   /* A view fades up as it opens. */
   --animate-enter: enter 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
   /* What you just added or moved is marked for a moment, so the eye finds it. */
@@ -183,13 +227,27 @@
     /* The page does not rubber-band away from the bar at the bottom. */
     overscroll-behavior-y: none;
   }
-  /* A long press on a task or in the sidebar opens done's own menu. The
-     system's text callout would open on the same press, so it is off there. */
-  [data-task],
-  [data-slot='sidebar'] {
+  /* Nothing on the screen is text to select or a link to preview with a
+     long press, as in any iPhone app, except what is being written and a
+     note being read. A selection handle appearing on a tab or a task title
+     is what makes a web page feel like one. */
+  body {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+  input,
+  textarea,
+  article {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  /* Safari zooms into any field set smaller than 16px when it is tapped. */
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, 1em);
   }
 }
 

@@ -34,6 +34,9 @@ export interface Data {
 
 export type View =
   | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'completed' | 'settings' }
+  // A phone's home for everything that is not one of its three tabs, in
+  // place of the sidebar.
+  | { kind: 'lists' }
   // A note id opens that note.
   | { kind: 'notes'; id?: number }
   | { kind: 'project'; id: number }
@@ -88,7 +91,7 @@ export interface Section {
 
 export function sections(view: View, all: Task[], today: Day): Section[] {
   const tasks = openTasks(all)
-  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'completed' || view.kind === 'notes' || view.kind === 'settings') return []
+  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'completed' || view.kind === 'notes' || view.kind === 'settings' || view.kind === 'lists') return []
   if (view.kind === 'inbox') return [{ tasks: tasks.filter((t) => t.projectId === null).sort(byPriority) }]
   if (view.kind === 'project') return [{ tasks: tasks.filter((t) => t.projectId === view.id).sort(byPriority) }]
   if (view.kind === 'today') {

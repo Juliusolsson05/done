@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "What the iPhone window may ask of the app beyond the basics: the taps under the finger.",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": ["haptics:allow-impact-feedback", "haptics:allow-notification-feedback", "haptics:allow-selection-feedback"]
+}

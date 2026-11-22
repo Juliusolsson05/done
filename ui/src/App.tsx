@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
@@ -9,11 +9,11 @@ import { Board } from '@/components/board'
 import { Completed } from '@/components/completed'
 import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
-import { MobileBar } from '@/components/mobile-bar'
+import { isTab, ListsScreen, NewTaskButton, TabBar, useEdgeSwipeBack } from '@/components/phone'
 import { MobileQuickAdd } from '@/components/quick-add'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
-import { TaskEditorDialog } from '@/components/task-editor'
+import { TaskEditorDialog, TaskSheet } from '@/components/task-editor'
 import { FindBar } from '@/components/find-bar'
 import { SearchDialog } from '@/components/search'
 import { TimeSheet } from '@/components/time-sheet'
@@ -83,6 +83,10 @@ export default function App() {
   const isMobile = useIsMobile()
 
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
+  // The page a phone swipes back from.
+  const page = useRef<HTMLDivElement>(null)
+  const backToLists = useCallback(() => setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'lists' } })), [])
+  useEdgeSwipeBack(isMobile && !isTab(ui.view) && !isOpen(ui), backToLists, page)
 
   // One message at a time, like one thing said at a time: a new one takes
   // the place of the last, and takes its Undo with it.
@@ -130,7 +134,10 @@ export default function App() {
       setUi((u) => ({
         ...u,
         ...CLOSED,
-        view: u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' ? { kind: 'inbox' } : u.view,
+        view:
+          u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' || u.view.kind === 'lists'
+            ? { kind: 'inbox' }
+            : u.view,
         adding: true,
       })),
     addGoal: () => setUi((u) => ({ ...u, ...CLOSED, adding: true, asGoal: true })),
@@ -410,7 +417,7 @@ export default function App() {
   const view = ui.view
   // Timeline and Board use the full width and open tasks over the page.
   const wide = view.kind === 'timeline' || view.kind === 'board'
-  const editing = wide && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
+  const editing = wide && !isMobile && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
 
   return (
     <AppContext.Provider value={app}>
@@ -427,7 +434,11 @@ export default function App() {
               <SidebarInset
                 className={cn(
                   'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
-                  'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+1.25rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+6rem)]',
+                  // On a phone: below iOS's navigation bar (44 points under
+                  // the status bar), and clear of the tab bar and New Task.
+                  'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+2.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+8rem)]',
+                  // Lists is a grouped screen: white groups on grey.
+                  view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
                   // With the sidebar put away the sheet keeps its margin on the left too.
                   'md:peer-data-[state=collapsed]:ml-2',
@@ -435,9 +446,16 @@ export default function App() {
               >
                 <SidebarToggle />
                 <div
+                  ref={page}
                   key={view.kind === 'project' ? view.id : view.kind}
-                  className={cn('animate-enter', (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col')}
+                  className={cn(
+                    // A phone switches tabs at once, as iOS does, and pushes
+                    // a screen opened from Lists in from the right.
+                    isMobile ? !isTab(view) && 'animate-push' : 'animate-enter',
+                    (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col',
+                  )}
                 >
+                  {view.kind === 'lists' && <ListsScreen />}
                   {view.kind === 'timeline' && <Timeline />}
                   {view.kind === 'board' && <Board />}
                   {view.kind === 'focus' && <FocusView />}
@@ -445,14 +463,26 @@ export default function App() {
                   {view.kind === 'notes' && <Notes />}
                   {view.kind === 'completed' && <Completed />}
                   {view.kind === 'settings' && <Settings />}
-                  {!wide && view.kind !== 'focus' && view.kind !== 'timesheet' && view.kind !== 'completed' && view.kind !== 'notes' && view.kind !== 'settings' && <ListView />}
+                  {!wide &&
+                    view.kind !== 'focus' &&
+                    view.kind !== 'timesheet' &&
+                    view.kind !== 'completed' &&
+                    view.kind !== 'notes' &&
+                    view.kind !== 'settings' &&
+                    view.kind !== 'lists' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
                 <SearchDialog />
                 <FindBar />
               </SidebarInset>
               <MobileQuickAdd />
-              <MobileBar />
+              {isMobile && (
+                <>
+                  <TaskSheet task={ui.editing === null ? undefined : data.tasks.find((t) => t.id === ui.editing)} />
+                  <NewTaskButton />
+                  <TabBar />
+                </>
+              )}
             </SidebarProvider>
           </div>
         </ContextMenuTrigger>
