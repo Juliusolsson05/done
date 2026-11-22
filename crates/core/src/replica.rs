@@ -41,11 +41,22 @@ const TABLES: [(&str, &str); 4] = [
 ];
 
 /// An id no other device is likely to pick: the time in milliseconds times
-/// 1000, plus a random part. Time first, so a newer row still sorts after an
-/// older one (subtasks and lists are shown in the order they were added),
-/// and well below 2^53 so the interface's numbers hold it exactly.
+/// 1000, plus a random part. Time first, so a newer row sorts after an older
+/// one (subtasks and lists are shown in the order they were added). Never
+/// below an id this file already has, or two rows added within the same
+/// millisecond (or on a clock that is behind) could come out of order; the
+/// random part stays either way, so two devices behind the same clock still
+/// pick different ids. Well below 2^53, so the interface's numbers hold it.
 pub(crate) fn fresh_id(conn: &Connection) -> Result<i64, Error> {
-    Ok(conn.query_row(&format!("SELECT {NOW} * 1000 + (abs(random()) % 1000)"), [], |r| r.get(0))?)
+    Ok(conn.query_row(
+        &format!(
+            "SELECT max({NOW} * 1000, coalesce(max(m), 0) + 1) + (abs(random()) % 1000)
+             FROM (SELECT max(id) AS m FROM task UNION ALL SELECT max(id) FROM project
+                   UNION ALL SELECT max(id) FROM note UNION ALL SELECT max(id) FROM entry)"
+        ),
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, Error> {
@@ -528,6 +539,20 @@ mod tests {
         assert_eq!(titles(&cloud), titles(&mac));
         // Every id is now a fresh one.
         assert!(cloud.state("2026-11-21").unwrap().tasks.iter().all(|t| t.id >= SMALL));
+    }
+
+    // Why fresh ids never go below one the file has: subtasks are listed by
+    // id, and two added within one millisecond came out in the wrong order.
+    #[test]
+    fn fresh_ids_keep_the_order_things_were_added_in() {
+        let s = store();
+        let mut last = 0;
+        for i in 0..200 {
+            let id = s.state("2026-11-21").unwrap().next_id;
+            assert!(id > last, "id {i} went backwards");
+            add(&s, vec![task(id, "One more")]);
+            last = id;
+        }
     }
 
     #[test]
