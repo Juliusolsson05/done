@@ -2,7 +2,7 @@
 
 Refs #49.
 Branch `feat/workspaces` · Worktree `../done-wt/workspaces` · Base `origin/main` @ 14847bf (2026-11-23)
-Status: **plan only**, revised twice after the owner's answers (23 Nov). Nothing is built. Size: long plan; four phases, one PR each.
+Status: **final, approved by the owner 23 Nov 2026.** Building starts with the interface mock (phase M), which the owner audits before any code. Size: long; a mock, then four phases, one PR each.
 
 ## Outcome
 
@@ -25,6 +25,9 @@ Someone who never creates or joins a workspace sees one new section in Settings 
 - Costs are fine, "just not 300 bucks a month".
 - **Stay on Google Cloud** ("lets go with GCP").
 - **No email**: invites and news as in-app notifications ("i hate the external email").
+- **Lean infrastructure that grows when needed**; workspaces open to anyone (see "Lean, and how it grows").
+- **All of the app's hosted data on Postgres** ("we can migrate all of the app to postgres"). Ruling: every account and workspace lives in Postgres; the Mac and iPhone apps keep their SQLite copy on the device, because that is what makes them work offline and without an account — cost if wrong: none to undo, the device file is a cache of the server for signed-in users.
+- **A full mock of the interface first**, in one HTML file covering every scenario, so the owner can check the direction before anything is built.
 
 ## Evidence (verified, do not re-derive)
 
@@ -66,7 +69,7 @@ thedone.app (Cloudflare forwards, as now)
    └─ Cloud Run "done" (the existing Rust server, 0 → up to 10 instances)
         ├─ Google sign-in, sessions (as now)
         ├─ /api/*: sync, workspaces, members, invites, notifications, moves
-        └─ Cloud SQL for PostgreSQL (db-f1-micro): every account's and workspace's data
+        └─ Cloud SQL for PostgreSQL (1 vCPU, 3.75 GB): every account's and workspace's data
    └─ Cloud Run "done-collab" (the same image, command `done collab`, 0 → 1 instance)
         └─ live note editing, cursors, presence; writes notes to the same database
 ```
@@ -79,8 +82,8 @@ The app needs five things: the server, the live-notes room, one database, secret
 ```
 Needs:      server, live-notes room, postgres, secrets, domain
 New:        Cloud SQL instance + database + user, one secret, one Cloud Run service (same image)
-Idle cost:  ~$10/month — all of it Cloud SQL; both Cloud Run services scale to zero
-Caps:       GCP has no hard spending cap. A $30/month budget alert, plus hard size limits:
+Idle cost:  ~$50/month — all of it Cloud SQL, paid from GCP credits while they last; both Cloud Run services scale to zero
+Caps:       GCP has no hard spending cap. A $80/month budget alert, plus hard size limits:
             Cloud Run max 10 instances ("done") and 1 ("done-collab"), the database at a fixed size
 Not added:  Redis, Pub/Sub, a queue, a staging copy, read replicas, high availability,
             an email service, a second image or language for live notes
@@ -91,7 +94,7 @@ Growing is a setting, not a redesign, and only on a measured number:
 | Measured | Then | Cost after |
 |---|---|---|
 | Cloud Run instances busy | raise its max instances | pay per request, still $0 idle |
-| Database CPU above ~70% for a day, or connections near the limit (~25 on db-f1-micro; each server instance keeps a pool of 3) | move to db-g1-small, one command, a minute of downtime | ~$26/month |
+| Database CPU above ~70% for a day, or connections near the limit (~100 at 3.75 GB; each server instance keeps a pool of 5) | 2 vCPU / 7.5 GB, one command, a minute of downtime | ~$100/month |
 | A day of downtime would hurt real customers | turn on high availability | about double |
 | One live-notes instance is not enough | a Postgres `LISTEN/NOTIFY` relay between rooms, then more instances | — |
 
@@ -168,11 +171,14 @@ Empty: "Work on projects together. Create a workspace and invite people." with *
 
 Each phase is one PR in done (plus the matching change in `done-infra`), merged only on the owner's word, released, and checked on thedone.app.
 
+**Phase M — the interface mock (before any code).**
+One static HTML file, `docs/plans/2026-11-23-workspaces-mock.html`, drawn in done's own look (its colours, type and spacing), showing every screen and state this plan adds or changes, on the Mac and the iPhone: the picker, All and a workspace, assignees everywhere, quick add, the filter, right-click, the bell, Settings → Workspaces from empty to full, invites (in the app, by link, wrong account), moving a project, removal, live notes with cursors, and someone who never uses workspaces. The owner goes through it; every change of direction goes into this plan before phase 0 starts. The file is removed before the last phase merges.
+
 **Phase 0 — Postgres and spaces under the hood (nothing visible changes).**
 0.1 Split `done-core` into shared rules and the `rusqlite` store; all tests still pass.
 0.2 `space_id` and per-space sync positions in `crates/core`; one personal space per account.
 0.3 The Postgres store in `crates/server` (sqlx, migrations); the conformance suite passes against it.
-0.4 `done-infra`: Cloud SQL (db-f1-micro, private to Cloud Run, 7-day backups), its secret, Cloud Run connected to it, max instances 10, the $30 budget alert. Infra receipt posted before apply.
+0.4 `done-infra`: Cloud SQL (`db-custom-1-3840`, private to Cloud Run, 7-day backups), its secret, Cloud Run connected to it, max instances 10, the $80 budget alert. Infra receipt posted before apply.
 0.5 Migration: a one-off tool reads each account's file from Cloud Storage with the `rusqlite` store and pushes its rows into that account's personal space through the sync protocol; counts compared; files kept as a read-only backup.
 0.6 Cut over behind a setting; the old file path kept two weeks as the way back; then removed with the bucket.
 Hands to phase 1: `spaces_for`, per-space sync, a personal space per account.
@@ -210,7 +216,7 @@ Each phase: the checks in AGENTS.md; a local run against a local Postgres on cop
 
 ## Costs
 
-Cloud SQL db-f1-micro about $9–10 a month (always on, the only idle cost), plus a little storage; both Cloud Run services scale to zero and cost cents at this size; no email service. **About $10–15 a month**, and ~$30 once the database needs the next size. See "Lean, and how it grows".
+Cloud SQL at 1 dedicated vCPU and 3.75 GB (`db-custom-1-3840`), about $50 a month (always on, the only idle cost), plus a little storage; both Cloud Run services scale to zero and cost cents at this size; no email service. **About $50–55 a month, paid from the owner's GCP credits** (and startup credits if redeemed). Ruling (owner, 23 Nov): start one step above the smallest — a dedicated core, the Cloud SQL SLA, no shared-core throttling, room for ~100 connections — cost if wrong: ~$40 a month more than the smallest; when the credits end, dropping to db-g1-small (~$26) is one command. See "Lean, and how it grows".
 
 ## Risks
 
