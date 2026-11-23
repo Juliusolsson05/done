@@ -267,7 +267,7 @@ export function Timeline() {
       <div ref={label} className={cn('sticky left-0 z-50 flex shrink-0 items-end border-r bg-background px-3 pb-1.5 text-xs font-medium text-faint', side)}>
         {byProject && 'Projects'}
       </div>
-      <div className="relative h-12 shrink-0" style={{ width }}>
+      <div className="relative h-[60px] shrink-0" style={{ width }}>
         {months.map((m) => (
           <div key={m.day} className="absolute top-1 text-xs font-semibold text-muted-foreground" style={{ left: m.left + 6 }}>
             {toDate(m.day).toLocaleDateString('en-GB', { month: 'long', ...(toDate(m.day).getMonth() === 0 || m.left === 0 ? { year: 'numeric' } : {}) })}
@@ -280,12 +280,19 @@ export function Timeline() {
           // A week's label right beside today's would run into it.
           if (zoom !== 'week' && day !== TODAY && Math.abs(daysBetween(day, TODAY)) * px < 28) return null
           return (
-            <div key={day} className="absolute bottom-1 grid place-content-center text-[11px] tabular-nums" style={{ left: i * px, width: zoom === 'week' ? px : undefined }}>
+            <div
+              key={day}
+              className={cn('absolute bottom-1 flex flex-col items-center gap-0.5 text-[11px] tabular-nums', zoom !== 'week' && day !== TODAY && '-translate-x-1/4')}
+              style={{ left: i * px, width: zoom === 'week' ? px : undefined }}
+            >
+              {/* The day of the week: a letter where every day shows, short where only some do. */}
+              <span className={cn('text-[10px] leading-none text-faint', (date.getDay() === 0 || date.getDay() === 6) && 'opacity-70')}>
+                {date.toLocaleDateString('en-GB', { weekday: zoom === 'week' ? 'narrow' : 'short' })}
+              </span>
               <span
                 className={cn(
                   'grid h-5 min-w-5 place-content-center rounded-full px-1',
                   day === TODAY ? 'bg-primary font-semibold text-primary-foreground' : 'text-muted-foreground',
-                  zoom !== 'week' && day !== TODAY && '-translate-x-1/4',
                 )}
               >
                 {zoom === 'week' ? date.getDate() : `${date.getDate()}`}
@@ -505,15 +512,29 @@ function TimelineItem({
 }) {
   const { data, noticed } = useApp()
   const [leaving, finish] = useFinish(task.id)
+  // The block is as long as the task's days, never narrower than its check.
+  const block = Math.max(width, 22)
+  // The title goes inside when it fits there, whole; otherwise just after
+  // the block, as plain text.
+  const facesWidth = task.assignees?.length ? 10 + Math.min(task.assignees.length, 3) * 14 : 0
+  const inside = textWidth(task.title) + (showProject ? 14 : 0) + facesWidth + 30 <= block
+  const label = (
+    <>
+      {/* On one timeline for everything, which project it is in. */}
+      {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
+      <span className={cn('min-w-0 truncate', inside ? 'flex-1' : 'max-w-[420px]')}>{task.title}</span>
+      <span className="shrink-0">
+        <TaskFaces task={task} ring={inside ? 'ring-project-tint' : 'ring-background'} />
+      </span>
+    </>
+  )
   return (
     <div
       data-task={task.id}
       title={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
-      // As wide as what is in it, and at least as long as the days it takes.
-      style={{ ...projectStyle(data.projects, task.projectId), left, minWidth: width }}
+      style={{ ...projectStyle(data.projects, task.projectId), left, width: block }}
       className={cn(
-        'absolute top-1 z-10 flex h-6 w-max cursor-grab touch-none items-center gap-1.5 border pr-2 pl-1 text-xs font-medium whitespace-nowrap select-none',
-        range ? 'rounded-md border-project-edge bg-project-tint' : 'rounded-full border-border bg-background',
+        'absolute top-1 z-10 flex h-6 cursor-grab touch-none items-center gap-1.5 rounded-md bg-project-tint pr-2 pl-1 text-xs font-medium whitespace-nowrap select-none',
         lifted && 'z-20 cursor-grabbing shadow-md',
         leaving && 'opacity-0 transition-opacity duration-150',
         noticed === task.id && 'animate-noticed',
@@ -527,12 +548,11 @@ function TimelineItem({
       <span data-check className="flex">
         <TaskCheck task={task} checked={leaving} onChange={finish} className="size-3.5" />
       </span>
-      {/* On one timeline for everything, which project it is in. */}
-      {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
-      <span className="pointer-events-none max-w-[420px] min-w-0 flex-1 truncate">{task.title}</span>
-      <span className="pointer-events-none shrink-0">
-        <TaskFaces task={task} ring="ring-background" />
-      </span>
+      {inside ? (
+        <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5">{label}</span>
+      ) : (
+        <span className="pointer-events-none absolute top-1/2 left-full ml-2 flex -translate-y-1/2 items-center gap-1.5 text-foreground">{label}</span>
+      )}
       {range && <span data-grip="end" className="absolute inset-y-0 right-0 w-2 cursor-ew-resize" />}
     </div>
   )
