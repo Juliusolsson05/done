@@ -8,6 +8,7 @@
 
 mod accounts;
 mod auth;
+mod collab;
 mod pages;
 mod pg;
 
@@ -252,6 +253,43 @@ async fn move_project(State(cloud): State<Cloud>, me: Me, Json(q): Json<MoveProj
     done(cloud.db.move_project(&me, q.project, q.space).await.map(OK))
 }
 
+#[derive(Deserialize)]
+struct LiveAsk {
+    #[serde(default)]
+    note: Option<i64>,
+    #[serde(default)]
+    space: Option<i64>,
+}
+
+/// A ticket to the live notes service: for one note of a workspace the
+/// person is in (to write it with the others), or for the workspace itself
+/// (to see who is in which note). Good for two minutes.
+async fn live_ticket(State(cloud): State<Cloud>, me: Me, session: auth::Session, Json(q): Json<LiveAsk>) -> Response {
+    let Some(url) = cloud.config.collab_url.clone() else { return auth::down(Fail::NotFound) };
+    let space = match (q.note, q.space) {
+        (Some(note), _) => cloud.db.note_workspace(&me, note).await,
+        (None, Some(space)) => match cloud.db.in_workspace(&me.id, space).await {
+            Ok(true) => Ok(space),
+            Ok(false) => Err(Fail::NotFound),
+            Err(e) => Err(e),
+        },
+        (None, None) => Err(Fail::NotFound),
+    };
+    let space = match space {
+        Ok(space) => space,
+        Err(e) => return auth::down(e),
+    };
+    let ticket = collab::Ticket {
+        account: me.id.clone(),
+        name: session.name.clone(),
+        picture: session.picture.clone(),
+        space,
+        note: q.note,
+        exp: collab::now() + collab::TICKET_LIFE,
+    };
+    Json(serde_json::json!({ "ticket": collab::issue(&cloud.config.key, &ticket), "url": url })).into_response()
+}
+
 async fn read_notifications(State(cloud): State<Cloud>, me: Me, Json(_): Json<serde_json::Value>) -> Response {
     done(cloud.db.read_notifications(&me).await.map(OK))
 }
@@ -307,6 +345,7 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/invites/decline", post(decline))
         .route("/api/projects/move", post(move_project))
         .route("/api/notifications/read", post(read_notifications))
+        .route("/api/live/ticket", post(live_ticket))
         .route("/invite/{token}", get(pages::invite))
         .layer(for_the_apps())
         .with_state(cloud)
@@ -406,6 +445,29 @@ async fn main() {
         let db = Db::connect(&database()).await.unwrap_or_else(|e| fail_start(e));
         std::process::exit(if import(&db, &Files::from_setting(from)).await { 0 } else { 1 });
     }
+    // Notes written together live: its own service, one instance (collab.rs).
+    if args.get(1).map(String::as_str) == Some("collab") {
+        // Only what it needs: the database, the key the main server signs
+        // tickets with, and where the web app is (the one site allowed to connect).
+        let read = |name: &str| std::env::var(name).map(|v| v.trim().to_string()).unwrap_or_default();
+        let (key, public_url) = (read("DONE_SESSION_KEY"), read("DONE_PUBLIC_URL").trim_end_matches('/').to_string());
+        if key.len() < 64 || public_url.is_empty() {
+            eprintln!("done collab needs DONE_SESSION_KEY (the main server's) and DONE_PUBLIC_URL.");
+            std::process::exit(2);
+        }
+        let url = database();
+        let db = Arc::new(Db::connect(&url).await.unwrap_or_else(|e| fail_start(e)));
+        let live = collab::Collab::new(db, axum_extra::extract::cookie::Key::from(key.as_bytes()), &public_url);
+        tokio::spawn(live.clone().keep());
+        tokio::spawn(live.clone().listen(url));
+        let local = public_url.starts_with("http://127.0.0.1:") || public_url.starts_with("http://localhost:");
+        let address = if local { "127.0.0.1" } else { "0.0.0.0" };
+        let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
+        let listener = tokio::net::TcpListener::bind((address, port)).await.expect("the port is free");
+        println!("done collab is running on {address}:{port}");
+        axum::serve(listener, collab::router(live)).await.expect("serve");
+        return;
+    }
     if std::env::var("DONE_MODE").as_deref() == Ok("cloud") {
         let config = auth::Config::from_env();
         let db = Db::connect(&database()).await.unwrap_or_else(|e| fail_start(e));
@@ -489,6 +551,7 @@ mod tests {
             authorize_url: format!("{google_at}/authorize"),
             token_url: format!("{google_at}/token"),
             dev: false,
+            collab_url: None,
         };
         let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });

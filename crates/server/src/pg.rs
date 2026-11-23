@@ -535,6 +535,9 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         )
         .await?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'note' AND id = $1 AND space_id = $2", &[&n.id, &target]).await?;
+        // A note being written live (it has a live document) hears of this
+        // write at once, and takes it in as an edit (collab.rs). Sent when this commits.
+        tx.execute("SELECT pg_notify('done_note', id::text) FROM note WHERE id = $1 AND ydoc IS NOT NULL", &[&n.id]).await?;
         applied += 1;
     }
 
@@ -1440,6 +1443,92 @@ impl Db {
             out[i] = client.query_one(&format!("SELECT count(*) FROM {table} WHERE space_id = $1"), &[&space]).await?.get(0);
         }
         Ok(out)
+    }
+}
+
+/// A note as live editing needs it: where it lives, its text, and its live
+/// document as last saved (none until it has been written live).
+pub struct LiveNote {
+    pub space: i64,
+    pub workspace: bool,
+    pub text: String,
+    pub ydoc: Option<Vec<u8>>,
+}
+
+/// What saving a live note found.
+#[derive(Debug, PartialEq)]
+pub enum Saved {
+    Saved,
+    /// Something else wrote the note since the room last saved it (a device,
+    /// the browser's save, an agent): its text now, and the live document as
+    /// the room last saved it, to take the difference in as an edit.
+    Changed { text: String, ydoc: Option<Vec<u8>> },
+    /// The note was deleted, or moved out of the space.
+    Gone,
+}
+
+impl Db {
+    pub async fn live_note(&self, note: i64) -> Result<Option<LiveNote>, Fail> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt("SELECT n.space_id, s.kind = 'workspace', n.text, n.ydoc FROM note n JOIN space s ON s.id = n.space_id WHERE n.id = $1", &[&note])
+            .await?;
+        Ok(row.map(|r| LiveNote { space: r.get(0), workspace: r.get(1), text: r.get(2), ydoc: r.get(3) }))
+    }
+
+    /// Writes a live note's text and document, only if what is stored is
+    /// still what the room last wrote (`expect`): otherwise it says what is
+    /// there instead, and writes nothing. A new seq in its space, so devices
+    /// fetch the text like any other change.
+    pub async fn save_live(&self, note: i64, space: i64, text: &str, ydoc: &[u8], expect: &str) -> Result<Saved, Fail> {
+        let mut client = self.pool.get().await?;
+        let tx = client.transaction().await?;
+        let Some(row) = tx.query_opt("SELECT space_id, text, ydoc FROM note WHERE id = $1 FOR UPDATE", &[&note]).await? else {
+            return Ok(Saved::Gone);
+        };
+        if row.get::<_, i64>(0) != space {
+            return Ok(Saved::Gone);
+        }
+        let stored: String = row.get(1);
+        let stored_doc: Option<Vec<u8>> = row.get(2);
+        if stored != expect {
+            return Ok(Saved::Changed { text: stored, ydoc: stored_doc });
+        }
+        if stored == text && stored_doc.as_deref() == Some(ydoc) {
+            return Ok(Saved::Saved);
+        }
+        let now = now_ms();
+        let seq = bump(&tx, space).await?;
+        tx.execute(
+            "UPDATE note SET text = $2, ydoc = $3, updated_at = $4, changed = greatest(changed + 1, $4), seq = $5 WHERE id = $1",
+            &[&note, &text, &ydoc, &now, &seq],
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(Saved::Saved)
+    }
+
+    /// Whether the person is in the workspace still: someone removed while a
+    /// note is open is taken out of it.
+    pub async fn in_workspace(&self, account: &str, space: i64) -> Result<bool, Fail> {
+        let client = self.pool.get().await?;
+        Ok(client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM member m JOIN space s ON s.id = m.space_id WHERE m.space_id = $1 AND m.account_id = $2 AND s.kind = 'workspace')",
+                &[&space, &account],
+            )
+            .await?
+            .get(0))
+    }
+
+    /// The workspace a note is in, for someone in it; "not found" for a note
+    /// in someone's own space or one they cannot see.
+    pub async fn note_workspace(&self, me: &Me, note: i64) -> Result<i64, Fail> {
+        let space = self.live_note(note).await?.filter(|n| n.workspace).ok_or(Fail::NotFound)?.space;
+        if !self.in_workspace(&me.id, space).await? {
+            return Err(Fail::NotFound);
+        }
+        Ok(space)
     }
 }
 
