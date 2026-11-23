@@ -9,6 +9,7 @@
 mod accounts;
 mod auth;
 mod pages;
+mod pg;
 
 use axum::{
     extract::{Query, Request, State},
@@ -18,9 +19,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use accounts::{Accounts, Failure, Files};
-use auth::{Cloud, Session};
-use done_core::{Change, Error, NewEntry, Outbox, SaveNote, Store};
+use accounts::Files;
+use auth::Cloud;
+use done_core::{Change, Error, NewEntry, Outbox, SaveNote, Store, Synced};
+use pg::{Db, Fail, Me};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -82,10 +84,6 @@ async fn finished(State(store): State<Arc<Store>>) -> Response {
     reply(store.finished(FINISHED_LISTED))
 }
 
-async fn cloud_finished(State(cloud): State<Cloud>, session: Session) -> Response {
-    answer(cloud.accounts.read(&session.sub, |s| s.finished(FINISHED_LISTED)).await)
-}
-
 async fn entries(State(store): State<Arc<Store>>, Query(q): Query<Day>) -> Response {
     reply(store.entries(&q.day))
 }
@@ -117,63 +115,145 @@ async fn delete_note(State(store): State<Arc<Store>>, Json(q): Json<Id>) -> Resp
     reply(store.delete_note(q.id).map(|()| serde_json::json!({})))
 }
 
-// The same calls as the local ones above, each for the signed-in
-// account's own file. The account comes from the session and from nowhere
-// else: no call takes an account id, so none can be pointed at another's.
-fn answer<T: Serialize>(result: Result<T, Failure>) -> Response {
+// The same calls as the local ones above, for the signed-in person, over
+// every space they are in. Who they are comes from the session and from
+// nowhere else: no call takes an account id, so none can be pointed at
+// another's (see pg.rs for how spaces are kept apart).
+fn done<T: Serialize>(result: Result<T, Fail>) -> Response {
     match result {
-        Ok(value) => reply(Ok(value)),
-        Err(Failure::Tasks(e)) => reply::<T>(Err(e)),
-        Err(Failure::Storage(why)) => {
-            eprintln!("{why}");
-            (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({ "error": "Your tasks could not be reached. Nothing was lost; try again." })))
-                .into_response()
-        }
+        Ok(value) => Json(value).into_response(),
+        Err(fail) => auth::down(fail),
     }
 }
 
-async fn cloud_state(State(cloud): State<Cloud>, session: Session, Query(q): Query<Today>) -> Response {
-    answer(cloud.accounts.read(&session.sub, |s| s.state(&q.today)).await)
+async fn cloud_state(State(cloud): State<Cloud>, me: Me, Query(q): Query<Today>) -> Response {
+    done(cloud.db.state(&me, &q.today).await)
 }
 
-async fn cloud_sync(State(cloud): State<Cloud>, session: Session, Json(change): Json<Change>) -> Response {
-    answer(cloud.accounts.write(&session.sub, |s| s.sync(change)).await)
+async fn cloud_sync(State(cloud): State<Cloud>, me: Me, Json(change): Json<Change>) -> Response {
+    done(cloud.db.sync(&me, change).await.map(|rev| Synced { rev }))
 }
 
-async fn cloud_entries(State(cloud): State<Cloud>, session: Session, Query(q): Query<Day>) -> Response {
-    answer(cloud.accounts.read(&session.sub, |s| s.entries(&q.day)).await)
+async fn cloud_finished(State(cloud): State<Cloud>, me: Me) -> Response {
+    done(cloud.db.finished(&me, FINISHED_LISTED).await)
 }
 
-async fn cloud_record_entry(State(cloud): State<Cloud>, session: Session, Json(entry): Json<NewEntry>) -> Response {
-    answer(cloud.accounts.write(&session.sub, |s| s.record(entry)).await)
+async fn cloud_entries(State(cloud): State<Cloud>, me: Me, Query(q): Query<Day>) -> Response {
+    done(cloud.db.entries(&me, &q.day).await)
 }
 
-async fn cloud_delete_entry(State(cloud): State<Cloud>, session: Session, Json(q): Json<Id>) -> Response {
-    answer(cloud.accounts.write(&session.sub, |s| s.delete_entry(q.id).map(|()| serde_json::json!({}))).await)
+async fn cloud_record_entry(State(cloud): State<Cloud>, me: Me, Json(entry): Json<NewEntry>) -> Response {
+    done(cloud.db.record(&me, entry).await)
 }
 
-async fn cloud_notes(State(cloud): State<Cloud>, session: Session) -> Response {
-    answer(cloud.accounts.read(&session.sub, |s| s.notes()).await)
+async fn cloud_delete_entry(State(cloud): State<Cloud>, me: Me, Json(q): Json<Id>) -> Response {
+    done(cloud.db.delete_entry(&me, q.id).await.map(|()| serde_json::json!({})))
 }
 
-async fn cloud_save_note(State(cloud): State<Cloud>, session: Session, Json(note): Json<SaveNote>) -> Response {
-    answer(cloud.accounts.write(&session.sub, |s| s.save_note(note)).await)
+async fn cloud_notes(State(cloud): State<Cloud>, me: Me) -> Response {
+    done(cloud.db.notes(&me).await)
 }
 
-async fn cloud_delete_note(State(cloud): State<Cloud>, session: Session, Json(q): Json<Id>) -> Response {
-    answer(cloud.accounts.write(&session.sub, |s| s.delete_note(q.id).map(|()| serde_json::json!({}))).await)
+async fn cloud_save_note(State(cloud): State<Cloud>, me: Me, Json(note): Json<SaveNote>) -> Response {
+    done(cloud.db.save_note(&me, note).await)
 }
 
-// A device swapping changes with this account's copy: the Mac and iPhone
-// apps keep their own file and meet here every few seconds (see
-// crates/core/src/replica.rs). A round with nothing new to send only reads,
-// so a device checking in does not rewrite the stored file each time.
-async fn cloud_replicate(State(cloud): State<Cloud>, session: Session, Json(outbox): Json<Outbox>) -> Response {
-    if outbox.rows.is_empty() {
-        answer(cloud.accounts.read(&session.sub, |s| s.exchange(&outbox)).await)
-    } else {
-        answer(cloud.accounts.write(&session.sub, |s| s.exchange(&outbox)).await)
-    }
+async fn cloud_delete_note(State(cloud): State<Cloud>, me: Me, Json(q): Json<Id>) -> Response {
+    done(cloud.db.delete_note(&me, q.id).await.map(|()| serde_json::json!({})))
+}
+
+// A device swapping changes with the server: the Mac and iPhone apps keep
+// their own file and meet here every few seconds (see
+// crates/core/src/replica.rs and pg.rs `exchange`).
+async fn cloud_replicate(State(cloud): State<Cloud>, me: Me, Json(outbox): Json<Outbox>) -> Response {
+    done(cloud.db.exchange(&me, &outbox).await)
+}
+
+async fn cloud_team(State(cloud): State<Cloud>, me: Me) -> Response {
+    done(cloud.db.team(&me).await)
+}
+
+#[derive(Deserialize)]
+struct Named {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct Space {
+    space: i64,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    account: String,
+}
+
+#[derive(Deserialize)]
+struct InviteId {
+    #[serde(default)]
+    invite: Option<i64>,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct MoveProject {
+    project: i64,
+    space: i64,
+}
+
+const OK: fn(()) -> serde_json::Value = |()| serde_json::json!({});
+
+async fn create_workspace(State(cloud): State<Cloud>, me: Me, Json(q): Json<Named>) -> Response {
+    done(cloud.db.create_workspace(&me, &q.name).await.map(|space| serde_json::json!({ "space": space })))
+}
+
+async fn rename_workspace(State(cloud): State<Cloud>, me: Me, Json(q): Json<Space>) -> Response {
+    done(cloud.db.rename_workspace(&me, q.space, &q.name).await.map(OK))
+}
+
+async fn delete_workspace(State(cloud): State<Cloud>, me: Me, Json(q): Json<Space>) -> Response {
+    done(cloud.db.delete_workspace(&me, q.space).await.map(OK))
+}
+
+async fn invite(State(cloud): State<Cloud>, me: Me, Json(q): Json<Space>) -> Response {
+    done(cloud.db.invite(&me, q.space, &q.email, &cloud.config.public_url).await)
+}
+
+async fn invite_link(State(cloud): State<Cloud>, me: Me, Json(q): Json<InviteId>) -> Response {
+    let Some(id) = q.invite else { return auth::down(Fail::NotFound) };
+    done(cloud.db.invite_link(&me, id, &cloud.config.public_url).await)
+}
+
+async fn revoke(State(cloud): State<Cloud>, me: Me, Json(q): Json<InviteId>) -> Response {
+    let Some(id) = q.invite else { return auth::down(Fail::NotFound) };
+    done(cloud.db.revoke(&me, id).await.map(OK))
+}
+
+async fn accept(State(cloud): State<Cloud>, me: Me, Json(q): Json<InviteId>) -> Response {
+    done(cloud.db.accept(&me, q.invite, q.token.as_deref()).await.map(|space| serde_json::json!({ "space": space })))
+}
+
+async fn decline(State(cloud): State<Cloud>, me: Me, Json(q): Json<InviteId>) -> Response {
+    let Some(id) = q.invite else { return auth::down(Fail::NotFound) };
+    done(cloud.db.decline(&me, id).await.map(OK))
+}
+
+async fn remove_member(State(cloud): State<Cloud>, me: Me, Json(q): Json<Space>) -> Response {
+    done(cloud.db.remove_member(&me, q.space, &q.account).await.map(OK))
+}
+
+async fn leave(State(cloud): State<Cloud>, me: Me, Json(q): Json<Space>) -> Response {
+    done(cloud.db.leave(&me, q.space).await.map(OK))
+}
+
+async fn move_project(State(cloud): State<Cloud>, me: Me, Json(q): Json<MoveProject>) -> Response {
+    done(cloud.db.move_project(&me, q.project, q.space).await.map(OK))
+}
+
+async fn read_notifications(State(cloud): State<Cloud>, me: Me, Json(_): Json<serde_json::Value>) -> Response {
+    done(cloud.db.read_notifications(&me).await.map(OK))
 }
 
 fn local(store: Arc<Store>) -> Router {
@@ -213,6 +293,20 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/notes", get(cloud_notes).post(cloud_save_note))
         .route("/api/notes/delete", post(cloud_delete_note))
         .route("/api/replicate", post(cloud_replicate))
+        .route("/api/team", get(cloud_team))
+        .route("/api/workspaces", post(create_workspace))
+        .route("/api/workspaces/rename", post(rename_workspace))
+        .route("/api/workspaces/delete", post(delete_workspace))
+        .route("/api/workspaces/invite", post(invite))
+        .route("/api/workspaces/invite-link", post(invite_link))
+        .route("/api/workspaces/revoke", post(revoke))
+        .route("/api/workspaces/remove", post(remove_member))
+        .route("/api/workspaces/leave", post(leave))
+        .route("/api/invites/accept", post(accept))
+        .route("/api/invites/decline", post(decline))
+        .route("/api/projects/move", post(move_project))
+        .route("/api/notifications/read", post(read_notifications))
+        .route("/invite/{token}", get(pages::invite))
         .layer(for_the_apps())
         .with_state(cloud)
 }
@@ -231,18 +325,91 @@ fn for_the_apps() -> tower_http::cors::CorsLayer {
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
-#[tokio::main]
-async fn main() {
-    if std::env::var("DONE_MODE").as_deref() == Ok("cloud") {
-        let config = auth::Config::from_env();
-        let kept = std::env::var("DONE_ACCOUNTS").unwrap_or_default();
-        if kept.trim().is_empty() {
-            eprintln!("done cannot start in cloud mode without DONE_ACCOUNTS (a folder, or gs://bucket).");
+/// Where the database is: a libpq connection string, from DONE_DATABASE.
+fn database() -> String {
+    match std::env::var("DONE_DATABASE") {
+        Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => {
+            eprintln!("done cannot start in cloud mode without DONE_DATABASE (a Postgres connection string).");
             std::process::exit(2);
         }
-        let accounts = Accounts::new(Files::from_setting(kept.trim()), std::env::temp_dir().join("done-accounts"));
+    }
+}
+
+fn fail_start(e: Fail) -> ! {
+    eprintln!("done could not reach its database: {e:?}");
+    std::process::exit(2);
+}
+
+/// Every account file, into its own space in the database, each one checked
+/// row for row after. True when every account came across whole.
+async fn import(db: &Db, files: &Files) -> bool {
+    let ids = match files.ids().await {
+        Ok(ids) => ids,
+        Err(e) => {
+            eprintln!("could not list the account files: {}", e.0);
+            return false;
+        }
+    };
+    let mut whole = true;
+    let work = std::env::temp_dir().join(format!("done-import-{:x}", rand::random::<u64>()));
+    let _ = std::fs::create_dir_all(&work);
+    for id in ids {
+        let outcome = async {
+            let (bytes, _) = files.get(&id).await.map_err(|e| e.0)?.ok_or("gone")?;
+            let path = work.join(format!("{id}.db"));
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            let file = Store::open(&path).map_err(|e| e.to_string())?.export().map_err(|e| e.to_string())?;
+            let fresh = db.import(&id, &file).await.map_err(|e| format!("{e:?}"))?;
+            let counted = db.count(&id).await.map_err(|e| format!("{e:?}"))?;
+            let expected = [file.rows.projects.len(), file.rows.tasks.len(), file.rows.notes.len(), file.rows.entries.len(), file.rows.gone.len()]
+                .map(|n| n as i64);
+            Ok::<_, String>((fresh, counted, expected))
+        }
+        .await;
+        match outcome {
+            Ok((fresh, counted, expected)) => {
+                let ok = counted == expected;
+                whole &= ok || !fresh;
+                println!(
+                    "{id}: {} projects {:?}, tasks {:?}, notes {:?}, entries {:?}, deletions {:?}",
+                    if !fresh { "already there;" } else if ok { "ok;" } else { "MISMATCH;" },
+                    (counted[0], expected[0]),
+                    (counted[1], expected[1]),
+                    (counted[2], expected[2]),
+                    (counted[3], expected[3]),
+                    (counted[4], expected[4]),
+                );
+            }
+            Err(why) => {
+                whole = false;
+                println!("{id}: FAILED: {why}");
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&work);
+    whole
+}
+
+#[tokio::main]
+async fn main() {
+    // One-off: bring the account files kept before Postgres into the
+    // database. `done-server import gs://bucket` (or a folder), with
+    // DONE_DATABASE set. Safe to run again: an account already there is left alone.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("import") {
+        let Some(from) = args.get(2) else {
+            eprintln!("usage: done-server import <gs://bucket or folder>");
+            std::process::exit(2);
+        };
+        let db = Db::connect(&database()).await.unwrap_or_else(|e| fail_start(e));
+        std::process::exit(if import(&db, &Files::from_setting(from)).await { 0 } else { 1 });
+    }
+    if std::env::var("DONE_MODE").as_deref() == Ok("cloud") {
+        let config = auth::Config::from_env();
+        let db = Db::connect(&database()).await.unwrap_or_else(|e| fail_start(e));
         let operator = Arc::new(pages::Operator::from_env());
-        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), operator, http: reqwest::Client::new() };
+        let state = Cloud { db: Arc::new(db), config: Arc::new(config), operator, http: reqwest::Client::new() };
         // PORT is what a container host sets. Every address, not only this
         // machine: here, being reachable is the point, and the session is the guard.
         let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
@@ -305,10 +472,9 @@ mod tests {
         })
     }
 
-    /// A hosted server with its own folder of accounts, and the Google it trusts.
-    async fn hosted(key: u8) -> (String, Google, tempfile::TempDir) {
+    /// A hosted server with a database of its own, and the Google it trusts.
+    async fn hosted(key: u8) -> (String, Google, Arc<Db>) {
         let (google, google_at) = Google::start().await;
-        let kept = tempfile::tempdir().unwrap();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let at = format!("http://{}", listener.local_addr().unwrap());
         let config = auth::Config {
@@ -319,11 +485,11 @@ mod tests {
             authorize_url: format!("{google_at}/authorize"),
             token_url: format!("{google_at}/token"),
         };
-        let accounts = Accounts::new(Files::Folder(kept.path().join("kept")), kept.path().join("work"));
+        let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
-        let state = Cloud { accounts: Arc::new(accounts), config: Arc::new(config), operator, http: reqwest::Client::new() };
+        let state = Cloud { db: db.clone(), config: Arc::new(config), operator, http: reqwest::Client::new() };
         tokio::spawn(async move { axum::serve(listener, cloud(state)).await.unwrap() });
-        (at, google, kept)
+        (at, google, db)
     }
 
     /// A browser, as far as these tests need one: it keeps cookies and does
@@ -470,7 +636,7 @@ mod tests {
 
     #[tokio::test]
     async fn signing_out_ends_the_session_and_deleting_the_account_removes_its_tasks() {
-        let (at, google, kept) = hosted(1).await;
+        let (at, google, db) = hosted(1).await;
         google.says(person("1001", "anna@example.com"));
         let mut b = Browser::new(&at);
         b.sign_in().await;
@@ -480,9 +646,9 @@ mod tests {
 
         b.sign_in().await;
         assert_eq!(b.titles().await, vec!["Call the bank"]);
-        assert!(kept.path().join("kept/1001.db").exists());
+        assert_eq!(db.count("1001").await.unwrap()[1], 1);
         assert_eq!(b.post("/api/account/delete", serde_json::json!({})).await.status(), 200);
-        assert!(!kept.path().join("kept/1001.db").exists());
+        assert!(matches!(db.count("1001").await, Err(Fail::NotFound)));
         assert_eq!(b.get("/api/state?today=2026-11-18").await.status(), 401);
         b.sign_in().await;
         assert!(b.titles().await.is_empty());

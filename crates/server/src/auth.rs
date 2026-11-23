@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::accounts::Accounts;
+use crate::pg::{Db, Fail, Me};
 
 /// What the hosted mode needs to be told. All of it comes from the
 /// environment; see `Config::from_env`.
@@ -74,7 +74,7 @@ impl Config {
 
 #[derive(Clone)]
 pub struct Cloud {
-    pub accounts: Arc<Accounts>,
+    pub db: Arc<Db>,
     pub config: Arc<Config>,
     pub operator: Arc<crate::pages::Operator>,
     pub http: reqwest::Client,
@@ -159,6 +159,12 @@ fn bearer(headers: &HeaderMap, key: &Key) -> Option<Session> {
     live(serde_json::from_str(&unseal(key, sealed)?).ok()?)
 }
 
+/// Whoever is signed in, by token or cookie, without turning anyone away:
+/// for pages that show something different to each.
+pub fn signed_in(headers: &HeaderMap, jar: &SignedCookieJar, key: &Key) -> Option<Session> {
+    bearer(headers, key).or_else(|| session_in(jar))
+}
+
 fn signed_out() -> Response {
     (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "signed out" }))).into_response()
 }
@@ -177,12 +183,41 @@ impl FromRequestParts<Cloud> for Session {
     }
 }
 
+/// The signed-in person as the database knows them: asking for this in a
+/// handler is asking for a session, and writes the account down on its
+/// first visit (with its own space).
+impl FromRequestParts<Cloud> for Me {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, cloud: &Cloud) -> Result<Self, Self::Rejection> {
+        let session = Session::from_request_parts(parts, cloud).await?;
+        cloud.db.me(&session.sub, &session.email, &session.name, &session.picture).await.map_err(down)
+    }
+}
+
+/// The database's answer as an HTTP one.
+pub fn down(fail: Fail) -> Response {
+    let fail_with = |status, message: &str| (status, Json(serde_json::json!({ "error": message }))).into_response();
+    match fail {
+        Fail::Invalid(why) => fail_with(StatusCode::BAD_REQUEST, &why),
+        Fail::NotFound => fail_with(StatusCode::NOT_FOUND, "Not found."),
+        Fail::Down(why) => {
+            eprintln!("{why}");
+            fail_with(StatusCode::SERVICE_UNAVAILABLE, "Your tasks could not be reached. Nothing was lost; try again.")
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct Start {
     /// Sent by an app signing in: the SHA-256, in hex, of a secret only that
     /// app knows. See `exchange`.
     #[serde(default)]
     app_challenge: Option<String>,
+    /// Where to come back to afterwards: an invite's page. Only such a path,
+    /// so a link cannot send someone elsewhere through this sign-in.
+    #[serde(default)]
+    then: Option<String>,
 }
 
 /// What this browser is remembered by while it is away at Google.
@@ -191,6 +226,15 @@ struct SigningIn {
     word: String,
     #[serde(default)]
     challenge: Option<String>,
+    #[serde(default)]
+    then: Option<String>,
+}
+
+/// An invite page's own path, and nothing else.
+fn back_to(then: Option<String>) -> Option<String> {
+    let then = then?;
+    let token = then.strip_prefix("/invite/")?;
+    (!token.is_empty() && token.len() <= 128 && token.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(then)
 }
 
 /// Sends the person to Google, remembering a random word to recognise them by
@@ -201,7 +245,7 @@ pub async fn start(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Q
         return (StatusCode::BAD_REQUEST, "That is not a challenge.").into_response();
     }
     let word = format!("{:032x}", rand::random::<u128>());
-    let remembered = serde_json::to_string(&SigningIn { word: word.clone(), challenge: q.app_challenge }).expect("plain text fields");
+    let remembered = serde_json::to_string(&SigningIn { word: word.clone(), challenge: q.app_challenge, then: back_to(q.then) }).expect("plain text fields");
     let mut to = reqwest::Url::parse(&cloud.config.authorize_url).expect("a valid address");
     to.query_pairs_mut()
         .append_pair("client_id", &cloud.config.client_id)
@@ -306,6 +350,7 @@ pub async fn back(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Qu
         return (jar, refuse("the account has no verified email or no usable id")).into_response();
     }
     let session = Session { sub: claims.sub, email: claims.email, name: claims.name, picture: claims.picture, exp: now() + THIRTY_DAYS };
+    let then = remembered.as_ref().and_then(|r| back_to(r.then.clone())).unwrap_or_else(|| "/".into());
     // An app started this: the browser is only the way to Google and back,
     // so it gets no session. It gets a link that hands the app a code.
     if let Some(challenge) = remembered.and_then(|r| r.challenge) {
@@ -316,7 +361,7 @@ pub async fn back(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Qu
         return (jar, Html(BACK_TO_THE_APP.replace("LINK", link.as_str()))).into_response();
     }
     let value = serde_json::to_string(&session).expect("plain text fields");
-    (jar.add(cookie(SESSION, value, config, THIRTY_DAYS)), Redirect::to("/")).into_response()
+    (jar.add(cookie(SESSION, value, config, THIRTY_DAYS)), Redirect::to(&then)).into_response()
 }
 
 const TWO_MINUTES: u64 = 120;
@@ -375,7 +420,7 @@ pub async fn exchange(State(cloud): State<Cloud>, Json(q): Json<Exchange>) -> Re
         return refused();
     }
     let s = &code.session;
-    let account = serde_json::json!({ "email": s.email, "name": s.name, "picture": s.picture });
+    let account = serde_json::json!({ "id": s.sub, "email": s.email, "name": s.name, "picture": s.picture });
     let token = seal(key, serde_json::to_string(&code.session).expect("plain text fields"));
     Json(serde_json::json!({ "token": token, "account": account })).into_response()
 }
@@ -388,13 +433,13 @@ pub async fn sign_out(jar: SignedCookieJar, Json(_): Json<serde_json::Value>) ->
 /// how the interface learns it has to show the sign-in screen.
 pub async fn me(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCookieJar) -> Response {
     let session = bearer(&headers, &cloud.config.key).or_else(|| session_in(&jar));
-    let account = session.map(|s| serde_json::json!({ "email": s.email, "name": s.name, "picture": s.picture }));
+    let account = session.map(|s| serde_json::json!({ "id": s.sub, "email": s.email, "name": s.name, "picture": s.picture }));
     Json(serde_json::json!({ "mode": "cloud", "account": account })).into_response()
 }
 
 /// Deletes the account's tasks for good and signs out.
-pub async fn delete_account(State(cloud): State<Cloud>, session: Session, jar: SignedCookieJar, Json(_): Json<serde_json::Value>) -> Response {
-    match cloud.accounts.delete(&session.sub).await {
+pub async fn delete_account(State(cloud): State<Cloud>, me: Me, jar: SignedCookieJar, Json(_): Json<serde_json::Value>) -> Response {
+    match cloud.db.delete_account(&me).await {
         Ok(()) => (jar.remove(gone(SESSION)), Json(serde_json::json!({}))).into_response(),
         Err(e) => {
             eprintln!("{e:?}");

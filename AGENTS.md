@@ -4,9 +4,9 @@ Notes for agents (and people) changing this repository: how the work is done her
 
 ## The shape of it
 
-- `crates/core`: the only code that touches SQLite. Every rule about tasks, notes and the time sheet lives here.
+- `crates/core`: the only code that touches SQLite (the apps' own file). Every rule about tasks, notes and the time sheet lives here, and the server uses the same rules.
 - `crates/mcp`: the MCP server, run as `done mcp`. Keep it a small set of task-shaped tools; a new tool needs a real use an agent hits, not a mirror of an endpoint.
-- `crates/server`: the web app. Local mode (default) serves this Mac only; `DONE_MODE=cloud` is the hosted service. It embeds `ui/dist/index.html` when compiled, so **build the UI before the server**.
+- `crates/server`: the web app. Local mode (default) serves this Mac only, from the SQLite file; `DONE_MODE=cloud` is the hosted service, on Postgres (`pg.rs`: spaces, workspaces, invites, who can see what). It embeds `ui/dist/index.html` when compiled, so **build the UI before the server**.
 - `crates/app`: the Tauri app (Mac, iPhone). Thin wrappers around core.
 - `ui/`: React, Tailwind, shadcn/ui. `ui/src/lib/backend.ts` is the one place that picks the app's commands, the local `/api` or the hosted server.
 - `docs/plans/`: one plan per change, kept true until merge.
@@ -27,8 +27,16 @@ Commits end with a `Co-Authored-By:` line for the agent; PR bodies end with the 
 
 ```bash
 cd ui && npm run typecheck && npm test && npm run build && cd ..
-cargo test -p done-core -p done-mcp -p done-server
+DONE_TEST_PG="host=/tmp port=54329 user=done" cargo test -p done-core -p done-mcp -p done-server
 cargo check -p done-app
+```
+
+The server's tests need a Postgres to make throwaway databases in (`DONE_TEST_PG`, a connection string without `dbname`). Keep one of its own, not the Mac's everyday Postgres:
+
+```bash
+B=/opt/homebrew/opt/postgresql@17/bin D=../done-wt/.pgtest
+[ -d $D ] || LC_ALL=en_US.UTF-8 $B/initdb -D $D -U done --auth=trust --locale=C --encoding=UTF8
+LC_ALL=en_US.UTF-8 $B/pg_ctl -D $D -o "-p 54329 -k /tmp" -l $D/log start
 ```
 
 - Pure logic goes in `ui/src/lib/*.ts` with a test beside it; components stay thin.
@@ -70,6 +78,7 @@ Build the UI first (`beforeBuildCommand` is emptied so it does not run `npm ci`)
 
 - **Never run `tauri build` with `ui/node_modules` as a symlink** to another worktree's: its `npm ci` empties the link's target. Worktrees may symlink it for tests; run `npm ci` for a real folder before any app build, and remove a symlink before `git worktree remove`.
 - **Never point a test or preview at `~/Library/Application Support/done/done.db`.** Use `DONE_DB` with a copy.
+- **Which space a row is in is the server's decision** (`pg.rs` `merge`). Never trust a `spaceId` a device or window sends for an existing row, and check every id a row points at is in a space the writer is in; the tests in `pg.rs` break if either slips.
 - Keys with Cmd in the Mac app's web view: listen in the capture phase (`addEventListener('keydown', fn, true)`), or the app's menus may take them first.
 - The disk on the owner's Mac is nearly full. Check `df -h ~` before a release build; share one `CARGO_TARGET_DIR` across worktrees.
 

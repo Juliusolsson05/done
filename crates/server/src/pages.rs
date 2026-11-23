@@ -3,9 +3,15 @@
 //! Every sentence on the privacy page describes what this crate does. If the
 //! code changes what is kept, where or for how long, the page changes with it.
 
-use axum::{extract::State, response::Html};
+use axum::{
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
+};
+use axum_extra::extract::cookie::SignedCookieJar;
 
-use crate::auth::Cloud;
+use crate::auth::{signed_in, Cloud};
+use crate::pg::{now_ms, Fail};
 
 /// Who runs this server, as shown on both pages. Someone else hosting the
 /// same code is a different operator, so this is a setting and not a constant.
@@ -65,23 +71,25 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
         &cloud.operator,
         r#"<h2>What is kept</h2>
 <ul>
-  <li><strong>Your tasks.</strong> Your tasks, projects and time sheet are kept in one file that belongs to your account alone.</li>
-  <li><strong>Who you are, from Google.</strong> When you sign in, Google tells this server your account's id, name, email address and picture. They are put in a signed cookie in your browser (or a token in the app) so the server knows which tasks are yours, and so the app can show who is signed in. The server keeps no list of users: your tasks file is named after the id, and the rest lives only in that cookie or token.</li>
+  <li><strong>Your tasks.</strong> Your tasks, projects, notes and time sheet are kept in a database, in a space that belongs to your account alone.</li>
+  <li><strong>Workspaces you are in.</strong> A project you move into a workspace, its tasks and notes, and who is assigned to what are kept in that workspace, where every member can see and change them. Your time sheet and your other projects are never shared.</li>
+  <li><strong>Who you are, from Google.</strong> When you sign in, Google tells this server your account's id, name, email address and picture. They are kept with your account so the server knows which tasks are yours, so people in your workspaces see your name and picture, and so an invite sent to your address can reach you. A signed cookie in your browser (or a token in the app) says who you are on each visit.</li>
+  <li><strong>Invites.</strong> An invite keeps the address it was sent to and who sent it. No email is sent: it waits in done for that address to sign in.</li>
 </ul>
 <p>Nothing else is asked of Google. done cannot read your mail, calendar, contacts or files.</p>
 
 <h2>What is not done</h2>
 <ul>
-  <li>No advertising and no tracking. The pages load nothing from other companies.</li>
-  <li>Your tasks are not sold, shared or used to train anything.</li>
+  <li>No advertising and no tracking. The pages load nothing from other companies, except your workspace members' pictures, which come from Google.</li>
+  <li>Your tasks are not sold, shared beyond the workspaces you choose, or used to train anything.</li>
   <li>The server's host keeps ordinary request logs (time, address requested, your network address) for a limited time, as every web server does. The content of your tasks is never written to them.</li>
 </ul>
 
 <h2>Where it is kept, and for how long</h2>
-<p>Your tasks file is stored with Google Cloud by WHO, and is kept until you delete your account. A copy of a replaced or deleted file can be restored for up to 14 days and is then gone for good. The sign-in cookie lasts 30 days.</p>
+<p>The database is run on Google Cloud by WHO, and your tasks are kept until you delete your account. The database is backed up every day and each backup is kept for 7 days. The sign-in cookie lasts 30 days.</p>
 
 <h2>Deleting everything</h2>
-<p>In done, open Settings and choose "Delete my account". Your tasks file is deleted at once, and its last restorable copy 14 days later. Signing out only removes the cookie.</p>"#,
+<p>In done, open Settings and choose "Delete my account". Your own space and everything in it are deleted at once, and leave the backups within 7 days. You leave every workspace; one you own that others are in passes to the member who joined it first, and one only you are in is deleted. Signing out only removes the cookie.</p>"#,
     )
 }
 
@@ -106,4 +114,107 @@ pub async fn terms(State(cloud): State<Cloud>) -> Html<String> {
 <h2>The software</h2>
 <p>done itself is open source under the MIT license, and you may run your own copy: <a href="https://github.com/Juliusolsson05/done">github.com/Juliusolsson05/done</a>. See also the <a href="/privacy">privacy page</a>.</p>"#,
     )
+}
+
+/// The page behind an invite link: who invited you to what, and one button.
+/// Someone who is not signed in is sent to Google and back here; someone
+/// signed in as another account is told whose invite it is.
+pub async fn invite(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCookieJar, Path(token): Path<String>) -> Response {
+    let gone = |title: &str, why: &str| (StatusCode::NOT_FOUND, card("", title, why, r#"<a class="quiet" href="/">Open done</a>"#)).into_response();
+    if token.is_empty() || token.len() > 128 || !token.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return gone("This invite does not work", "The link may be cut short. Ask for a new one.");
+    }
+    let invite = match cloud.db.invite_page(&token).await {
+        Ok(invite) => invite,
+        Err(Fail::NotFound) => return gone("This invite does not work", "The link may be cut short, or a newer one replaced it. Ask for a new one."),
+        Err(e) => return crate::auth::down(e),
+    };
+    let by = if invite.by_name.is_empty() { "Someone".to_string() } else { text(invite.by_name.split_whitespace().next().unwrap_or("")) };
+    let space = text(&invite.space);
+    match invite.state.as_str() {
+        "pending" => {}
+        "expired" => return gone("This invite has expired", &format!("Invites last 7 days. Ask {by} to send a new one.")),
+        "accepted" => return gone("This invite has been used", "If it was you, Hop is already in done. Open done to see it.".replace("Hop", &space).as_str()),
+        _ => return gone("This invite was taken back", &format!("Ask {by} if they meant to.")),
+    }
+    let picture = if invite.by_picture.starts_with("https://") {
+        format!(r#"<img class="face" src="{}" alt="" referrerpolicy="no-referrer">"#, text(&invite.by_picture))
+    } else {
+        format!(r#"<span class="face">{}</span>"#, by.chars().next().unwrap_or('•'))
+    };
+    let days = ((invite.expires - now_ms()) / (24 * 60 * 60 * 1000)).max(0);
+    let lasts = if days >= 1 { format!("This invite works for {days} more day{}.", if days == 1 { "" } else { "s" }) } else { "This invite runs out today.".into() };
+    let people = format!("{space} has {} member{}.", invite.members, if invite.members == 1 { "" } else { "s" });
+    let back = format!("/auth/google?then=/invite/{token}");
+    let session = signed_in(&headers, &jar, &cloud.config.key);
+    let html = match session {
+        None => card(
+            &picture,
+            &format!("{by} invited you to {space}"),
+            &format!("{people} Sign in with {} to join.", text(&invite.email)),
+            &format!(r#"<a class="go" href="{back}">Continue with Google</a><p class="small">{lasts}</p>"#),
+        ),
+        Some(s) if s.email.trim().to_lowercase() == invite.to => card(
+            &picture,
+            &format!("{by} invited you to {space}"),
+            &format!("{people} Its projects show up in done beside your own; your own stay yours."),
+            &format!(
+                r#"<button class="go" id="join">Join {space}</button><p class="small" id="said">{lasts}</p>
+<script>
+document.getElementById('join').onclick = async () => {{
+  const r = await fetch('/api/invites/accept', {{ method: 'POST', headers: {{ 'content-type': 'application/json' }}, body: JSON.stringify({{ token: '{token}' }}) }})
+  if (r.ok) location.href = '/'
+  else document.getElementById('said').textContent = (await r.json().catch(() => ({{}}))).error || 'That did not work. Try again.'
+}}
+</script>"#
+            ),
+        ),
+        Some(s) => card(
+            "",
+            "This invite is for another account",
+            &format!("It was sent to {}. You are signed in as {}.", text(&invite.email), text(&s.email)),
+            &format!(
+                r#"<button class="go" id="switch">Switch account</button> <a class="quiet" href="/">Open done</a>
+<script>
+document.getElementById('switch').onclick = async () => {{
+  await fetch('/auth/signout', {{ method: 'POST', headers: {{ 'content-type': 'application/json' }}, body: '{{}}' }})
+  location.href = '{back}'
+}}
+</script>"#
+            ),
+        ),
+    };
+    html.into_response()
+}
+
+// One small card in the middle of the page, in done's own colours.
+fn card(face: &str, title: &str, said: &str, actions: &str) -> Html<String> {
+    Html(format!(
+        r##"<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{title} · done</title>
+<style>
+  body {{ font: 15px/1.5 -apple-system, system-ui, sans-serif; color: #1e1f1d; background: #fcfcfa; margin: 0; min-height: 100svh; display: grid; place-items: center; }}
+  main {{ max-width: 23rem; padding: 2rem 1.25rem; text-align: center; }}
+  .mark {{ display: inline-flex; gap: .5rem; align-items: center; font-weight: 650; font-size: 1.3rem; letter-spacing: -.02em; margin-bottom: 2rem; color: #1e1f1d; text-decoration: none; }}
+  .face {{ width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #1e4fbf; color: #fff; font-weight: 600; margin-bottom: .9rem; object-fit: cover; }}
+  h1 {{ font-size: 1.4rem; line-height: 1.3; letter-spacing: -.01em; margin: 0 0 .4rem; }}
+  p {{ color: #62645f; margin: 0 0 1.4rem; }}
+  .go {{ display: inline-block; background: #1e4fbf; color: #fff; text-decoration: none; padding: .7rem 1.1rem; border-radius: .45rem; font: 500 15px -apple-system, system-ui, sans-serif; border: 0; cursor: pointer; }}
+  .go:focus-visible, .quiet:focus-visible {{ outline: 3px solid rgb(30 79 191 / .35); outline-offset: 2px; }}
+  .quiet {{ color: #62645f; margin-left: .75rem; }}
+  .small {{ font-size: 13px; color: #9a9c96; margin-top: 1rem; }}
+</style>
+<main>
+<a class="mark" href="/"><svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="#1e4fbf"/><path d="M5.6 10.3l3 3 5.8-6.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>done</a>
+<div>{face}</div>
+<h1>{title}</h1>
+<p>{said}</p>
+{actions}
+</main>
+</html>"##
+    ))
 }
