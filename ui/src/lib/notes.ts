@@ -1,5 +1,6 @@
 // Notes: free text that is not a task, such as a list jotted down in the
 // middle of a conversation. Kept apart from the tasks and their revision.
+import { withoutMentionSyntax } from '@/lib/mentions'
 import { matchesQuery } from '@/lib/search'
 
 export interface Note {
@@ -23,10 +24,11 @@ export interface SaveNote {
 }
 
 // The first line with something on it names the note in the list, without
-// the Markdown that marks it as a heading ("# Funds" is "Funds").
+// the Markdown that marks it as a heading ("# Funds" is "Funds"), and with a
+// mentioned task as its words alone.
 export function titleOf(text: string): string {
   for (const line of text.split('\n')) {
-    const title = line
+    const title = withoutMentionSyntax(line)
       .replace(/^\s{0,3}#{1,6}(\s+|$)/, '')
       .replace(/\s+#+\s*$/, '')
       .trim()

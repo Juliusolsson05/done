@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest'
+import { atQuery, insertMention, mentionId, mentionLink, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
+import type { Task } from '@/lib/tasks'
+
+const task = (id: number, title: string, fields: Partial<Task> = {}): Task => ({
+  id,
+  title,
+  notes: '',
+  projectId: null,
+  start: null,
+  due: null,
+  priority: 4,
+  ...fields,
+})
+
+// The ids are the size real ones are (time in milliseconds times 1000, plus a random part).
+const BANK = 1795306779859023
+const SYNC = 1795390229598378
+
+describe('a mention', () => {
+  it('is only the exact done:task/<digits> form', () => {
+    expect(mentionId(`done:task/${BANK}`)).toBe(BANK)
+    expect(mentionId('https://done.app/task/1')).toBeNull()
+    expect(mentionId('done:task/12abc')).toBeNull()
+    expect(mentionId('done:task/')).toBeNull()
+    expect(mentionId('xdone:task/1')).toBeNull()
+    expect(mentionId(undefined)).toBeNull()
+  })
+
+  it('survives a title with brackets and backslashes, and reads back as the title', () => {
+    const awkward = task(7, 'Fix [urgent] path C:\\temp')
+    const link = mentionLink(awkward)
+    expect(link).toBe('[Fix \\[urgent\\] path C:\\\\temp](done:task/7)')
+    expect(mentionsIn(`Do ${link} today`)).toEqual([7])
+    expect(withoutMentionSyntax(link)).toBe('Fix [urgent] path C:\\temp')
+  })
+})
+
+describe('the tasks a note mentions', () => {
+  it('are listed in order, once each, wherever the Markdown puts them', () => {
+    const note = [
+      '# Next week',
+      '## Goals',
+      `- [Call the bank](done:task/${BANK}) by **Friday**`,
+      `- [Improve sync](done:task/${SYNC})`,
+      '| Milestone | Task |',
+      '|---|---|',
+      `| Ship | [Call the bank](done:task/${BANK}) |`,
+    ].join('\n')
+    expect(mentionsIn(note)).toEqual([BANK, SYNC])
+  })
+
+  // Code is shown as written, so a mention in it is text, as the Markdown parser draws it.
+  it('leave out what is written inside code', () => {
+    const note = ['Inline `[x](done:task/1)` stays text.', '```', '[y](done:task/2)', '```', '[z](done:task/3)'].join('\n')
+    expect(mentionsIn(note)).toEqual([3])
+  })
+})
+
+describe('typing @', () => {
+  it('asks for a task at the start of a line or after a space or bracket', () => {
+    expect(atQuery('@ca', 3)).toEqual({ start: 0, query: 'ca' })
+    expect(atQuery('Goals:\n- @call the', 18)).toEqual({ start: 9, query: 'call the' })
+    expect(atQuery('(@sync', 6)).toEqual({ start: 1, query: 'sync' })
+    expect(atQuery('Ask @', 5)).toEqual({ start: 4, query: '' })
+  })
+
+  it('does not for an email address, a finished mention, or a gap', () => {
+    expect(atQuery('mail julius@done.app', 20)).toBeNull()
+    expect(atQuery('@call  bank', 11)).toBeNull()
+    expect(atQuery('@call\nnext', 10)).toBeNull()
+    expect(atQuery('[Call](done:task/1) ', 20)).toBeNull()
+  })
+
+  it('follows the caret, and lets go once a sentence is being written', () => {
+    const text = 'Before @sy and then we wrote on'
+    expect(atQuery(text, 10)).toEqual({ start: 7, query: 'sy' })
+    expect(atQuery(text, 31)).toBeNull()
+  })
+
+  it('is replaced by the mention, with the caret past one space', () => {
+    const text = '- @call the\nNext line'
+    const at = atQuery(text, 11)
+    expect(at).not.toBeNull()
+    const done = insertMention(text, at!.start, 11, task(BANK, 'Call the bank'))
+    expect(done.text).toBe(`- [Call the bank](done:task/${BANK})\nNext line`)
+    expect(done.text.slice(0, done.caret)).toBe(`- [Call the bank](done:task/${BANK})\n`)
+    expect(insertMention('@x', 0, 2, task(1, 'A')).text).toBe('[A](done:task/1) ')
+  })
+})
+
+describe('the tasks offered', () => {
+  const tasks = [
+    task(1, 'Reach out to the bank', { priority: 2 }),
+    task(2, 'Bank statement', { priority: 4 }),
+    task(3, 'Call the bank', { priority: 1 }),
+    task(4, 'Bank holiday', { done: true, doneDay: '2026-11-20' }),
+    task(5, 'Bank subtask', { parentId: 2 }),
+    task(6, 'Plan the week', { due: '2026-11-24' }),
+  ]
+
+  it('put a title that starts with the words first, then a word that does, by priority', () => {
+    expect(suggestions(tasks, 'bank').map((t) => t.id)).toEqual([2, 3, 1])
+    expect(suggestions(tasks, 'call bank').map((t) => t.id)).toEqual([3])
+  })
+
+  it('leave out finished tasks and subtasks, and with nothing typed put the soonest due first', () => {
+    expect(suggestions(tasks, '').map((t) => t.id)[0]).toBe(6)
+    expect(suggestions(tasks, '').map((t) => t.id)).not.toContain(4)
+    expect(suggestions(tasks, '').map((t) => t.id)).not.toContain(5)
+  })
+})
