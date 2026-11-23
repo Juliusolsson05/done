@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
 import { inScope, spaceForNew } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
-import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,9 +33,10 @@ import {
   withFolder,
   type Note,
 } from '@/lib/notes'
-import { label, linksIn } from '@/lib/links'
+import { linksIn } from '@/lib/links'
 import { mentionId, mentionsIn } from '@/lib/mentions'
-import { MentionChips, TaskMention } from '@/components/task-mention'
+import { TaskMention } from '@/components/task-mention'
+import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
@@ -636,18 +637,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
   const links = linksIn(note.text)
   return (
     <div className="relative">
-      <MentionChips ids={mentionsIn(note.text)} />
-      {/* The note's links, to open with one click while writing. */}
-      {links.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {links.map((href) => (
-            <Button key={href} variant="outline" size="xs" onClick={() => openLink(href)} className="font-normal text-muted-foreground">
-              <ExternalLinkIcon />
-              {label(href)}
-            </Button>
-          ))}
-        </div>
-      )}
+      <NoteRefs note={note.id} tasks={mentionsIn(note.text)} links={links} />
       <NoteEditor text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} />
     </div>
   )

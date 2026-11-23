@@ -8,13 +8,16 @@ type Who = Pick<Member, 'id' | 'name' | 'email' | 'picture'>
 
 const SIZE = { xs: 'size-4 text-[8px]', sm: 'size-5 text-[9.5px]', md: 'size-7 text-xs', lg: 'size-9 text-sm' }
 
+// Google hands out a 96-pixel picture; the same address gives a sharper one.
+export const sharper = (url: string): string => url.replace(/=s96-c$/, '=s192-c')
+
 export function Avatar({ who, size = 'sm', className }: { who: Who; size?: keyof typeof SIZE; className?: string }) {
   const [failed, setFailed] = useState(false)
   const label = who.name || who.email
   if (who.picture && !failed)
     return (
       <img
-        src={who.picture}
+        src={sharper(who.picture)}
         alt={label}
         title={label}
         // Google's pictures load without telling Google which page asked.
