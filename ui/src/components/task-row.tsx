@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { NotesText } from '@/components/notes-text'
 import { Subtasks } from '@/components/subtasks'
-import { TaskFaces, WorkspaceTag } from '@/components/assignees'
+import { TaskFaces } from '@/components/assignees'
 import { SwipeRow } from '@/components/swipe-row'
 import { TaskEditor } from '@/components/task-editor'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -135,8 +135,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             {projectName(data.projects, task.projectId)}
           </span>
         )}
-        {/* In All, which workspace; on a workspace's task, who is on it. */}
-        <WorkspaceTag task={task} />
+        {/* On a workspace's task, who is on it. */}
         <TaskFaces task={task} ring={isMobile ? 'ring-background' : 'ring-background group-hover/row:ring-muted'} />
       </div>
     </div>
