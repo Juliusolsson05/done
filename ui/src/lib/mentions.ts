@@ -18,7 +18,7 @@ export const mentionHref = (id: number): string => SCHEME + id
 // counts, so a web link, or anything else that merely starts the same way,
 // keeps being a plain link.
 export function mentionId(href: string | undefined): number | null {
-  const match = href ? /^done:task\/(\d{1,20})$/.exec(href) : null
+  const match = href ? /^done:task\/(\d{1,20})(?:#inline)?$/.exec(href) : null
   return match ? Number(match[1]) : null
 }
 
@@ -61,6 +61,27 @@ export function mentionRanges(text: string): { from: number; to: number; id: num
     ranges.push({ from: match.index, to: match.index + match[0].length, id: Number(match[2]), label: unescapeLabel(match[1]) })
   }
   return ranges
+}
+
+// In the read view, a mention alone on its line (a list item or paragraph
+// with nothing else, a checkbox or trailing punctuation aside) is drawn as
+// the task's full card; one that shares its line with other words is drawn
+// small, inside the sentence. Marked here by an #inline on its address,
+// which mentionId still reads as the same task. Code is left as written.
+const ALONE = /^\s*(?:[-*+]|\d+[.)])?\s*(?:\[[ xX]\]\s*)?$/
+export function markInline(text: string): string {
+  let fenced = false
+  return text
+    .split('\n')
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
+      if (fenced || !line.includes('](done:task/')) return line
+      const matches = [...line.matchAll(MENTION)]
+      const rest = line.replace(MENTION, '').replace(/[\s.,;:!?]+$/, '')
+      if (matches.length === 1 && ALONE.test(rest)) return line
+      return line.replace(MENTION, (whole) => whole.replace(/\)$/, '#inline)'))
+    })
+    .join('\n')
 }
 
 // A mention read as its words alone, for a note's title in the list: "Call

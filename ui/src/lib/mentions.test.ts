@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atQuery, insertMention, mentionDetails, mentionId, mentionLink, mentionRanges, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
+import { atQuery, insertMention, mentionDetails, mentionId, mentionLink, markInline, mentionRanges, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
 import type { Task } from '@/lib/tasks'
 
 const task = (id: number, title: string, fields: Partial<Task> = {}): Task => ({
@@ -162,5 +162,27 @@ describe("a mentioned task's card", () => {
       [34, 'Pay [rent]', '[Pay \\[rent\\]](done:task/34)'],
     ])
     expect(mentionRanges('[a web link](https://x.com)')).toEqual([])
+  })
+
+  it('draws a mention alone on its line as a card, and one among words small', () => {
+    const text = [
+      '- [Call the bank](done:task/1)',
+      '- [ ] [Call the bank](done:task/2).',
+      'Julius: [Order equipment](done:task/3) (20 Nov)',
+      '[A](done:task/4) and [B](done:task/5)',
+      '```',
+      'x [C](done:task/6) y',
+      '```',
+    ].join('\n')
+    expect(markInline(text).split('\n')).toEqual([
+      '- [Call the bank](done:task/1)',
+      '- [ ] [Call the bank](done:task/2).',
+      'Julius: [Order equipment](done:task/3#inline) (20 Nov)',
+      '[A](done:task/4#inline) and [B](done:task/5#inline)',
+      '```',
+      'x [C](done:task/6) y',
+      '```',
+    ])
+    expect(mentionId('done:task/3#inline')).toBe(3)
   })
 })

@@ -34,8 +34,8 @@ import {
   type Note,
 } from '@/lib/notes'
 import { linksIn } from '@/lib/links'
-import { mentionId, mentionsIn } from '@/lib/mentions'
-import { TaskMention } from '@/components/task-mention'
+import { markInline, mentionId, mentionsIn } from '@/lib/mentions'
+import { TaskMention, TaskMentionInline } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
 import { Faces, LiveBar, useLiveNote, useLiveStatus, usePresence } from '@/components/live-note'
@@ -689,7 +689,7 @@ function NoteDocument({ text }: { text: string }) {
   // passage can be selected and copied. Edit or Esc goes back.
   return (
     <article data-findable className={cn(DOCUMENT, 'pt-1 pb-24')}>
-      <Markdown options={MARKDOWN}>{keepLineBreaks(text)}</Markdown>
+      <Markdown options={MARKDOWN}>{keepLineBreaks(markInline(text))}</Markdown>
     </article>
   )
 }
@@ -700,7 +700,9 @@ function NoteDocument({ text }: { text: string }) {
 // already found it as a link, and everything around it is drawn as before.
 function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
   const mentioned = mentionId(href)
-  if (mentioned !== null) return <TaskMention id={mentioned} fallback={children} />
+  // Alone on its line, the task's card; among other words, small inside the sentence.
+  if (mentioned !== null)
+    return href?.endsWith('#inline') ? <TaskMentionInline id={mentioned} fallback={children} /> : <TaskMention id={mentioned} fallback={children} />
   return (
     <a
       href={href}
