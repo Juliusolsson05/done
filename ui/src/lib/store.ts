@@ -126,3 +126,17 @@ export function replicateSoon() {
   clearTimeout(soon)
   soon = setTimeout(() => void replicateNow(), 1500)
 }
+
+// After a workspace was made, joined or changed on the server: bring this
+// window up to date with it. An app learns it through a sync round, which
+// also stores it on the device; a browser by loading again.
+export async function caughtUp(): Promise<void> {
+  if (canReplicate) {
+    // A round is skipped while another is running; wait for that one, then go.
+    await pending
+    await replicateNow()
+  } else {
+    refresh()
+  }
+  await pending
+}

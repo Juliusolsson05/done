@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
+import { TaskFaces, useTaskPeople } from '@/components/assignees'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -26,6 +27,7 @@ function BoardCard({ task, dragged, onDrag }: { task: Task; dragged: boolean; on
   const { data, noticed, edit, reopen } = useApp()
   const [leaving, finish] = useFinish(task.id)
   const done = task.done === true
+  const people = useTaskPeople(task).on.length > 0
   const start = (event: DragEvent) => {
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', String(task.id))
@@ -56,7 +58,7 @@ function BoardCard({ task, dragged, onDrag }: { task: Task; dragged: boolean; on
         >
           <span data-findable className="wrap-anywhere">{task.title}</span>
         </Button>
-        {(task.goalDay === TODAY || task.due !== null || task.projectId !== null) && (
+        {(task.goalDay === TODAY || task.due !== null || task.projectId !== null || people) && (
           <div className="flex flex-wrap items-center gap-x-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
             {task.goalDay === TODAY && <span className="font-medium text-primary">Today’s goal</span>}
             {task.due && <span className={cn(!done && task.due < TODAY && 'text-overdue')}>{describeDay(task.due, TODAY)}</span>}
@@ -66,6 +68,10 @@ function BoardCard({ task, dragged, onDrag }: { task: Task; dragged: boolean; on
                 {projectName(data.projects, task.projectId)}
               </span>
             )}
+            {/* Who is on it, at the card's bottom right. */}
+            <span className="ml-auto">
+              <TaskFaces task={task} ring="ring-card" />
+            </span>
           </div>
         )}
       </div>
@@ -82,13 +88,14 @@ export function Board() {
   // The filter only changes what is drawn. Subtasks go through untouched:
   // the board shows top-level tasks, and a subtask is judged with its task.
   const filter = useViewFilter()
+  const { shown: { tasks: shownTasks }, me } = useApp()
   const columns = lanes(
-    data.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    shownTasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY, me)),
     TODAY,
   )
   const count = (c: Record<LaneKey, Task[]>) => c.todo.length + c.doing.length + c.done.length
   const shown = count(columns)
-  const total = count(lanes(data.tasks, TODAY))
+  const total = count(lanes(shownTasks, TODAY))
 
   const onDrag = (id: number | null) => {
     setCard(id)

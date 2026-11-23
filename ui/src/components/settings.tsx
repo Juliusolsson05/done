@@ -1,3 +1,4 @@
+import { Avatar } from '@/components/avatars'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -5,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
+import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
 import { canSignIn, deleteAccount, isDesktop, restart, signIn, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
@@ -78,8 +80,16 @@ function AccountPane() {
   const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
   return (
     <Pane title="Account">
+      {/* Your Google picture, as the people in your workspaces see it. */}
+      <div className="flex items-center gap-3">
+        <Avatar who={{ id: account.id ?? account.email, name: account.name, email: account.email, picture: account.picture }} size="lg" />
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate font-medium">{account.name || account.email}</span>
+          {account.name && <span className="truncate text-sm text-muted-foreground">{account.email}</span>}
+        </div>
+      </div>
       <p className="text-muted-foreground">
-        Signed in as {account.name ? `${account.name} (${account.email})` : account.email}.
+        {account.picture ? 'Signed in with Google.' : 'Signed in with Google. Your Google account has no picture, so your initials stand in for it; add one there and sign in again to use it here.'}
         {isDesktop && ' Your tasks stay on this device too and sync every few seconds when there is a connection. Signing out keeps them here.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
@@ -109,12 +119,17 @@ function AccountPane() {
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
+  // A workspace's page opens in place of the settings, with a way back.
+  const [space, setSpace] = useState<number | null>(null)
   const path = info.mcpCommand
+  if (space !== null) return <WorkspacePage id={space} onBack={() => setSpace(null)} />
   return (
     <div className="max-w-3xl">
       <ViewHeader title="Settings" />
       <div className="flex flex-col gap-8">
         <AccountPane />
+
+        <WorkspacesPane onOpen={setSpace} />
 
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there

@@ -8,6 +8,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The hosted server keeps everything in Postgres; its tests make a
+    # database of their own in this one.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -24,3 +34,5 @@ jobs:
       # The desktop app is left out here: it needs macOS to build, and the
       # release workflow builds it. Everything with rules in it is tested.
       - run: cargo test -p done-core -p done-mcp -p done-server
+        env:
+          DONE_TEST_PG: host=localhost port=5432 user=postgres password=postgres

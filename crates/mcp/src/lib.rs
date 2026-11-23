@@ -94,11 +94,15 @@ fn tools() -> Value {
         "items": { "type": "object", "properties": { "title": { "type": "string" }, "notes": { "type": "string" } }, "required": ["title"] },
     });
     update["status"] = json!({ "type": "string", "enum": ["todo", "doing"], "description": "doing means in progress." });
+    let people = json!({ "type": "array", "items": { "type": "string" },
+        "description": "Who it is assigned to, by name or email, from the members of the workspace the task is in (list_projects says which projects are in one). Replaces whoever is on it; [] takes everyone off. Only for tasks in a workspace." });
+    update["assignees"] = people.clone();
+    add["assignees"] = people;
     let id_only = json!({ "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"] });
     json!([
         { "name": "list_tasks", "description": "List open tasks, with today's date. Finished tasks are not listed. Each task carries its subtasks, including the ones already done.",
           "inputSchema": { "type": "object", "properties": {
-              "filter": { "type": "string", "enum": ["all", "today", "upcoming", "inbox", "finished_today"], "description": "today includes overdue tasks; finished_today lists what was finished today instead of open tasks. Defaults to all." },
+              "filter": { "type": "string", "enum": ["all", "today", "upcoming", "inbox", "assigned_to_me", "finished_today"], "description": "today includes overdue tasks; assigned_to_me is the tasks someone in a workspace put you on; finished_today lists what was finished today instead of open tasks. Defaults to all." },
               "project": { "type": "string", "description": "Only tasks in this project." } } } },
         { "name": "add_task", "description": "Add a task, optionally with subtasks, or add one subtask to an existing task.",
           "inputSchema": { "type": "object", "properties": add, "required": ["title"] } },
@@ -107,7 +111,7 @@ fn tools() -> Value {
         { "name": "complete_task", "description": "Mark a task or a subtask as finished. Finishing a task finishes its open subtasks.", "inputSchema": id_only },
         { "name": "reopen_task", "description": "Put back a task that was finished today, for example one finished by mistake, with the subtasks finished along with it.", "inputSchema": id_only },
         { "name": "delete_task", "description": "Delete a task for good, with its subtasks. Prefer complete_task for work that was done.", "inputSchema": id_only },
-        { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
+        { "name": "list_projects", "description": "List the projects. A project in a workspace is shared with the workspace's members, who are listed; its tasks and notes are theirs as much as yours.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
         { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title. Each note lists the tasks it mentions, with whether they are done (found: false means finished a while ago, or deleted).",
@@ -129,20 +133,72 @@ fn tools() -> Value {
     ])
 }
 
-fn describe(task: &Task, projects: &[Project]) -> Value {
-    let project = task.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
-    json!({
+/// The workspace a row is in, if it is in one (not the person's own space).
+fn workspace<'a>(team: &'a Option<Value>, space: Option<i64>) -> Option<&'a Value> {
+    let space = space?;
+    team.as_ref()?["spaces"].as_array()?.iter().find(|s| s["id"].as_i64() == Some(space) && s["kind"] == "workspace")
+}
+
+fn member_name(space: &Value, id: &str) -> String {
+    space["members"].as_array().into_iter().flatten().find(|m| m["id"] == id).and_then(|m| m["name"].as_str()).unwrap_or(id).to_string()
+}
+
+/// The person this device is signed in as, if it is.
+fn me(state: &State) -> Option<String> {
+    state.team.as_ref()?["me"].as_str().map(String::from)
+}
+
+fn describe(task: &Task, state: &State) -> Value {
+    let project = task.project_id.and_then(|id| state.projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
+    let mut said = json!({
         "id": task.id, "title": task.title, "notes": task.notes, "project": project,
         "start": task.start, "due": task.due, "priority": task.priority,
         "status": task.status.as_deref().unwrap_or("todo"),
         "goalDay": task.goal_day,
         "parent": task.parent_id,
-    })
+    });
+    // Written by and for other people too: said, so an agent treats it so.
+    if let Some(space) = workspace(&state.team, task.space_id) {
+        said["workspace"] = space["name"].clone();
+        said["assignees"] = task.assignees.iter().map(|a| json!(member_name(space, a))).collect();
+    }
+    said
+}
+
+/// Who an agent named, as account ids in the task's workspace.
+fn assignees_named(task: &Task, state: &State, names: &[Value]) -> Result<Vec<String>, String> {
+    let space = workspace(&state.team, task.space_id)
+        .ok_or("Only a task in a workspace can be assigned. Move its project into a workspace in the app first.")?;
+    let members: Vec<&Value> = space["members"].as_array().into_iter().flatten().collect();
+    names
+        .iter()
+        .map(|n| {
+            let wanted = n.as_str().unwrap_or("").trim().to_lowercase();
+            members
+                .iter()
+                .find(|m| {
+                    let name = m["name"].as_str().unwrap_or("").to_lowercase();
+                    m["email"].as_str().unwrap_or("").to_lowercase() == wanted || name == wanted || name.split_whitespace().next() == Some(wanted.as_str())
+                })
+                .and_then(|m| m["id"].as_str().map(String::from))
+                .ok_or_else(|| {
+                    let all: Vec<&str> = members.iter().filter_map(|m| m["name"].as_str()).collect();
+                    format!("Nobody called \"{wanted}\" is in {}. Its members are: {}.", space["name"].as_str().unwrap_or("the workspace"), all.join(", "))
+                })
+        })
+        .collect()
+}
+
+/// The assignment changes that make a task's assignees exactly `ids`.
+fn reassign(task: &Task, ids: &[String]) -> Vec<done_core::Assign> {
+    let off = task.assignees.iter().filter(|a| !ids.contains(a)).map(|a| done_core::Assign { task_id: task.id, account_id: a.clone(), on: false });
+    let on = ids.iter().filter(|a| !task.assignees.contains(a)).map(|a| done_core::Assign { task_id: task.id, account_id: a.clone(), on: true });
+    off.chain(on).collect()
 }
 
 /// A task as list_tasks gives it: with the subtasks under it, done or not.
 fn describe_with_subtasks(task: &Task, state: &State) -> Value {
-    let mut said = describe(task, &state.projects);
+    let mut said = describe(task, state);
     let subtasks: Vec<Value> = state.tasks.iter()
         .filter(|t| t.parent_id == Some(task.id))
         .map(|t| json!({ "id": t.id, "title": t.title, "notes": t.notes, "done": t.done }))
@@ -194,6 +250,8 @@ fn apply(task: &mut Task, args: &Value, state: &State, today: &str) -> Result<()
     }
     if let Some(goal) = args.get("goal").and_then(Value::as_bool) {
         task.goal_day = goal.then(|| today.to_string());
+        // A goal is one person's: this device's.
+        task.goal_by = if goal { me(state) } else { None };
         // As in the app: a goal for today with no date gets today's.
         if goal && task.due.is_none() {
             task.due = Some(today.to_string());
@@ -298,6 +356,15 @@ fn describe_note(note: &Note, projects: &[Project], known: &[Task]) -> Value {
     json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder.clone().flatten(), "tasks": tasks, "updatedAt": note.updated_at })
 }
 
+/// A note, labelled with its workspace when it is in one: other people write there too.
+fn describe_note_in(note: &Note, state: &State, known: &[Task]) -> Value {
+    let mut said = describe_note(note, &state.projects, known);
+    if let Some(space) = workspace(&state.team, note.space_id) {
+        said["workspace"] = space["name"].clone();
+    }
+    said
+}
+
 /// The folder an agent named for a note: Some(None) for an explicit null,
 /// None when it said nothing. A name that matches an existing folder but for
 /// case is that folder, so "fundraising" files into "Fundraising" instead of
@@ -354,7 +421,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         "list_tasks" => {
             let today = store.today().map_err(|e| e.to_string())?;
             let state = store.state(&today).map_err(|e| e.to_string())?;
-            let goal = state.tasks.iter().find(|t| t.goal_day.as_deref() == Some(today.as_str())).map(|t| t.title.clone());
+            let mine = me(&state);
+            let goal = state.tasks.iter().find(|t| t.goal_day.as_deref() == Some(today.as_str()) && (t.goal_by.is_none() || t.goal_by == mine)).map(|t| t.title.clone());
             let project = match args.get("project").and_then(Value::as_str) {
                 Some(name) => Some(project_named(&state, name)?),
                 None => None,
@@ -368,7 +436,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
                     // Days written YYYY-MM-DD compare correctly as text.
                     "today" => t.due.as_deref().is_some_and(|d| d <= today.as_str()),
                     "upcoming" => t.due.as_deref().is_some_and(|d| d > today.as_str()),
-                    "inbox" => t.project_id.is_none(),
+                    "inbox" => t.project_id.is_none() && workspace(&state.team, t.space_id).is_none(),
+                    "assigned_to_me" => mine.as_ref().is_some_and(|m| t.assignees.contains(m)),
                     _ => true,
                 })
                 .map(|t| describe_with_subtasks(t, &state))
@@ -380,7 +449,12 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let state = store.state(&today).map_err(|e| e.to_string())?;
             let projects: Vec<Value> = state.projects.iter().map(|p| {
                 let open = state.tasks.iter().filter(|t| !t.done && t.parent_id.is_none() && t.project_id == Some(p.id)).count();
-                json!({ "name": p.name, "openTasks": open })
+                let mut said = json!({ "name": p.name, "openTasks": open });
+                if let Some(space) = workspace(&state.team, p.space_id) {
+                    said["workspace"] = space["name"].clone();
+                    said["members"] = space["members"].as_array().into_iter().flatten().map(|m| m["name"].clone()).collect();
+                }
+                said
             }).collect();
             Ok(json!({ "projects": projects }))
         }
@@ -388,6 +462,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let mut task = Task {
                 id: state.next_id, title: String::new(), notes: String::new(), project_id: None,
                 start: None, due: None, priority: 4, status: None, done: false, done_day: None, goal_day: None, parent_id: None,
+                space_id: None, goal_by: None, assignees: Vec::new(),
             };
             apply(&mut task, args, state, today)?;
             let listed = args.get("subtasks").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -416,20 +491,35 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
                     notes: sub.get("notes").and_then(Value::as_str).unwrap_or("").to_string(),
                     project_id: task.project_id,
                     start: None, due: None, priority: 4, status: None, done: false, done_day: None, goal_day: None,
-                    parent_id: Some(task.id),
+                    parent_id: Some(task.id), space_id: None, goal_by: None, assignees: Vec::new(),
                 });
             }
-            let mut said = describe(&task, &state.projects);
+            // Its space is its project's, which assigning needs to know now.
+            task.space_id = task.project_id.and_then(|p| state.projects.iter().find(|x| x.id == p)).and_then(|p| p.space_id);
+            let assign = match args.get("assignees").and_then(Value::as_array) {
+                Some(names) => reassign(&task, &assignees_named(&task, state, names)?),
+                None => Vec::new(),
+            };
+            let mut said = describe(&task, state);
             if !listed.is_empty() {
                 said["subtasks"] = tasks[1..].iter().map(|t| json!({ "id": t.id, "title": t.title, "notes": t.notes, "done": false })).collect();
             }
-            Ok((Change { tasks, ..Default::default() }, said))
+            Ok((Change { tasks, assign, ..Default::default() }, said))
         }),
         "update_task" => change(store, |state, today| {
             let mut task = open_task(state, args)?;
             apply(&mut task, args, state, today)?;
-            let said = describe(&task, &state.projects);
-            Ok((Change { tasks: vec![task], ..Default::default() }, said))
+            let assign = match args.get("assignees").and_then(Value::as_array) {
+                Some(names) => reassign(&task, &assignees_named(&task, state, names)?),
+                None => Vec::new(),
+            };
+            let mut said = describe(&task, state);
+            if !assign.is_empty() {
+                let ids: Vec<String> = assignees_named(&task, state, args["assignees"].as_array().unwrap())?;
+                let space = workspace(&state.team, task.space_id).unwrap();
+                said["assignees"] = ids.iter().map(|a| json!(member_name(space, a))).collect();
+            }
+            Ok((Change { tasks: vec![task], assign, ..Default::default() }, said))
         }),
         "complete_task" => change(store, |state, today| {
             let mut task = open_task(state, args)?;
@@ -480,7 +570,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             }
             // The first colour no other project is using, as the app does.
             let color = (0..COLOURS).find(|c| state.projects.iter().all(|p| p.color != *c)).unwrap_or(0);
-            let project = Project { id: state.next_id, name: name.clone(), color };
+            let project = Project { id: state.next_id, name: name.clone(), color, space_id: None };
             Ok((Change { projects: vec![project], ..Default::default() }, json!({ "created": name })))
         }),
         "list_notes" => {
@@ -494,7 +584,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
                 .collect();
             let state = current_state(store)?;
             let known = known_tasks(store, &state)?;
-            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects, &known)).collect();
+            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note_in(n, &state, &known)).collect();
             let more = found.len().saturating_sub(NOTES_LISTED);
             Ok(if more > 0 { json!({ "notes": notes, "notListed": more }) } else { json!({ "notes": notes }) })
         }
@@ -523,8 +613,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let state = current_state(store)?;
             let project_id = note_project(args, &state)?.flatten();
             let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
-            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note, &state.projects, &known_tasks(store, &state)?))
+            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder, space_id: None }).map_err(|e| e.to_string())?;
+            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?))
         }
         "update_note" => {
             let note = existing_note(store, args)?;
@@ -533,8 +623,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let project_id = note_project(args, &state)?.unwrap_or(note.project_id);
             // Not said: the note keeps its folder.
             let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
-            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note, &state.projects, &known_tasks(store, &state)?))
+            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder, space_id: note.space_id }).map_err(|e| e.to_string())?;
+            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?))
         }
         "delete_note" => {
             let note = existing_note(store, args)?;
@@ -729,9 +819,9 @@ mod tests {
     #[test]
     fn an_agent_can_search_notes_and_is_told_what_was_left_out() {
         let store = Store::open(Path::new(":memory:")).unwrap();
-        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
+        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1, project_id: None, folder: None, space_id: None }).unwrap();
         for i in 0..25 {
-            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i, project_id: None, folder: None }).unwrap();
+            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i, project_id: None, folder: None, space_id: None }).unwrap();
         }
         let replies = talk(&store, &[tool(1, "list_notes", json!({ "search": "ALPHA seed" })), tool(2, "list_notes", json!({}))]);
         let found = said(&replies[0]);
@@ -804,5 +894,47 @@ mod tests {
         assert_eq!(said(&replies[1])["project"], Value::Null);
         assert_eq!(said(&replies[1])["text"], "# Seed funds\nAlpha");
         assert_eq!(replies[2]["result"]["isError"], true);
+    }
+
+    // A device in a workspace, as the server leaves it after a sync: a Hop
+    // project with a task, and the team (Julius and Geart) it said.
+    fn in_hop() -> Store {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let reply: done_core::Reply = serde_json::from_value(json!({
+            "upto": 0,
+            "rows": {
+                "projects": [{ "id": 5000000000001i64, "name": "Launch", "color": 3, "spaceId": 77, "changed": 1 }],
+                "tasks": [{ "id": 5000000000002i64, "title": "Open the bank account", "projectId": 5000000000001i64, "spaceId": 77, "changed": 1 }]
+            },
+            "spaces": [{ "space": 77, "at": 2 }, { "space": 11, "at": 0 }],
+            "team": { "me": "1001", "personal": 11, "spaces": [
+                { "id": 11, "kind": "personal", "name": "", "role": "owner", "members": [] },
+                { "id": 77, "kind": "workspace", "name": "Hop", "role": "owner", "members": [
+                    { "id": "1001", "name": "Julius Olsson", "email": "julius@hop.dev" },
+                    { "id": "1002", "name": "Geart", "email": "geart@hop.dev" } ] } ] }
+        }))
+        .unwrap();
+        store.inbox(&reply, 0).unwrap();
+        store
+    }
+
+    #[test]
+    fn an_agent_sees_the_workspace_and_assigns_by_name() {
+        let store = in_hop();
+        let replies = talk(&store, &[
+            tool(1, "update_task", json!({ "id": 5000000000002i64, "assignees": ["geart", "Julius"] })),
+            tool(2, "list_tasks", json!({ "filter": "assigned_to_me" })),
+            tool(3, "update_task", json!({ "id": 5000000000002i64, "assignees": ["Ana"] })),
+            tool(4, "list_projects", json!({})),
+        ]);
+        let said = |i: usize| -> Value { serde_json::from_str(replies[i]["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+        assert_eq!(said(0)["workspace"], "Hop");
+        assert_eq!(said(0)["assignees"], json!(["Geart", "Julius Olsson"]));
+        assert_eq!(said(1)["tasks"][0]["title"], "Open the bank account");
+        assert!(replies[2]["result"]["content"][0]["text"].as_str().unwrap().contains("Nobody called \"ana\" is in Hop"));
+        assert_eq!(said(3)["projects"][0]["members"], json!(["Julius Olsson", "Geart"]));
+        let mut on = store.state(&store.today().unwrap()).unwrap().tasks[0].assignees.clone();
+        on.sort();
+        assert_eq!(on, vec!["1001", "1002"]);
     }
 }

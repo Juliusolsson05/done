@@ -84,6 +84,7 @@ describe('a stored filter', () => {
       priorities: [1],
       when: 'any',
       words: '',
+      people: [],
     })
     // A name every object has must not pass for a time window.
     expect(cleanFilter({ when: 'toString' }, projects).when).toBe('any')
@@ -105,5 +106,27 @@ describe('quick add on a filtered page', () => {
     expect(addDefaults(filter({ projects: [HOP], priorities: [1], when: 'today' }), today)).toEqual({ projectId: HOP, priority: 1, due: today })
     expect(addDefaults(filter({ priorities: [1, 2], when: 'week' }), today)).toEqual({ projectId: null, priority: null, due: today })
     expect(addDefaults(filter({ when: 'none' }), today)).toEqual({ projectId: null, priority: null, due: null })
+  })
+})
+
+describe('people', () => {
+  const on = (id: number, assignees?: string[]) => ({ id, title: 't', notes: '', projectId: null, start: null, due: null, priority: 4, assignees })
+  const all = [on(1), on(2, ['1001']), on(3, ['1002']), on(4, ['1001', '1002'])]
+  const shown = (people: string[], me: string | null = '1001') => all.filter((t) => matchesFilter(t, filter({ people }), today, me)).map((t) => t.id)
+
+  it('keeps the tasks someone chosen is on', () => {
+    expect(shown(['me'])).toEqual([2, 4])
+    expect(shown(['nobody'])).toEqual([1])
+    expect(shown(['1002', 'nobody'])).toEqual([1, 3, 4])
+    // Me without an account is nobody's tasks only.
+    expect(shown(['me'], null)).toEqual([])
+    expect(isFiltering(filter({ people: ['me'] }))).toBe(true)
+  })
+
+  it('names people on their chips and reads them back from storage', () => {
+    const chips = filterChips(filter({ people: ['me', '1002', 'nobody', 'gone'] }), [], [{ id: '1002', name: 'Geart' }])
+    expect(chips.map((c) => c.label)).toEqual(['Me', 'Geart', 'Nobody', 'Someone'])
+    expect(chips[1].without.people).toEqual(['me', 'nobody', 'gone'])
+    expect(cleanFilter({ people: ['me', 'me', 3, ''] }, []).people).toEqual(['me'])
   })
 })

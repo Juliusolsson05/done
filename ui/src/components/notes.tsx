@@ -1,9 +1,10 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, useMemo } from 'react'
+import { inScope, spaceForNew } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
-import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,9 +33,10 @@ import {
   withFolder,
   type Note,
 } from '@/lib/notes'
-import { label, linkAt, linksIn } from '@/lib/links'
+import { linkAt, linksIn } from '@/lib/links'
 import { atQuery, insertMention, mentionId, mentionsIn, suggestions } from '@/lib/mentions'
-import { caretPoint, MentionChips, MentionPicker, TaskMention } from '@/components/task-mention'
+import { caretPoint, MentionPicker, TaskMention } from '@/components/task-mention'
+import { NoteRefs } from '@/components/note-refs'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
@@ -55,9 +57,17 @@ function storedKept(): string[] {
 }
 
 export function Notes() {
-  const { ui, data } = useApp()
+  const { ui, data, scope, team } = useApp()
   const isMobile = useIsMobile()
-  const [notes, setNotes] = useState<Note[] | null>(null)
+  const [stored, setNotes] = useState<Note[] | null>(null)
+  // The notes of the space the picker is on. A note is where its project is,
+  // else where it was written.
+  const notes = useMemo(
+    () =>
+      stored &&
+      stored.filter((n) => inScope(n.projectId != null ? (data.projects.find((p) => p.id === n.projectId)?.spaceId ?? n.spaceId) : n.spaceId, scope, team)),
+    [stored, scope, team, data.projects],
+  )
   const [openId, setOpenId] = useState<number | null>(null)
   // What is typed in the search field. Kept while notes are opened, so going
   // through the matches one by one does not lose it.
@@ -210,7 +220,7 @@ export function Notes() {
     leave(openId)
     try {
       await queue.current
-      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into })
+      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into, spaceId: spaceForNew(scope) })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
       setOpenId(note.id)
@@ -684,18 +694,7 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
   }
   return (
     <div className="relative">
-      <MentionChips ids={mentionsIn(note.text)} />
-      {/* The note's links, to open with one click while writing. */}
-      {links.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {links.map((href) => (
-            <Button key={href} variant="outline" size="xs" onClick={() => openLink(href)} className="font-normal text-muted-foreground">
-              <ExternalLinkIcon />
-              {label(href)}
-            </Button>
-          ))}
-        </div>
-      )}
+      <NoteRefs note={note.id} tasks={mentionsIn(note.text)} links={links} />
       <textarea
         ref={field}
         autoFocus={focused}

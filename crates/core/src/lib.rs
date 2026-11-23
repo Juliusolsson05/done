@@ -2,13 +2,13 @@
 //! the web app. Both go through this crate and nothing else touches the file,
 //! so there is one set of rules for what a valid task is.
 
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 mod replica;
-pub use replica::{Gone, Outbox, Reply, Rows, Stamped};
+pub use replica::{Assignee, Cursor, Exported, Gone, Outbox, Reply, Rows, Seqs, Stamped};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +19,10 @@ pub struct Project {
     /// design matter and live with the interface.
     #[serde(default)]
     pub color: i64,
+    /// The space it lives in: the person's own (absent on a device that has
+    /// never synced) or a workspace. Decided by the server; see SPACES.md.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -58,6 +62,27 @@ pub struct Task {
     /// task named here never has a parent of its own.
     #[serde(default)]
     pub parent_id: Option<i64>,
+    /// The space it lives in, as the server last said; follows its project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<i64>,
+    /// Whose goal `goal_day` makes it: a goal is one person's, even on a
+    /// task two people share. Absent on a device with no account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_by: Option<String>,
+    /// Who it is assigned to, by account id. Filled in by `state` for the
+    /// window to show; never read from what a window sends (assignments
+    /// travel one by one, as `Change::assign`, so two people's at once both stay).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assignees: Vec<String>,
+}
+
+/// Putting someone on a task or taking them off.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Assign {
+    pub task_id: i64,
+    pub account_id: String,
+    pub on: bool,
 }
 
 fn no_priority() -> i64 {
@@ -71,6 +96,10 @@ pub struct State {
     pub next_id: i64,
     pub projects: Vec<Project>,
     pub tasks: Vec<Task>,
+    /// The spaces, members and notifications of a signed-in device, as the
+    /// server last sent them. Absent with no account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team: Option<serde_json::Value>,
 }
 
 /// What one window changed since it last loaded or saved.
@@ -87,6 +116,8 @@ pub struct Change {
     pub delete_projects: Vec<i64>,
     #[serde(default)]
     pub delete_tasks: Vec<i64>,
+    #[serde(default)]
+    pub assign: Vec<Assign>,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -160,6 +191,9 @@ pub struct Note {
     /// that does not mention its folder leaves the folder as it is.
     #[serde(default, deserialize_with = "said", skip_serializing_if = "Option::is_none")]
     pub folder: Option<Option<String>>,
+    /// The space it lives in: its project's, or the one it was written in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<i64>,
 }
 
 /// A note as a window sends it: without an id it is a new note.
@@ -176,6 +210,9 @@ pub struct SaveNote {
     /// note out of its folder.
     #[serde(default, deserialize_with = "said")]
     pub folder: Option<Option<String>>,
+    /// For a new note: the workspace it is written in. None is your own.
+    #[serde(default)]
+    pub space_id: Option<i64>,
 }
 
 /// Reads a field that may be left out: left out is `None`, null is
@@ -222,7 +259,7 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
-fn is_day(s: &str) -> bool {
+pub fn is_day(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 10
         && b.iter().enumerate().all(|(i, c)| match i {
@@ -238,7 +275,7 @@ fn check_day(what: &str, day: &Option<String>) -> Result<(), Error> {
     }
 }
 
-fn check(task: &Task) -> Result<(), Error> {
+pub fn check(task: &Task) -> Result<(), Error> {
     if task.title.trim().is_empty() {
         return Err(Error::Invalid("A task needs a title.".into()));
     }
@@ -255,7 +292,7 @@ fn check(task: &Task) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_entry(entry: &NewEntry) -> Result<(), Error> {
+pub fn check_entry(entry: &NewEntry) -> Result<(), Error> {
     if entry.title.trim().is_empty() {
         return Err(Error::Invalid("A time sheet entry needs a title.".into()));
     }
@@ -381,6 +418,30 @@ impl Store {
         if !has_note_folder {
             conn.execute("ALTER TABLE note ADD COLUMN folder TEXT", [])?;
         }
+        // Spaces (see replica.rs): where a row lives, whose goal a goal is,
+        // who is on a task, and what the server last said about the spaces.
+        for (table, column) in [("project", "space_id INTEGER"), ("task", "space_id INTEGER"), ("task", "goal_by TEXT"), ("note", "space_id INTEGER")] {
+            let name = column.split(' ').next().unwrap_or(column);
+            let has: bool = conn.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"), [name], |r| {
+                r.get::<_, i64>(0).map(|n| n > 0)
+            })?;
+            if !has {
+                conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column}"), [])?;
+            }
+        }
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS task_assignee (
+               task_id INTEGER NOT NULL,
+               account_id TEXT NOT NULL,
+               space_id INTEGER,
+               is_on INTEGER NOT NULL DEFAULT 1,
+               changed INTEGER NOT NULL DEFAULT 0,
+               seq INTEGER NOT NULL DEFAULT 1,
+               PRIMARY KEY (task_id, account_id)
+             );
+             CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS space_cursor (space_id INTEGER PRIMARY KEY, pulled INTEGER NOT NULL);",
+        )?;
         // Last, once every table exists: what keeping copies in step needs.
         replica::prepare(&conn)?;
         Ok(Self { conn: Mutex::new(conn) })
@@ -460,9 +521,11 @@ impl Store {
     /// Every note, the most recently changed first.
     pub fn notes(&self) -> Result<Vec<Note>, Error> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder FROM note ORDER BY updated_at DESC, id DESC")?;
+        let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder, space_id FROM note ORDER BY updated_at DESC, id DESC")?;
         let notes = stmt
-            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?) }))?
+            .query_map([], |r| {
+                Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?), space_id: r.get(5)? })
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(notes)
     }
@@ -479,11 +542,14 @@ impl Store {
         let folder = clean_folder(note.folder.flatten().as_deref());
         let id = match note.id {
             Some(id) => {
+                // An existing note keeps its space unless its project says otherwise.
                 conn.execute(
-                    "INSERT INTO note (id, text, updated_at, project_id, folder) VALUES (?1, ?2, ?3, ?4, ?5)
+                    "INSERT INTO note (id, text, updated_at, project_id, folder, space_id) VALUES (?1, ?2, ?3, ?4, ?5,
+                       coalesce((SELECT space_id FROM project WHERE id = ?4), ?7))
                      ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at,
-                       project_id = excluded.project_id, folder = CASE WHEN ?6 THEN excluded.folder ELSE note.folder END",
-                    params![id, note.text, note.updated_at, note.project_id, folder, said],
+                       project_id = excluded.project_id, folder = CASE WHEN ?6 THEN excluded.folder ELSE note.folder END,
+                       space_id = coalesce((SELECT space_id FROM project WHERE id = excluded.project_id), note.space_id)",
+                    params![id, note.text, note.updated_at, note.project_id, folder, said, note.space_id],
                 )?;
                 id
             }
@@ -491,15 +557,16 @@ impl Store {
                 // Fresh, for the same reason as a time sheet entry's.
                 let id = replica::fresh_id(&conn)?;
                 conn.execute(
-                    "INSERT INTO note (id, text, updated_at, project_id, folder) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![id, note.text, note.updated_at, note.project_id, folder],
+                    "INSERT INTO note (id, text, updated_at, project_id, folder, space_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, coalesce((SELECT space_id FROM project WHERE id = ?4), ?6))",
+                    params![id, note.text, note.updated_at, note.project_id, folder, note.space_id],
                 )?;
                 id
             }
         };
         // Read back: a note that did not say its folder kept the one it had.
-        let folder: Option<String> = conn.query_row("SELECT folder FROM note WHERE id = ?1", [id], |r| r.get(0))?;
-        Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id, folder: Some(folder) })
+        let (folder, space_id): (Option<String>, Option<i64>) = conn.query_row("SELECT folder, space_id FROM note WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id, folder: Some(folder), space_id })
     }
 
     pub fn delete_note(&self, id: i64) -> Result<(), Error> {
@@ -520,7 +587,7 @@ impl Store {
     pub fn finished(&self, limit: i64) -> Result<Vec<Task>, Error> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id
+            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by
              FROM task WHERE done_day IS NOT NULL AND parent_id IS NULL
              ORDER BY done_day DESC, id DESC LIMIT ?1",
         )?;
@@ -540,6 +607,9 @@ impl Store {
                     done_day,
                     goal_day: r.get(9)?,
                     parent_id: r.get(10)?,
+                    space_id: r.get(11)?,
+                    goal_by: r.get(12)?,
+                    assignees: Vec::new(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -564,12 +634,12 @@ impl Store {
         }
         let conn = self.conn.lock().unwrap();
         let rev = conn.query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))?;
-        let mut stmt = conn.prepare("SELECT id, name, color FROM project ORDER BY id")?;
+        let mut stmt = conn.prepare("SELECT id, name, color, space_id FROM project ORDER BY id")?;
         let projects = stmt
-            .query_map([], |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)? }))?
+            .query_map([], |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, space_id: r.get(3)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id
+            "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by
              FROM task WHERE done_day IS NULL OR done_day = ?1
                 OR parent_id IN (SELECT id FROM task WHERE done_day IS NULL)
              ORDER BY id",
@@ -590,16 +660,31 @@ impl Store {
                     done_day,
                     goal_day: r.get(9)?,
                     parent_id: r.get(10)?,
+                    space_id: r.get(11)?,
+                    goal_by: r.get(12)?,
+                    assignees: Vec::new(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        let mut tasks = tasks;
+        // Who is on each task. Only for tasks that exist: an assignment
+        // can outlive its task on a device until the server says so.
+        let mut stmt = conn.prepare("SELECT task_id, account_id FROM task_assignee WHERE is_on = 1 ORDER BY changed, account_id")?;
+        let on: Vec<(i64, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        for (task_id, account) in on {
+            if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id) {
+                t.assignees.push(account);
+            }
+        }
+        let team: Option<String> = conn.query_row("SELECT value FROM kv WHERE key = 'team'", [], |r| r.get(0)).optional()?;
+        let team = team.and_then(|t| serde_json::from_str(&t).ok());
         // Ids are handed out by the window, counting up from this one. Taken
         // from the clock rather than one past the highest id: a phone and a
         // Mac adding tasks offline would otherwise both pick the same next
         // number (see replica.rs). A window loads again every few seconds and
         // gets a new start, so what it adds still sorts after what others added.
         let next_id = replica::fresh_id(&conn)?;
-        Ok(State { rev, next_id, projects, tasks })
+        Ok(State { rev, next_id, projects, tasks, team })
     }
 
     /// Applies one window's changes, all or nothing. Refused as `Stale` when
@@ -629,27 +714,34 @@ impl Store {
         // Projects first: the tasks below may point at a project made in this
         // same change.
         for p in &change.projects {
+            // A project's space is said once, when it is made; it moves only
+            // when the server moves it.
             tx.execute(
-                "INSERT INTO project (id, name, color) VALUES (?1, ?2, ?3)
+                "INSERT INTO project (id, name, color, space_id) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color",
-                params![p.id, p.name.trim(), p.color],
+                params![p.id, p.name.trim(), p.color, p.space_id],
             )?;
         }
         for t in &change.tasks {
             let done_day = if t.done { t.done_day.as_deref() } else { None };
             // One goal per day, whoever is writing: naming a new goal for a
             // day takes the title from whichever task held it.
+            // Whose goal: a goal is one person's (see Task::goal_by).
             if let Some(day) = &t.goal_day {
-                tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2", params![day, t.id])?;
+                tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2 AND goal_by IS ?3", params![day, t.id, t.goal_by])?;
             }
+            // Its space follows its project, here as on the server, so the
+            // window can show it in the right place before the next sync.
             tx.execute(
-                "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, goal_by, space_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                   coalesce((SELECT space_id FROM project WHERE id = ?4), (SELECT space_id FROM task WHERE id = ?11)))
                  ON CONFLICT(id) DO UPDATE SET title = excluded.title, notes = excluded.notes,
                    project_id = excluded.project_id, start = excluded.start, due = excluded.due,
                    priority = excluded.priority, status = excluded.status, done_day = excluded.done_day,
-                   goal_day = excluded.goal_day, parent_id = excluded.parent_id",
-                params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day, t.parent_id],
+                   goal_day = excluded.goal_day, parent_id = excluded.parent_id, goal_by = excluded.goal_by,
+                   space_id = excluded.space_id",
+                params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day, t.parent_id, t.goal_by],
             )?;
         }
         for id in &change.delete_tasks {
@@ -657,6 +749,16 @@ impl Store {
         }
         for id in &change.delete_projects {
             tx.execute("DELETE FROM project WHERE id = ?1", [id])?;
+        }
+        for a in &change.assign {
+            if a.account_id.trim().is_empty() {
+                return Err(Error::Invalid("An assignee needs an account.".into()));
+            }
+            tx.execute(
+                "INSERT INTO task_assignee (task_id, account_id, is_on, space_id) VALUES (?1, ?2, ?3, (SELECT space_id FROM task WHERE id = ?1))
+                 ON CONFLICT(task_id, account_id) DO UPDATE SET is_on = excluded.is_on",
+                params![a.task_id, a.account_id, a.on],
+            )?;
         }
         // One level only, checked on the result rather than on what was sent:
         // the rule can be broken from either end (giving a subtask a subtask,
@@ -706,6 +808,9 @@ mod tests {
             done_day: None,
             goal_day: None,
             parent_id: None,
+            space_id: None,
+            goal_by: None,
+            assignees: Vec::new(),
         }
     }
 
@@ -796,7 +901,7 @@ mod tests {
     #[test]
     fn what_is_saved_comes_back() {
         let s = store();
-        let project = Project { id: 1, name: "Work".into(), color: 2 };
+        let project = Project { id: 1, name: "Work".into(), color: 2, space_id: None };
         let mut t = task(2, "  Send the invoice  ");
         t.project_id = Some(1);
         t.due = Some("2026-11-20".into());
@@ -842,7 +947,7 @@ mod tests {
         let s = store();
         let mut t = task(2, "Keep me");
         t.project_id = Some(1);
-        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Home".into(), color: 0 }], tasks: vec![t], ..Default::default() })
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Home".into(), color: 0, space_id: None }], tasks: vec![t], ..Default::default() })
             .unwrap();
         s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
         let state = s.state("2026-11-13").unwrap();
@@ -956,7 +1061,7 @@ mod tests {
     }
 
     fn note(id: Option<i64>, text: &str, at: i64) -> SaveNote {
-        SaveNote { id, text: text.into(), updated_at: at, project_id: None, folder: None }
+        SaveNote { id, text: text.into(), updated_at: at, project_id: None, folder: None, space_id: None }
     }
 
     #[test]
@@ -979,20 +1084,20 @@ mod tests {
         s.delete_note(n.id).unwrap();
         assert!(s.notes().unwrap().is_empty());
         s.save_note(note(Some(n.id), "Funds", 1)).unwrap();
-        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None) }]);
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None), space_id: None }]);
     }
 
     #[test]
     fn a_note_keeps_its_folder_and_a_blank_folder_is_none() {
         let s = store();
-        let filed = |folder: Option<&str>| SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(folder.map(Into::into)) };
+        let filed = |folder: Option<&str>| SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(folder.map(Into::into)), space_id: None };
         let n = s.save_note(filed(Some("  Fund   raising "))).unwrap();
         assert_eq!(n.folder.clone().flatten().as_deref(), Some("Fund raising"));
         assert_eq!(s.notes().unwrap()[0].folder.clone().flatten().as_deref(), Some("Fund raising"));
         assert_eq!(s.save_note(filed(Some("   "))).unwrap().folder, Some(None));
         // Saved again without saying its folder (an app from before folders):
         // it stays where it was. Saying none takes it out.
-        let again = |folder| SaveNote { id: Some(n.id), text: "Funds, edited".into(), updated_at: 2, project_id: None, folder };
+        let again = |folder| SaveNote { id: Some(n.id), text: "Funds, edited".into(), updated_at: 2, project_id: None, folder, space_id: None };
         assert_eq!(s.save_note(again(None)).unwrap().folder, Some(Some("Fund raising".into())));
         assert_eq!(s.save_note(again(Some(None))).unwrap().folder, Some(None));
         assert_eq!(clean_folder(Some(&"x".repeat(200))).map(|f| f.chars().count()), Some(60));
@@ -1008,11 +1113,11 @@ mod tests {
     #[test]
     fn a_note_keeps_its_project_and_outlives_it() {
         let s = store();
-        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0 }], ..Default::default() }).unwrap();
-        let n = s.save_note(SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: Some(1), folder: None }).unwrap();
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None }], ..Default::default() }).unwrap();
+        let n = s.save_note(SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: Some(1), folder: None, space_id: None }).unwrap();
         assert_eq!(s.notes().unwrap()[0].project_id, Some(1));
         s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
-        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None) }]);
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None), space_id: None }]);
     }
 
     #[test]

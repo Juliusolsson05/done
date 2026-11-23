@@ -14,12 +14,18 @@
 //!   `pushed`) and gets back what the server wrote since it last asked (the
 //!   server's `seq` above `pulled`). Where both sides changed the same row,
 //!   the later edit wins, row by row.
+//! - Rows live in spaces: a person's own, or a workspace shared with others.
+//!   The server keeps one counter per space, and a device keeps how far it
+//!   has read each space it is in (`space_cursor`); a space the server no
+//!   longer lists is dropped from the device. Which space a row is in is the
+//!   server's decision, never the device's (see crates/server/src/pg.rs).
 //! - Ids come from the clock plus a random part (`fresh_id`), so two devices
 //!   adding a task offline do not pick the same id. Rows from before that
 //!   (small ids, counted up from 1 on each device) are renumbered once, in
 //!   their old order, before they are first sent.
 
 use crate::{check, check_entry, Entry, Error, NewEntry, Note, Project, Store, Task};
+use serde_json::Value;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
@@ -34,9 +40,9 @@ const NOW: &str = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 /// one of these columns is a change worth sending; `seq` and `changed` are
 /// bookkeeping and writing them must not count as one.
 const TABLES: [(&str, &str); 4] = [
-    ("project", "name, color"),
-    ("task", "title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id"),
-    ("note", "text, updated_at, project_id, folder"),
+    ("project", "name, color, space_id"),
+    ("task", "title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by"),
+    ("note", "text, updated_at, project_id, folder, space_id"),
     ("entry", "task_id, title, day, started_at, ended_at, planned_ms, focused_ms"),
 ];
 
@@ -144,6 +150,20 @@ pub(crate) fn prepare(conn: &Connection) -> Result<(), Error> {
              END;"
         ))?;
     }
+    // Who is on a task: a row per person, never deleted, only switched off,
+    // so taking someone off travels like any other edit.
+    let assignee = format!(
+        "UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
+         UPDATE task_assignee SET
+           seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
+           changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
+         WHERE task_id = NEW.task_id AND account_id = NEW.account_id;"
+    );
+    conn.execute_batch(&format!(
+        "CREATE INDEX IF NOT EXISTS task_assignee_seq ON task_assignee (seq);
+         CREATE TRIGGER IF NOT EXISTS task_assignee_written AFTER INSERT ON task_assignee BEGIN {assignee} END;
+         CREATE TRIGGER IF NOT EXISTS task_assignee_edited AFTER UPDATE OF is_on ON task_assignee BEGIN {assignee} END;"
+    ))?;
     Ok(())
 }
 
@@ -161,6 +181,30 @@ pub struct Gone {
     pub kind: String,
     pub id: i64,
     pub changed: i64,
+    /// From the server: the space it left. A row moved to another space
+    /// leaves this behind in the old one, and a device that has the row in
+    /// its new space keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<i64>,
+}
+
+/// Someone on a task, or taken off it (`on` false).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Assignee {
+    pub task_id: i64,
+    pub account_id: String,
+    pub on: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<i64>,
+}
+
+/// How far one space has been read: by a device (what it sends) or by the
+/// server (what it answers).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Cursor {
+    pub space: i64,
+    pub at: i64,
 }
 
 /// Rows written in one file after some point in its counter.
@@ -176,12 +220,19 @@ pub struct Rows {
     #[serde(default)]
     pub entries: Vec<Stamped<Entry>>,
     #[serde(default)]
+    pub assignees: Vec<Stamped<Assignee>>,
+    #[serde(default)]
     pub gone: Vec<Gone>,
 }
 
 impl Rows {
     pub fn is_empty(&self) -> bool {
-        self.projects.is_empty() && self.tasks.is_empty() && self.notes.is_empty() && self.entries.is_empty() && self.gone.is_empty()
+        self.projects.is_empty()
+            && self.tasks.is_empty()
+            && self.notes.is_empty()
+            && self.entries.is_empty()
+            && self.assignees.is_empty()
+            && self.gone.is_empty()
     }
 }
 
@@ -198,14 +249,27 @@ pub struct Outbox {
     /// window reloads when it is above zero, or it would go on with old ids.
     #[serde(default)]
     pub renumbered: usize,
+    /// How far this device has read each space. Absent from an app made
+    /// before workspaces; the server then reads `pulled` as the person's own space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursors: Option<Vec<Cursor>>,
 }
 
 /// What the server answers: what it wrote since `pulled`, and its counter now.
 #[derive(Serialize, Deserialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Reply {
+    /// The person's own space's counter: what an app from before workspaces reads.
     pub upto: i64,
     pub rows: Rows,
+    /// Every space the person is in now, with its counter. A device drops
+    /// any space not listed: it was left, or the person was removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spaces: Option<Vec<Cursor>>,
+    /// The spaces' names, their members and the person's notifications,
+    /// kept whole by the device and shown by the window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<Value>,
 }
 
 fn meta(conn: &Connection, key: &str) -> Result<i64, Error> {
@@ -219,12 +283,12 @@ fn set_meta(conn: &Connection, key: &str, value: i64) -> Result<(), Error> {
 
 fn rows_since(conn: &Connection, after: i64) -> Result<Rows, Error> {
     let mut rows = Rows::default();
-    let mut stmt = conn.prepare("SELECT id, name, color, changed FROM project WHERE seq > ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, name, color, space_id, changed FROM project WHERE seq > ?1 ORDER BY id")?;
     rows.projects = stmt
-        .query_map([after], |r| Ok(Stamped { row: Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)? }, changed: r.get(3)? }))?
+        .query_map([after], |r| Ok(Stamped { row: Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, space_id: r.get(3)? }, changed: r.get(4)? }))?
         .collect::<Result<_, _>>()?;
     let mut stmt = conn.prepare(
-        "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, changed
+        "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, changed, space_id, goal_by
          FROM task WHERE seq > ?1 ORDER BY id",
     )?;
     rows.tasks = stmt
@@ -244,16 +308,19 @@ fn rows_since(conn: &Connection, after: i64) -> Result<Rows, Error> {
                     done_day,
                     goal_day: r.get(9)?,
                     parent_id: r.get(10)?,
+                    space_id: r.get(12)?,
+                    goal_by: r.get(13)?,
+                    assignees: Vec::new(),
                 },
                 changed: r.get(11)?,
             })
         })?
         .collect::<Result<_, _>>()?;
-    let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder, changed FROM note WHERE seq > ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder, changed, space_id FROM note WHERE seq > ?1 ORDER BY id")?;
     rows.notes = stmt
         .query_map([after], |r| {
             Ok(Stamped {
-                row: Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?) },
+                row: Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?), space_id: r.get(6)? },
                 changed: r.get(5)?,
             })
         })?
@@ -278,8 +345,15 @@ fn rows_since(conn: &Connection, after: i64) -> Result<Rows, Error> {
             })
         })?
         .collect::<Result<_, _>>()?;
+    let mut stmt = conn.prepare("SELECT task_id, account_id, is_on, space_id, changed FROM task_assignee WHERE seq > ?1 ORDER BY task_id, account_id")?;
+    rows.assignees = stmt
+        .query_map([after], |r| {
+            Ok(Stamped { row: Assignee { task_id: r.get(0)?, account_id: r.get(1)?, on: r.get(2)?, space_id: r.get(3)? }, changed: r.get(4)? })
+        })?
+        .collect::<Result<_, _>>()?;
     let mut stmt = conn.prepare("SELECT kind, id, changed FROM tombstone WHERE seq > ?1 ORDER BY kind, id")?;
-    rows.gone = stmt.query_map([after], |r| Ok(Gone { kind: r.get(0)?, id: r.get(1)?, changed: r.get(2)? }))?.collect::<Result<_, _>>()?;
+    rows.gone =
+        stmt.query_map([after], |r| Ok(Gone { kind: r.get(0)?, id: r.get(1)?, changed: r.get(2)?, space: None }))?.collect::<Result<_, _>>()?;
     Ok(rows)
 }
 
@@ -309,9 +383,10 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
             continue;
         }
         tx.execute(
-            "INSERT INTO project (id, name, color, changed, seq) VALUES (?1, ?2, ?3, ?4, 0)
-             ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, changed = excluded.changed, seq = excluded.seq",
-            params![p.id, p.name.trim(), p.color, changed],
+            "INSERT INTO project (id, name, color, space_id, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, space_id = excluded.space_id,
+               changed = excluded.changed, seq = excluded.seq",
+            params![p.id, p.name.trim(), p.color, p.space_id, changed],
         )?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'project' AND id = ?1", [p.id])?;
         applied += 1;
@@ -321,17 +396,33 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
             continue;
         }
         if let Some(day) = &t.goal_day {
-            tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2", params![day, t.id])?;
+            tx.execute("UPDATE task SET goal_day = NULL WHERE goal_day = ?1 AND id != ?2 AND goal_by IS ?3", params![day, t.id, t.goal_by])?;
         }
         let done_day = if t.done { t.done_day.as_deref() } else { None };
         tx.execute(
-            "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, changed, seq)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)
+            "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, changed, seq, space_id, goal_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET title = excluded.title, notes = excluded.notes,
                project_id = excluded.project_id, start = excluded.start, due = excluded.due,
                priority = excluded.priority, status = excluded.status, done_day = excluded.done_day,
-               goal_day = excluded.goal_day, parent_id = excluded.parent_id, changed = excluded.changed, seq = excluded.seq",
-            params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day, t.parent_id, changed],
+               goal_day = excluded.goal_day, parent_id = excluded.parent_id, changed = excluded.changed, seq = excluded.seq,
+               space_id = excluded.space_id, goal_by = excluded.goal_by",
+            params![
+                t.id,
+                t.title.trim(),
+                t.notes,
+                t.project_id,
+                t.start,
+                t.due,
+                t.priority,
+                t.status,
+                done_day,
+                t.goal_day,
+                t.parent_id,
+                changed,
+                t.space_id,
+                t.goal_by
+            ],
         )?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'task' AND id = ?1", [t.id])?;
         applied += 1;
@@ -341,13 +432,23 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
             continue;
         }
         tx.execute(
-            "INSERT INTO note (id, text, updated_at, project_id, folder, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
+            "INSERT INTO note (id, text, updated_at, project_id, folder, changed, seq, space_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?8)
              ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at,
                project_id = excluded.project_id, changed = excluded.changed, seq = excluded.seq,
-               folder = CASE WHEN ?7 THEN excluded.folder ELSE note.folder END",
+               folder = CASE WHEN ?7 THEN excluded.folder ELSE note.folder END,
+               space_id = coalesce(excluded.space_id, note.space_id)",
             // A device from before folders does not say a note's folder; the
             // folder it has here is kept (see Note::folder).
-            params![n.id, n.text, n.updated_at, n.project_id, crate::clean_folder(n.folder.clone().flatten().as_deref()), changed, n.folder.is_some()],
+            params![
+                n.id,
+                n.text,
+                n.updated_at,
+                n.project_id,
+                crate::clean_folder(n.folder.clone().flatten().as_deref()),
+                changed,
+                n.folder.is_some(),
+                n.space_id
+            ],
         )?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'note' AND id = ?1", [n.id])?;
         applied += 1;
@@ -376,9 +477,36 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
         tx.execute("DELETE FROM tombstone WHERE kind = 'entry' AND id = ?1", [e.id])?;
         applied += 1;
     }
+    for Stamped { row: a, changed } in &rows.assignees {
+        let here: Option<i64> = tx
+            .query_row("SELECT changed FROM task_assignee WHERE task_id = ?1 AND account_id = ?2", params![a.task_id, a.account_id], |r| r.get(0))
+            .optional()?;
+        if a.account_id.trim().is_empty() || here.is_some_and(|h| *changed <= h) {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO task_assignee (task_id, account_id, is_on, space_id, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+             ON CONFLICT(task_id, account_id) DO UPDATE SET is_on = excluded.is_on, space_id = excluded.space_id,
+               changed = excluded.changed, seq = excluded.seq",
+            params![a.task_id, a.account_id, a.on, a.space_id, changed],
+        )?;
+        applied += 1;
+    }
     for gone in &rows.gone {
         if !TABLES.iter().any(|(t, _)| *t == gone.kind) {
             continue;
+        }
+        // Left behind in a space the row moved out of. The row is gone from
+        // that space, not from the world: where this device has it in
+        // another space (it arrived there in this same reply), it stays.
+        if let Some(space) = gone.space {
+            if gone.kind != "entry" {
+                let at: Option<Option<i64>> =
+                    tx.query_row(&format!("SELECT space_id FROM {} WHERE id = ?1", gone.kind), [gone.id], |r| r.get(0)).optional()?;
+                if matches!(at, Some(Some(s)) if s != space) {
+                    continue;
+                }
+            }
         }
         let here: Option<i64> =
             tx.query_row(&format!("SELECT changed FROM {} WHERE id = ?1", gone.kind), [gone.id], |r| r.get(0)).optional()?;
@@ -427,7 +555,7 @@ fn rekey(tx: &Transaction) -> Result<usize, Error> {
     // (table, [(other table, column that points at this table)])
     let links: [(&str, &[(&str, &str)]); 4] = [
         ("project", &[("task", "project_id"), ("note", "project_id")]),
-        ("task", &[("task", "parent_id"), ("entry", "task_id")]),
+        ("task", &[("task", "parent_id"), ("entry", "task_id"), ("task_assignee", "task_id")]),
         ("note", &[]),
         ("entry", &[]),
     ];
@@ -455,6 +583,65 @@ fn rekey(tx: &Transaction) -> Result<usize, Error> {
     Ok(moved)
 }
 
+/// The spaces the server says this person is in now, with how far each has
+/// been read. Anything in a space no longer listed is dropped from the
+/// device, without a tombstone: it was not deleted, this person just no
+/// longer sees it. Returns how many rows went.
+fn take_spaces(tx: &Transaction, spaces: &[Cursor]) -> Result<usize, Error> {
+    let listed: Vec<i64> = spaces.iter().map(|c| c.space).collect();
+    let inside = listed.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+    tx.execute("UPDATE meta SET value = 1 WHERE key IN ('quiet', 'applying')", [])?;
+    let mut dropped = 0;
+    for table in ["task_assignee", "task", "note", "project"] {
+        dropped += tx.execute(&format!("DELETE FROM {table} WHERE space_id IS NOT NULL AND space_id NOT IN ({inside})"), [])?;
+    }
+    tx.execute_batch(
+        "UPDATE task SET project_id = NULL WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM project);
+         UPDATE note SET project_id = NULL WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM project);
+         DELETE FROM space_cursor;",
+    )?;
+    tx.execute("UPDATE meta SET value = 0 WHERE key IN ('quiet', 'applying')", [])?;
+    for c in spaces {
+        tx.execute("INSERT INTO space_cursor (space_id, pulled) VALUES (?1, ?2)", params![c.space, c.at])?;
+    }
+    Ok(dropped)
+}
+
+/// The `seq` of each row in an `Exported`, in the same order.
+#[derive(Default, Debug)]
+pub struct Seqs {
+    pub projects: Vec<i64>,
+    pub tasks: Vec<i64>,
+    pub notes: Vec<i64>,
+    pub entries: Vec<i64>,
+    pub gone: Vec<i64>,
+}
+
+/// A whole file, with each row's place in its counter: what moving a hosted
+/// account's file into the database needs to keep an app's sync position true.
+#[derive(Default, Debug)]
+pub struct Exported {
+    pub seq: i64,
+    pub rows: Rows,
+    pub seqs: Seqs,
+}
+
+impl Store {
+    pub fn export(&self) -> Result<Exported, Error> {
+        let conn = self.conn.lock().unwrap();
+        let rows = rows_since(&conn, i64::MIN)?;
+        let seqs_of = |sql: &str| -> Result<Vec<i64>, Error> { Ok(conn.prepare(sql)?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?) };
+        let seqs = Seqs {
+            projects: seqs_of("SELECT seq FROM project ORDER BY id")?,
+            tasks: seqs_of("SELECT seq FROM task ORDER BY id")?,
+            notes: seqs_of("SELECT seq FROM note ORDER BY id")?,
+            entries: seqs_of("SELECT seq FROM entry ORDER BY id")?,
+            gone: seqs_of("SELECT seq FROM tombstone ORDER BY kind, id")?,
+        };
+        Ok(Exported { seq: meta(&conn, "seq")?, rows, seqs })
+    }
+}
+
 impl Store {
     /// On a device: what to send. Rows with small ids are first given fresh
     /// ones (see `rekey`); when that happens the revision moves, so open
@@ -467,7 +654,11 @@ impl Store {
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
         }
         let pushed = meta(&tx, "pushed")?;
-        let out = Outbox { pulled: meta(&tx, "pulled")?, upto: meta(&tx, "seq")?, rows: rows_since(&tx, pushed)?, renumbered };
+        let cursors = tx
+            .prepare("SELECT space_id, pulled FROM space_cursor ORDER BY space_id")?
+            .query_map([], |r| Ok(Cursor { space: r.get(0)?, at: r.get(1)? }))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let out = Outbox { pulled: meta(&tx, "pulled")?, upto: meta(&tx, "seq")?, rows: rows_since(&tx, pushed)?, renumbered, cursors: Some(cursors) };
         tx.commit()?;
         Ok(out)
     }
@@ -485,6 +676,18 @@ impl Store {
             set_meta(&tx, "pushed", upto)?;
         }
         set_meta(&tx, "pulled", reply.upto)?;
+        let mut applied = applied;
+        if let Some(spaces) = &reply.spaces {
+            applied += take_spaces(&tx, spaces)?;
+        }
+        if let Some(team) = &reply.team {
+            let text = team.to_string();
+            let before: Option<String> = tx.query_row("SELECT value FROM kv WHERE key = 'team'", [], |r| r.get(0)).optional()?;
+            if before.as_deref() != Some(text.as_str()) {
+                tx.execute("INSERT INTO kv (key, value) VALUES ('team', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
+                applied += 1;
+            }
+        }
         if applied > 0 {
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
         }
@@ -502,7 +705,7 @@ impl Store {
             // Windows of the web app open on this account load the new rows.
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
         }
-        let reply = Reply { upto: meta(&tx, "seq")?, rows: rows_since(&tx, outbox.pulled)? };
+        let reply = Reply { upto: meta(&tx, "seq")?, rows: rows_since(&tx, outbox.pulled)?, spaces: None, team: None };
         tx.commit()?;
         Ok(reply)
     }
@@ -532,6 +735,9 @@ mod tests {
             done_day: None,
             goal_day: None,
             parent_id: None,
+            space_id: None,
+            goal_by: None,
+            assignees: Vec::new(),
         }
     }
 
@@ -621,7 +827,7 @@ mod tests {
     #[test]
     fn notes_and_the_time_sheet_travel_too() {
         let (mac, phone, cloud) = (store(), store(), store());
-        let note = mac.save_note(SaveNote { id: None, text: "Funds\n- A\n- B".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
+        let note = mac.save_note(SaveNote { id: None, text: "Funds\n- A\n- B".into(), updated_at: 1, project_id: None, folder: None, space_id: None }).unwrap();
         assert!(note.id >= SMALL);
         mac.record(NewEntry {
             task_id: None,
@@ -646,13 +852,13 @@ mod tests {
     #[test]
     fn a_note_s_folder_reaches_the_other_device_and_so_does_taking_it_out() {
         let (mac, phone, cloud) = (store(), store(), store());
-        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())) };
+        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())), space_id: None };
         let note = mac.save_note(filed).unwrap();
         round(&mac, &cloud);
         round(&phone, &cloud);
         assert_eq!(phone.notes().unwrap()[0].folder, Some(Some("Fundraising".into())));
         // Taken out of the folder on the phone, and nothing else changed.
-        phone.save_note(SaveNote { id: Some(note.id), text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(None) }).unwrap();
+        phone.save_note(SaveNote { id: Some(note.id), text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(None), space_id: None }).unwrap();
         round(&phone, &cloud);
         round(&mac, &cloud);
         assert_eq!(mac.notes().unwrap()[0].folder, Some(None));
@@ -663,7 +869,7 @@ mod tests {
     #[test]
     fn an_edit_from_a_device_that_predates_folders_keeps_the_folder() {
         let (mac, cloud) = (store(), store());
-        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())) };
+        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())), space_id: None };
         let note = mac.save_note(filed).unwrap();
         round(&mac, &cloud);
         // The old phone's edit, exactly as it is sent: no folder field at all.
@@ -685,7 +891,7 @@ mod tests {
     #[test]
     fn a_folder_change_is_sent_from_a_file_whose_trigger_predates_folders() {
         let mac = store();
-        let note = mac.save_note(SaveNote { id: None, text: "Ideas".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
+        let note = mac.save_note(SaveNote { id: None, text: "Ideas".into(), updated_at: 1, project_id: None, folder: None, space_id: None }).unwrap();
         let conn = mac.conn.lock().unwrap();
         conn.execute_batch(
             "DROP TRIGGER note_edited;
@@ -708,7 +914,7 @@ mod tests {
     #[test]
     fn a_task_in_a_project_deleted_elsewhere_falls_back_to_the_inbox() {
         let (mac, phone, cloud) = (store(), store(), store());
-        mac.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0 }], ..Default::default() }).unwrap();
+        mac.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None }], ..Default::default() }).unwrap();
         round(&mac, &cloud);
         round(&phone, &cloud);
         let project = phone.state("2026-11-21").unwrap().projects[0].id;

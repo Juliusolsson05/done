@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { PriorityDot } from '@/components/marks'
+import { AssigneePage, AssigneePicker, AssigneeRow } from '@/components/assignees'
 import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
@@ -96,6 +97,8 @@ function EditorForm({ task }: { task: Task }) {
             </SelectContent>
           </Select>
         )}
+        {/* Who is on it: only on a workspace's task. Saved as it is chosen. */}
+        <AssigneePicker task={task} />
         <div className="ml-auto flex gap-2">
           <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => removeTask(task.id)}>
             Delete task
@@ -154,6 +157,8 @@ function Sheet({ task }: { task: Task }) {
   const [priority, setPriority] = useState(task.priority)
   const [projectId, setProjectId] = useState(task.projectId)
   const [leaving, setLeaving] = useState(false)
+  // Choosing who is on it: a page of its own within the sheet.
+  const [choosing, setChoosing] = useState(false)
   // Pulled down by the grabber: how far, while the finger is on it.
   const [pull, setPull] = useState(0)
   const pullFrom = useRef<number | null>(null)
@@ -208,7 +213,12 @@ function Sheet({ task }: { task: Task }) {
             </button>
           </div>
         </div>
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+        {choosing && (
+          <div className="flex flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+            <AssigneePage task={task} onBack={() => setChoosing(false)} />
+          </div>
+        )}
+        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)]', choosing && 'hidden')}>
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <textarea
               value={title}
@@ -262,6 +272,7 @@ function Sheet({ task }: { task: Task }) {
                 </select>
               </label>
             )}
+            <AssigneeRow task={task} className={row} onOpen={() => setChoosing(true)} />
           </div>
           <button
             type="button"

@@ -16,9 +16,11 @@ export interface ViewFilter {
   when: When
   // Every word must appear in the title or the notes, case ignored.
   words: string
+  // Chosen people: 'me', 'nobody', or an account id. Empty: anyone's.
+  people: string[]
 }
 
-export const NO_FILTER: ViewFilter = { projects: [], priorities: [], when: 'any', words: '' }
+export const NO_FILTER: ViewFilter = { projects: [], priorities: [], when: 'any', words: '', people: [] }
 
 export const WHEN_NAMES: Record<When, string> = {
   any: 'Any time',
@@ -32,7 +34,7 @@ export const WHEN_NAMES: Record<When, string> = {
 export const PRIORITY_SHORT: Record<number, string> = { 1: 'P1', 2: 'P2', 3: 'P3', 4: 'No priority' }
 
 export const isFiltering = (filter: ViewFilter): boolean =>
-  filter.projects.length > 0 || filter.priorities.length > 0 || filter.when !== 'any' || filter.words.trim() !== ''
+  filter.projects.length > 0 || filter.priorities.length > 0 || filter.when !== 'any' || filter.words.trim() !== '' || filter.people.length > 0
 
 const words = (text: string): string[] => text.toLowerCase().split(/\s+/).filter(Boolean)
 
@@ -57,8 +59,16 @@ function inWindow(task: Task, when: When, today: Day): boolean {
   }
 }
 
-export function matchesFilter(task: Task, filter: ViewFilter, today: Day): boolean {
+// A task is anyone's chosen when someone chosen is on it: Me is you, Nobody
+// is a task with nobody on it. `me` is your account id, if you have one.
+function forPeople(task: Task, people: string[], me: string | null | undefined): boolean {
+  const on = task.assignees ?? []
+  return people.some((p) => (p === 'nobody' ? on.length === 0 : p === 'me' ? !!me && on.includes(me) : on.includes(p)))
+}
+
+export function matchesFilter(task: Task, filter: ViewFilter, today: Day, me?: string | null): boolean {
   if (filter.projects.length > 0 && !filter.projects.includes(task.projectId)) return false
+  if (filter.people.length > 0 && !forPeople(task, filter.people, me)) return false
   if (filter.priorities.length > 0 && !filter.priorities.includes(task.priority)) return false
   if (!inWindow(task, filter.when, today)) return false
   const wanted = words(filter.words)
@@ -77,7 +87,8 @@ export interface Chip {
   without: ViewFilter
 }
 
-export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | 'name'>[]): Chip[] {
+// `people` names the account ids a filter may hold, for their chips.
+export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | 'name'>[], people: { id: string; name: string }[] = []): Chip[] {
   const chips: Chip[] = []
   if (filter.words.trim()) chips.push({ key: 'words', label: `“${filter.words.trim()}”`, without: { ...filter, words: '' } })
   for (const id of filter.projects) {
@@ -92,6 +103,10 @@ export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | '
     })
   }
   if (filter.when !== 'any') chips.push({ key: 'when', label: WHEN_NAMES[filter.when], without: { ...filter, when: 'any' } })
+  for (const person of filter.people) {
+    const label = person === 'me' ? 'Me' : person === 'nobody' ? 'Nobody' : (people.find((p) => p.id === person)?.name ?? 'Someone')
+    chips.push({ key: `a${person}`, label, without: { ...filter, people: filter.people.filter((p) => p !== person) } })
+  }
   return chips
 }
 
@@ -110,6 +125,7 @@ export function cleanFilter(stored: unknown, projects: Pick<Project, 'id'>[]): V
     // Its own keys only: "toString" is "in" any object, and would hide everything.
     when: typeof value.when === 'string' && Object.hasOwn(WHEN_NAMES, value.when) ? (value.when as When) : 'any',
     words: typeof value.words === 'string' ? value.words : '',
+    people: [...new Set(list(value.people).filter((p): p is string => typeof p === 'string' && p !== ''))],
   }
 }
 

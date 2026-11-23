@@ -2,6 +2,8 @@
 // have no accounts ('local'). The hosted server has ('cloud'), and there the
 // account is null until someone has signed in.
 export interface Account {
+  // The account's id, where the server says it (it does since workspaces).
+  id?: string
   email: string
   name: string
   picture: string

@@ -2,11 +2,14 @@
 // the interface makes to them. All of it is plain data in, plain data out;
 // nothing here is saved or drawn.
 import { addDays, describeDay, fullDay, type Day } from '@/lib/days'
+import type { Team } from '@/lib/team'
 
 export interface Project {
   id: number
   name: string
   color?: number | null
+  // The space it lives in (see lib/team.ts); absent until the server has seen it.
+  spaceId?: number | null
 }
 
 export interface Task {
@@ -23,6 +26,12 @@ export interface Task {
   goalDay?: Day | null
   // Set on a subtask: the task it is listed under. One level only.
   parentId?: number | null
+  // The space it lives in, as the server last said. Follows its project.
+  spaceId?: number | null
+  // Whose goal goalDay makes it: a goal is one person's, even on a shared task.
+  goalBy?: string | null
+  // Who it is assigned to, by account id. Only ever on a workspace's task.
+  assignees?: string[]
 }
 
 export interface Data {
@@ -30,10 +39,16 @@ export interface Data {
   nextId: number
   projects: Project[]
   tasks: Task[]
+  // Spaces, members and notifications, for a signed-in window.
+  team?: Team | null
 }
 
 export type View =
   | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'completed' | 'settings' }
+  // In a workspace (or All): the tasks someone put you on.
+  | { kind: 'mine' }
+  // A phone's list of notifications; a window shows them under the bell.
+  | { kind: 'notifications' }
   // A phone's home for everything that is not one of its three tabs, in
   // place of the sidebar.
   | { kind: 'lists' }
@@ -77,8 +92,10 @@ export function nextColor(projects: Project[]): number {
 
 // ---------- Views ----------
 
-// Today's goal: one task, named for today.
-export const goalTask = (tasks: Task[], today: Day): Task | undefined => tasks.find((t) => t.goalDay === today)
+// Today's goal: one task, named for today, by you. A goal with no name on it
+// was set before accounts, by whoever this is.
+const yours = (t: Task, me: string | null | undefined) => t.goalBy == null || !me || t.goalBy === me
+export const goalTask = (tasks: Task[], today: Day, me?: string | null): Task | undefined => tasks.find((t) => t.goalDay === today && yours(t, me))
 
 export interface Section {
   heading?: string
@@ -89,9 +106,23 @@ export interface Section {
   tasks: Task[]
 }
 
-export function sections(view: View, all: Task[], today: Day): Section[] {
-  const tasks = openTasks(all)
-  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'completed' || view.kind === 'notes' || view.kind === 'settings' || view.kind === 'lists') return []
+// `keep` narrows the day views (Today, Upcoming): in All, someone else's
+// workspace tasks are left out of them (see lib/team.ts forMe).
+export function sections(view: View, all: Task[], today: Day, keep: (t: Task) => boolean = () => true): Section[] {
+  const tasks = view.kind === 'today' || view.kind === 'upcoming' ? openTasks(all).filter(keep) : openTasks(all)
+  if (view.kind === 'timeline' || view.kind === 'board' || view.kind === 'focus' || view.kind === 'timesheet' || view.kind === 'completed' || view.kind === 'notes' || view.kind === 'settings' || view.kind === 'lists' || view.kind === 'notifications') return []
+  if (view.kind === 'mine') {
+    // Yours, by date: overdue and dated first, then the rest.
+    const dated = tasks.filter((t) => t.due !== null).sort((a, b) => (a.due ?? '').localeCompare(b.due ?? '') || byPriority(a, b))
+    const late = dated.filter((t) => (t.due ?? '') < today)
+    const soon = dated.filter((t) => (t.due ?? '') >= today)
+    const rest = tasks.filter((t) => t.due === null).sort(byPriority)
+    return [
+      { heading: 'Overdue', late: true, tasks: late },
+      { heading: 'Scheduled', tasks: soon },
+      { heading: 'No date', tasks: rest },
+    ].filter((s) => s.tasks.length > 0)
+  }
   if (view.kind === 'inbox') return [{ tasks: tasks.filter((t) => t.projectId === null).sort(byPriority) }]
   if (view.kind === 'project') return [{ tasks: tasks.filter((t) => t.projectId === view.id).sort(byPriority) }]
   if (view.kind === 'today') {
@@ -124,13 +155,14 @@ export interface Counts {
   late: boolean
   project: (id: number) => number
 }
-export function counts(all: Task[], today: Day): Counts {
+export function counts(all: Task[], today: Day, keep: (t: Task) => boolean = () => true): Counts {
   const tasks = openTasks(all)
+  const day = tasks.filter(keep)
   return {
     inbox: tasks.filter((t) => t.projectId === null).length,
-    today: tasks.filter((t) => t.due !== null && t.due <= today).length,
-    upcoming: tasks.filter((t) => t.due !== null && t.due > today).length,
-    late: tasks.some((t) => t.due !== null && t.due < today),
+    today: day.filter((t) => t.due !== null && t.due <= today).length,
+    upcoming: day.filter((t) => t.due !== null && t.due > today).length,
+    late: day.some((t) => t.due !== null && t.due < today),
     project: (id) => tasks.filter((t) => t.projectId === id).length,
   }
 }
@@ -225,8 +257,9 @@ const patch = (data: Data, id: number, change: (t: Task) => Task): Data => ({
 export const patchTask = (data: Data, id: number, fields: Partial<Task>): Data => patch(data, id, (t) => ({ ...t, ...fields }))
 
 // New ids are taken from nextId here, on the client.
-export function addTask(data: Data, fields: Pick<Task, 'title' | 'due' | 'priority' | 'projectId'>): Data {
+export function addTask(data: Data, fields: Pick<Task, 'title' | 'due' | 'priority' | 'projectId'> & Pick<Partial<Task>, 'assignees'>): Data {
   const task: Task = { id: data.nextId, title: fields.title, notes: '', start: null, due: fields.due, priority: fields.priority, projectId: fields.projectId }
+  if (fields.assignees?.length) task.assignees = fields.assignees
   return { ...data, nextId: data.nextId + 1, tasks: [...data.tasks, task] }
 }
 
@@ -241,14 +274,15 @@ export function addSubtask(data: Data, parentId: number, title: string): Data {
   return { ...data, nextId: data.nextId + 1, tasks: [...data.tasks, task] }
 }
 
-// Naming another task as today's goal moves the title.
-export function setGoal(data: Data, id: number, today: Day): Data {
+// Naming another task as today's goal moves the title, from your own last
+// goal only: someone else's goal on a shared task stays theirs.
+export function setGoal(data: Data, id: number, today: Day, me?: string | null): Data {
   return {
     ...data,
     tasks: data.tasks.map((t) => {
       // A goal for today with no date would be missing from the timeline.
-      if (t.id === id) return { ...t, goalDay: today, due: t.due ?? today }
-      return t.goalDay === today ? { ...t, goalDay: null } : t
+      if (t.id === id) return { ...t, goalDay: today, goalBy: me ?? null, due: t.due ?? today }
+      return t.goalDay === today && yours(t, me) ? { ...t, goalDay: null, goalBy: null } : t
     }),
   }
 }
@@ -315,8 +349,9 @@ export function deleteTask(data: Data, id: number): { data: Data; undo: (d: Data
   }
 }
 
-export function addProject(data: Data, name: string): Data {
-  const project: Project = { id: data.nextId, name, color: nextColor(data.projects) }
+// `spaceId`: the workspace it is made in, or none for your own.
+export function addProject(data: Data, name: string, spaceId: number | null = null): Data {
+  const project: Project = { id: data.nextId, name, color: nextColor(data.projects), ...(spaceId === null ? {} : { spaceId }) }
   return { ...data, nextId: data.nextId + 1, projects: [...data.projects, project] }
 }
 export const patchProject = (data: Data, id: number, fields: Partial<Project>): Data => ({
@@ -343,4 +378,19 @@ export function deleteProject(data: Data, id: number): { data: Data; said: strin
       tasks: d.tasks.map((t) => (moved.has(t.id) ? { ...t, projectId: id } : t)),
     }),
   }
+}
+
+// Putting people on a task or taking them off. Only a workspace's task has
+// any; the server refuses anyone else, so the window does not offer it.
+export function setAssignees(data: Data, id: number, people: string[]): Data {
+  return patch(data, id, (t) => {
+    const next = { ...t }
+    if (people.length) next.assignees = [...new Set(people)]
+    else delete next.assignees
+    return next
+  })
+}
+export function toggleAssignee(data: Data, id: number, person: string): Data {
+  const on = data.tasks.find((t) => t.id === id)?.assignees ?? []
+  return setAssignees(data, id, on.includes(person) ? on.filter((p) => p !== person) : [...on, person])
 }
