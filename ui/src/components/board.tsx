@@ -11,7 +11,9 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
 import { play } from '@/lib/sounds'
-import { laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
+import { isSubtask, laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
+import { matchesFilter, isFiltering } from '@/lib/view-filter'
+import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
 import { cn } from '@/lib/utils'
 
 const LANES: { key: LaneKey; name: string; hint: string; dot: string }[] = [
@@ -77,7 +79,16 @@ export function Board() {
   const isMobile = useIsMobile()
   const [card, setCard] = useState<number | null>(null)
   const [over, setOver] = useState<LaneKey | null>(null)
-  const columns = lanes(data.tasks, TODAY)
+  // The filter only changes what is drawn. Subtasks go through untouched:
+  // the board shows top-level tasks, and a subtask is judged with its task.
+  const filter = useViewFilter()
+  const columns = lanes(
+    data.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    TODAY,
+  )
+  const count = (c: Record<LaneKey, Task[]>) => c.todo.length + c.doing.length + c.done.length
+  const shown = count(columns)
+  const total = count(lanes(data.tasks, TODAY))
 
   const onDrag = (id: number | null) => {
     setCard(id)
@@ -98,7 +109,13 @@ export function Board() {
 
   return (
     <div>
-      <ViewHeader title="Board" sub={isMobile ? 'Press and hold a card to move it' : 'Drag a card between columns'} />
+      <ViewHeader title="Board" sub={isMobile ? 'Press and hold a card to move it' : 'Drag a card between columns'}>
+        <FilterButton />
+      </ViewHeader>
+      <FilterBar shown={shown} total={total} />
+      {isFiltering(filter) && shown === 0 ? (
+        <NothingMatches />
+      ) : (
       <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-3">
         {LANES.map((lane) => (
           <div
@@ -126,6 +143,7 @@ export function Board() {
           </div>
         ))}
       </div>
+      )}
       <div className="-mx-2 mt-7">
         <AddRow />
       </div>

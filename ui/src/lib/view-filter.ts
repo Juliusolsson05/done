@@ -1,0 +1,113 @@
+// The filter on the Board and the Timeline: which tasks they show. Plain data
+// in, plain data out. Filtering only changes what is drawn; no task is
+// written because of it.
+import { addDays, type Day } from '@/lib/days'
+import type { Project, Task } from '@/lib/tasks'
+
+// A time window by due date. Late is its own choice: "this week" does not
+// include what is already late, so the two never blur.
+export type When = 'any' | 'late' | 'today' | 'week' | 'fortnight' | 'none'
+
+export interface ViewFilter {
+  // Chosen projects; null is the Inbox. Empty: every project.
+  projects: (number | null)[]
+  // Chosen priorities, 1 to 4 (4 is none). Empty: every priority.
+  priorities: number[]
+  when: When
+  // Every word must appear in the title or the notes, case ignored.
+  words: string
+}
+
+export const NO_FILTER: ViewFilter = { projects: [], priorities: [], when: 'any', words: '' }
+
+export const WHEN_NAMES: Record<When, string> = {
+  any: 'Any time',
+  late: 'Late',
+  today: 'Due today',
+  week: 'This week',
+  fortnight: 'Next two weeks',
+  none: 'No date',
+}
+
+export const PRIORITY_SHORT: Record<number, string> = { 1: 'P1', 2: 'P2', 3: 'P3', 4: 'No priority' }
+
+export const isFiltering = (filter: ViewFilter): boolean =>
+  filter.projects.length > 0 || filter.priorities.length > 0 || filter.when !== 'any' || filter.words.trim() !== ''
+
+const words = (text: string): string[] => text.toLowerCase().split(/\s+/).filter(Boolean)
+
+function inWindow(task: Task, when: When, today: Day): boolean {
+  const due = task.due
+  switch (when) {
+    case 'any':
+      return true
+    case 'none':
+      return due === null
+    case 'late':
+      return due !== null && due < today && !task.done
+    case 'today':
+      return due === today
+    case 'week':
+      return due !== null && due >= today && due <= addDays(today, 6)
+    case 'fortnight':
+      return due !== null && due >= today && due <= addDays(today, 13)
+  }
+}
+
+export function matchesFilter(task: Task, filter: ViewFilter, today: Day): boolean {
+  if (filter.projects.length > 0 && !filter.projects.includes(task.projectId)) return false
+  if (filter.priorities.length > 0 && !filter.priorities.includes(task.priority)) return false
+  if (!inWindow(task, filter.when, today)) return false
+  const wanted = words(filter.words)
+  if (wanted.length > 0) {
+    const text = (task.title + ' ' + task.notes).toLowerCase()
+    if (!wanted.every((w) => text.includes(w))) return false
+  }
+  return true
+}
+
+// What is filtered, as chips under the title: each with its label and the
+// filter as it would be without it, so removing one leaves the rest.
+export interface Chip {
+  key: string
+  label: string
+  without: ViewFilter
+}
+
+export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | 'name'>[]): Chip[] {
+  const chips: Chip[] = []
+  if (filter.words.trim()) chips.push({ key: 'words', label: `“${filter.words.trim()}”`, without: { ...filter, words: '' } })
+  for (const id of filter.projects) {
+    const name = id === null ? 'Inbox' : (projects.find((p) => p.id === id)?.name ?? 'A project')
+    chips.push({ key: `p${id ?? 'inbox'}`, label: name, without: { ...filter, projects: filter.projects.filter((p) => p !== id) } })
+  }
+  for (const priority of [...filter.priorities].sort()) {
+    chips.push({
+      key: `r${priority}`,
+      label: PRIORITY_SHORT[priority],
+      without: { ...filter, priorities: filter.priorities.filter((p) => p !== priority) },
+    })
+  }
+  if (filter.when !== 'any') chips.push({ key: 'when', label: WHEN_NAMES[filter.when], without: { ...filter, when: 'any' } })
+  return chips
+}
+
+// A filter read back from storage, made safe: anything unreadable becomes no
+// filter, and a project deleted since is dropped (it would hide everything,
+// with no chip anyone could recognise).
+export function cleanFilter(stored: unknown, projects: Pick<Project, 'id'>[]): ViewFilter {
+  if (typeof stored !== 'object' || stored === null) return NO_FILTER
+  const value = stored as Partial<Record<keyof ViewFilter, unknown>>
+  const known = new Set(projects.map((p) => p.id))
+  const list = (v: unknown) => (Array.isArray(v) ? v : [])
+  return {
+    projects: list(value.projects).filter((p): p is number | null => p === null || (typeof p === 'number' && known.has(p))),
+    priorities: list(value.priorities).filter((p): p is number => typeof p === 'number' && p >= 1 && p <= 4),
+    when: typeof value.when === 'string' && value.when in WHEN_NAMES ? (value.when as When) : 'any',
+    words: typeof value.words === 'string' ? value.words : '',
+  }
+}
+
+// The one project chosen, if exactly one (not the Inbox) is: where a task
+// added on a filtered page should go, so it does not vanish from it.
+export const onlyProject = (filter: ViewFilter): number | null => (filter.projects.length === 1 ? filter.projects[0] : null)

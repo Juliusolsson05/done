@@ -29,6 +29,7 @@ import { change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } f
 import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
+import { setFilterOpen } from '@/lib/view-filter-store'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
 const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
@@ -367,6 +368,11 @@ export default function App() {
       if (event.key === 'q' || event.key === 'n') {
         event.preventDefault()
         app.add()
+      }
+      // F opens the filter where there is one (Cmd+F, finding on the page, is left alone above).
+      if (event.key === 'f' && (app.ui.view.kind === 'board' || app.ui.view.kind === 'timeline')) {
+        event.preventDefault()
+        setFilterOpen(true)
       }
       const views: Record<string, View> = {
         '1': { kind: 'inbox' },
