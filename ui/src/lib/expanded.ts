@@ -47,5 +47,7 @@ export function useExpanded(id: number): boolean {
       return () => listeners.delete(listener)
     },
     () => expanded.has(id),
+    // Drawn without a browser (a note rendered to text in a test): as stored.
+    () => expanded.has(id),
   )
 }

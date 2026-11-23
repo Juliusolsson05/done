@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { byNewest, cleanFolder, folderList, groupByDate, inFolder, isBlank, keepLineBreaks, matches, titleOf, withFolder, type Note } from './notes'
 
 describe('titleOf', () => {
+  it('reads a mentioned task as its words, not the link around it', () => {
+    expect(titleOf('# [Call the bank](done:task/1795306779859023) this week\nMore')).toBe('Call the bank this week')
+  })
+
   it('is the first line with something on it, trimmed', () => {
     expect(titleOf('\n  Seed funds  \nAlpha Ventures\nBeta Capital')).toBe('Seed funds')
   })

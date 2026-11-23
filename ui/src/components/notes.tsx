@@ -12,7 +12,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { ProjectDot } from '@/components/marks'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { projectName } from '@/lib/tasks'
+import { projectName, type Task } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { SYNCED } from '@/lib/store'
 import { FolderActions, FolderNav } from '@/components/note-folders'
@@ -33,6 +33,8 @@ import {
   type Note,
 } from '@/lib/notes'
 import { label, linkAt, linksIn } from '@/lib/links'
+import { atQuery, insertMention, mentionId, mentionsIn, suggestions } from '@/lib/mentions'
+import { caretPoint, MentionChips, MentionPicker, TaskMention } from '@/components/task-mention'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
@@ -450,12 +452,15 @@ export function Notes() {
   if (isMobile && current) {
     return (
       <div>
-        <div className="mb-3 flex items-center">
+        {/* On a phone the actions wrap under the way back rather than pushing
+            the page wider than the screen (folder, project, Read and Delete
+            do not fit one line at 393 points). */}
+        <div className="mb-3 flex flex-wrap items-center gap-y-1">
           <Button variant="ghost" size="sm" className="-ml-2.5 max-w-40 text-primary" onClick={() => open(null)}>
             <ChevronLeftIcon />
             <span className="truncate">{folder ?? 'All notes'}</span>
           </Button>
-          <div className="ml-auto flex min-w-0 gap-1">
+          <div className="ml-auto flex min-w-0 flex-wrap justify-end gap-1">
             {folderPicker}
             {projectPicker}
             {readToggle}
@@ -617,16 +622,69 @@ export function Notes() {
 // The note's text, always ready for typing. It grows with the text, so a
 // long note scrolls with the page instead of inside a box of its own.
 function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; onChange: (text: string) => void }) {
+  const { data } = useApp()
   const field = useRef<HTMLTextAreaElement>(null)
+  // Where the caret is, for the @ being typed before it.
+  const [caret, setCaret] = useState(0)
+  // The @ the list was closed for with Esc (where it starts), so it stays closed.
+  const [dismissed, setDismissed] = useState<number | null>(null)
+  const [chosen, setChosen] = useState(0)
+  // The list only shows while the note is being written in: clicking away closes it.
+  const [writing, setWriting] = useState(false)
+  // Where the caret goes once a mention has been put in.
+  const nextCaret = useRef<number | null>(null)
   useLayoutEffect(() => {
     const el = field.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
+    if (nextCaret.current !== null) {
+      el.setSelectionRange(nextCaret.current, nextCaret.current)
+      setCaret(nextCaret.current)
+      nextCaret.current = null
+    }
   }, [note.text])
   const links = linksIn(note.text)
+
+  // The @ picker: open while an @ is being typed and some task fits it. It
+  // only ever inserts plain text (a Markdown link); see lib/mentions.
+  const at = atQuery(note.text, caret)
+  const offered = writing && at && at.start !== dismissed ? suggestions(data.tasks, at.query) : []
+  const query = at?.query
+  useEffect(() => setChosen(0), [query])
+  // Esc closes the list for that one @. Once it is gone, a new @ in the same
+  // place opens the list again.
+  const atStart = at?.start ?? null
+  useEffect(() => {
+    if (atStart === null) setDismissed(null)
+  }, [atStart])
+  const point = offered.length > 0 && field.current && at ? caretPoint(field.current, at.start) : null
+  const pick = (task: Task) => {
+    const el = field.current
+    if (!at || !el) return
+    const next = insertMention(note.text, at.start, caret, task)
+    // Put in the way typing does, so Cmd+Z in the note can still take it
+    // (and what was typed before it) back: setting the field's value from
+    // code would wipe the field's own undo history. The input event this
+    // fires carries the new text through onChange as usual.
+    el.setSelectionRange(at.start, caret)
+    const inserted = next.text.slice(at.start, next.text.length - (note.text.length - caret))
+    if (document.execCommand?.('insertText', false, inserted)) {
+      el.setSelectionRange(next.caret, next.caret)
+      setCaret(next.caret)
+      return
+    }
+    // Where insertText is not supported, set the text directly.
+    nextCaret.current = next.caret
+    onChange(next.text)
+  }
+  const follow = () => {
+    const el = field.current
+    if (el) setCaret(el.selectionStart)
+  }
   return (
-    <>
+    <div className="relative">
+      <MentionChips ids={mentionsIn(note.text)} />
       {/* The note's links, to open with one click while writing. */}
       {links.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1.5">
@@ -643,7 +701,33 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
         autoFocus={focused}
         aria-label="Note"
         value={note.text}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          setCaret(event.target.selectionStart)
+          onChange(event.target.value)
+        }}
+        onSelect={follow}
+        onKeyUp={follow}
+        onFocus={() => setWriting(true)}
+        onBlur={() => setWriting(false)}
+        onKeyDown={(event) => {
+          if (offered.length === 0 || !at) return
+          // Enter that finishes a word in a Japanese or Chinese input method,
+          // and Enter or Tab with a modifier, are not a choice from the list.
+          if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            const step = event.key === 'ArrowDown' ? 1 : -1
+            setChosen((i) => (i + step + offered.length) % offered.length)
+          } else if (event.key === 'Enter' || event.key === 'Tab') {
+            event.preventDefault()
+            pick(offered[Math.min(chosen, offered.length - 1)])
+          } else if (event.key === 'Escape') {
+            // Closes only the list: not the note, and not anything behind it.
+            event.preventDefault()
+            event.stopPropagation()
+            setDismissed(at.start)
+          }
+        }}
         // Cmd-click on an address opens it, as in a code editor; a plain
         // click places the caret as usual.
         onClick={(event) => {
@@ -654,10 +738,24 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
             openLink(href)
           }
         }}
-        placeholder="Write it down…"
+        placeholder="Write it down… Type @ to add a task."
+        aria-expanded={offered.length > 0}
         className="block min-h-[50svh] w-full max-w-[68ch] resize-none overflow-hidden bg-transparent pb-24 text-[16px] leading-7 outline-none placeholder:text-faint max-md:text-[17px]"
       />
-    </>
+      {point && field.current && (
+        <MentionPicker
+          tasks={offered}
+          chosen={Math.min(chosen, offered.length - 1)}
+          // Just under the line with the @, kept inside the note's width.
+          at={{
+            top: field.current.offsetTop + point.top + point.lineHeight,
+            left: Math.max(0, Math.min(point.left, field.current.clientWidth - 320)),
+          }}
+          onPick={pick}
+          onHover={setChosen}
+        />
+      )}
+    </div>
   )
 }
 
@@ -673,8 +771,13 @@ function NoteDocument({ text }: { text: string }) {
   )
 }
 
-// A link opens in the browser, never inside the app's window.
+// A link opens in the browser, never inside the app's window. A link to a
+// task (done:task/<id>) is a mention and is drawn as the task; this is the
+// only place a mention changes how a note is drawn: the Markdown parser has
+// already found it as a link, and everything around it is drawn as before.
 function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const mentioned = mentionId(href)
+  if (mentioned !== null) return <TaskMention id={mentioned} fallback={children} />
   return (
     <a
       href={href}
@@ -719,4 +822,4 @@ const DOCUMENT = cn(
 // could run in the app.
 // No wrapper element: the blocks sit right in the article, so its spacing
 // rules (paragraphs, space above headings) reach them.
-const MARKDOWN = { disableParsingRawHTML: true, forceBlock: true, wrapper: Fragment, overrides: { a: NoteLink } }
+export const MARKDOWN = { disableParsingRawHTML: true, forceBlock: true, wrapper: Fragment, overrides: { a: NoteLink } }

@@ -110,15 +110,15 @@ fn tools() -> Value {
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title.",
+        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title. Each note lists the tasks it mentions, with whether they are done (found: false means finished a while ago, or deleted).",
           "inputSchema": { "type": "object", "properties": {
               "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." },
               "folder": { "type": "string", "description": "Only notes in this folder, case ignored." } } } },
-        { "name": "add_note", "description": "Add a note. Put a short title on the first line.",
+        { "name": "add_note", "description": "Add a note. Put a short title on the first line. To put a task in the note, mention it as a Markdown link: [its title](done:task/<id>), with the id from list_tasks; the app shows it as the live task.",
           "inputSchema": { "type": "object", "properties": { "text": { "type": "string" },
               "project": { "type": "string", "description": "The name of an existing project the note belongs to." },
               "folder": { "type": "string", "description": "The folder to file it in. A folder that does not exist yet is made by filing a note in it." } }, "required": ["text"] } },
-        { "name": "update_note", "description": "Change a note. text replaces the whole text: to add to it, send its current text with the addition. project moves it to a project, or null takes it out of one; folder likewise. Fields left out stay as they are.",
+        { "name": "update_note", "description": "Change a note. text replaces the whole text: to add to it, send its current text with the addition. project moves it to a project, or null takes it out of one; folder likewise. Fields left out stay as they are. Tasks are mentioned as [title](done:task/<id>).",
           "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" },
               "project": { "type": ["string", "null"], "description": "The name of an existing project, or null for none." },
               "folder": { "type": ["string", "null"], "description": "A folder name, or null for none." } }, "required": ["id"] } },
@@ -239,9 +239,63 @@ fn title_of(text: &str) -> String {
     "New note".to_string()
 }
 
-fn describe_note(note: &Note, projects: &[Project]) -> Value {
+/// The tasks a note mentions, as the app writes them: [title](done:task/<id>),
+/// in order, once each. Code is skipped (inside backticks or a fenced block),
+/// as the app shows code as written.
+fn mentions_in(text: &str) -> Vec<i64> {
+    const MARK: &str = "](done:task/";
+    let mut ids = Vec::new();
+    let mut fenced = false;
+    for line in text.lines() {
+        let start = line.trim_start();
+        if start.starts_with("```") || start.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        // Every other piece between backticks is inline code.
+        for part in line.split('`').step_by(2) {
+            let mut rest = part;
+            while let Some(at) = rest.find(MARK) {
+                let after = &rest[at + MARK.len()..];
+                let digits = after.len() - after.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+                if digits > 0 && after[digits..].starts_with(')') {
+                    if let Ok(id) = after[..digits].parse::<i64>() {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+                rest = after;
+            }
+        }
+    }
+    ids
+}
+
+/// The tasks a note's mentions can point at: open ones and those finished
+/// today (the state), and those finished earlier.
+fn known_tasks(store: &Store, state: &State) -> Result<Vec<Task>, String> {
+    let mut known = state.tasks.clone();
+    known.extend(store.finished(500).map_err(|e| e.to_string())?);
+    Ok(known)
+}
+
+fn describe_note(note: &Note, projects: &[Project], known: &[Task]) -> Value {
+    let tasks: Vec<Value> = mentions_in(&note.text)
+        .into_iter()
+        .map(|id| match known.iter().find(|t| t.id == id) {
+            Some(t) => json!({ "id": id, "title": t.title, "done": t.done }),
+            // Not open, not finished recently: finished long ago, or deleted.
+            // Which one cannot be told, so an agent is not told it was deleted
+            // (it might then "fix" the note).
+            None => json!({ "id": id, "found": false, "why": "finished a while ago, or deleted" }),
+        })
+        .collect();
     let project = note.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
-    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder.clone().flatten(), "updatedAt": note.updated_at })
+    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder.clone().flatten(), "tasks": tasks, "updatedAt": note.updated_at })
 }
 
 /// The folder an agent named for a note: Some(None) for an explicit null,
@@ -439,7 +493,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
                 .filter(|n| folder.as_ref().is_none_or(|f| n.folder.clone().flatten().is_some_and(|nf| nf.to_lowercase() == *f)))
                 .collect();
             let state = current_state(store)?;
-            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects)).collect();
+            let known = known_tasks(store, &state)?;
+            let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects, &known)).collect();
             let more = found.len().saturating_sub(NOTES_LISTED);
             Ok(if more > 0 { json!({ "notes": notes, "notListed": more }) } else { json!({ "notes": notes }) })
         }
@@ -469,7 +524,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let project_id = note_project(args, &state)?.flatten();
             let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
             let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note, &state.projects))
+            Ok(describe_note(&note, &state.projects, &known_tasks(store, &state)?))
         }
         "update_note" => {
             let note = existing_note(store, args)?;
@@ -479,7 +534,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             // Not said: the note keeps its folder.
             let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
             let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
-            Ok(describe_note(&note, &state.projects))
+            Ok(describe_note(&note, &state.projects, &known_tasks(store, &state)?))
         }
         "delete_note" => {
             let note = existing_note(store, args)?;
@@ -654,6 +709,21 @@ mod tests {
         // Taking it out of the folder kept its text.
         assert_eq!(said(&replies[1])["text"], "Seed round funds");
         assert_eq!(titles(&said(&replies[2])), vec!["Angel list"]);
+    }
+
+    #[test]
+    fn a_note_lists_the_tasks_it_mentions_and_whether_they_are_done() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[tool(1, "add_task", json!({ "title": "Call the bank" })), tool(2, "add_task", json!({ "title": "Ship sync" }))]);
+        let (bank, sync) = (said(&replies[0])["id"].as_i64().unwrap(), said(&replies[1])["id"].as_i64().unwrap());
+        let text = format!("# Next week\n- [Call the bank](done:task/{bank})\n- [Ship sync](done:task/{sync}) and again [it](done:task/{sync})\n`[x](done:task/{bank})`\n- [Gone](done:task/42)");
+        let replies = talk(&store, &[tool(3, "add_note", json!({ "text": text })), tool(4, "complete_task", json!({ "id": sync })), tool(5, "list_notes", json!({}))]);
+        assert_eq!(said(&replies[0])["tasks"][0]["title"], "Call the bank");
+        let tasks = &said(&replies[2])["notes"][0]["tasks"];
+        assert_eq!(tasks.as_array().unwrap().len(), 3);
+        assert_eq!((tasks[0]["id"].as_i64(), tasks[0]["done"].as_bool()), (Some(bank), Some(false)));
+        assert_eq!((tasks[1]["id"].as_i64(), tasks[1]["done"].as_bool()), (Some(sync), Some(true)));
+        assert_eq!(tasks[2]["found"], false);
     }
 
     #[test]
