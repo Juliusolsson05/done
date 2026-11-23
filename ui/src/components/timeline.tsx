@@ -134,7 +134,7 @@ interface BarHandlers {
 }
 
 export function Timeline() {
-  const { ui, dragging, setTlStart, edit, update, shown: inScope } = useApp()
+  const { ui, dragging, setTlStart, edit, update, shown: inScope, me } = useApp()
   const scroller = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   const days = Array.from({ length: DAYS }, (_, i) => addDays(ui.tlStart, i))
@@ -152,7 +152,7 @@ export function Timeline() {
   const filter = useViewFilter()
   const groups = timelineGroups(
     inScope.projects,
-    inScope.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    inScope.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY, me)),
     order,
   )
   const shown = groups.reduce((n, g) => n + g.tasks.length, 0)

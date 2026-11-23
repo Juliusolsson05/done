@@ -3,7 +3,8 @@
 // bar under the title that keeps what is filtered in sight as chips, with a
 // count. One filter for both pages (see lib/view-filter).
 import { useMemo, useSyncExternalStore, type ReactNode } from 'react'
-import { CheckIcon, ListFilterIcon, SearchIcon, XIcon } from 'lucide-react'
+import { CheckIcon, ListFilterIcon, SearchIcon, UserXIcon, XIcon } from 'lucide-react'
+import { Avatar } from '@/components/avatars'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -16,6 +17,17 @@ import { play } from '@/lib/sounds'
 import { cleanFilter, filterChips, isFiltering, NO_FILTER, PRIORITY_SHORT, WHEN_NAMES, type ViewFilter, type When } from '@/lib/view-filter'
 import { getFilterOpen, getStoredFilter, setFilterOpen, setViewFilter, subscribeViewFilter } from '@/lib/view-filter-store'
 import { cn } from '@/lib/utils'
+import { workspaces, type Member } from '@/lib/team'
+
+// The people a filter can name: the members of the workspaces being looked
+// at, once each, you first. None in one's own space.
+function usePeople(): Member[] {
+  const { team, scope, me } = useApp()
+  const spaces = workspaces(team).filter((s) => scope === 'all' || s.id === scope)
+  const seen = new Map<string, Member>()
+  for (const m of spaces.flatMap((s) => s.members)) if (!seen.has(m.id)) seen.set(m.id, m)
+  return [...seen.values()].sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : 0))
+}
 
 // The filter as it applies now: read from storage and checked against the
 // projects there are today.
@@ -40,7 +52,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function FilterChoices() {
-  const { data } = useApp()
+  const { shown, me } = useApp()
+  const people = usePeople()
   const filter = useViewFilter()
   const isMobile = useIsMobile()
   const set = (next: Partial<ViewFilter>) => setViewFilter({ ...filter, ...next })
@@ -67,6 +80,24 @@ function FilterChoices() {
     )
   }
 
+  const personRow = (key: string, name: string, face: ReactNode) => {
+    const chosen = filter.people.includes(key)
+    return (
+      <button
+        key={key}
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={chosen}
+        onClick={() => set({ people: chosen ? filter.people.filter((p) => p !== key) : [...filter.people, key] })}
+        className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent max-md:py-2.5', chosen && 'font-medium')}
+      >
+        {face}
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        {chosen && <CheckIcon className="size-4 text-primary" />}
+      </button>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="relative">
@@ -84,9 +115,17 @@ function FilterChoices() {
       <Section title="Projects">
         <div className="-mx-2 flex max-h-56 flex-col overflow-y-auto">
           {projectRow(null, 'Inbox')}
-          {data.projects.map((p) => projectRow(p.id, p.name))}
+          {shown.projects.map((p) => projectRow(p.id, p.name))}
         </div>
       </Section>
+      {people.length > 0 && (
+        <Section title="Assignee">
+          <div className="-mx-2 flex max-h-48 flex-col overflow-y-auto">
+            {people.map((m) => personRow(m.id === me ? 'me' : m.id, m.id === me ? 'Me' : m.name || m.email, <Avatar who={m} size="xs" />))}
+            {personRow('nobody', 'Nobody', <UserXIcon className="size-4 text-muted-foreground" />)}
+          </div>
+        </Section>
+      )}
       <Section title="Priority">
         <ToggleGroup
           type="multiple"
@@ -189,12 +228,13 @@ export function FilterButton() {
 // Under the title while a filter is on: what is filtered, each removable,
 // how many tasks are shown of how many, and Clear.
 export function FilterBar({ shown, total }: { shown: number; total: number }) {
-  const { data } = useApp()
+  const { data, team } = useApp()
   const filter = useViewFilter()
   if (!isFiltering(filter)) return null
+  const people = (team?.spaces ?? []).flatMap((s) => s.members).map((m) => ({ id: m.id, name: m.name || m.email }))
   return (
     <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5" aria-label="Filter">
-      {filterChips(filter, data.projects).map((chip) => (
+      {filterChips(filter, data.projects, people).map((chip) => (
         <span key={chip.key} className="flex items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1 pl-2.5 text-xs">
           {chip.key.startsWith('p') && <ProjectDot id={chip.key === 'pinbox' ? null : Number(chip.key.slice(1))} />}
           {chip.label}

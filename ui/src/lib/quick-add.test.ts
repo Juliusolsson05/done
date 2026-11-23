@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseQuickAdd, projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/quick-add'
+import { parseQuickAdd, peopleSpans, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
 
 // 13 November 2026 is a Friday.
 const today = '2026-11-13'
@@ -17,6 +17,7 @@ describe('parseQuickAdd', () => {
       date: { start: 14, end: 22, day: '2026-11-14' },
       priority: 1,
       projectId: 7,
+      assignees: [],
     })
   })
 
@@ -27,6 +28,7 @@ describe('parseQuickAdd', () => {
       date: null,
       priority: null,
       projectId: null,
+      assignees: [],
     })
   })
 
@@ -103,6 +105,7 @@ describe('parseQuickAdd', () => {
       date: null,
       priority: 1,
       projectId: null,
+      assignees: [],
     })
     // Dismissed alone, the word is a title.
     expect(parseQuickAdd('tomorrow', projects, today, [{ start: 0, end: 8, words: 'tomorrow' }])).toMatchObject({ title: 'tomorrow', due: null })
@@ -129,6 +132,7 @@ describe('readLine', () => {
       date: null,
       priority: 4,
       projectId: 8,
+      assignees: [],
     })
     expect(readLine('water plants tomorrow #home', projects, today, fallback)).toMatchObject({ due: '2026-11-14', projectId: 7 })
   })
@@ -182,5 +186,50 @@ describe('suggesting a project', () => {
   it('completes the word with Tab', () => {
     const s = suggestProjects('fix it @si now', 10, projects)!
     expect(takeSuggestion('fix it @si now', s, s.projects[0])).toEqual({ text: 'fix it @side-project now', caret: 21 })
+  })
+})
+
+// Hop's members, as quick add gets them for a task going into Hop.
+const hop: Person[] = [
+  { id: '1001', handle: 'julius', name: 'Julius Olsson' },
+  { id: '1002', handle: 'geart', name: 'Geart' },
+]
+
+describe('+name', () => {
+  it('puts the people named on the task and takes them out of the title', () => {
+    expect(parseQuickAdd('ship the deck +geart +jul friday', projects, today, [], hop)).toMatchObject({
+      title: 'ship the deck',
+      assignees: ['1002', '1001'],
+      due: '2026-11-20',
+    })
+    // Named twice is once; someone not in the workspace stays in the title.
+    expect(parseQuickAdd('review +geart +geart +ana', projects, today, [], hop)).toMatchObject({ title: 'review +ana', assignees: ['1002'] })
+    // A "+" that names nobody is just text.
+    expect(parseQuickAdd('+1 for the idea', projects, today, [], hop)).toMatchObject({ title: '+1 for the idea', assignees: [] })
+    // Without a workspace there is nobody to name.
+    expect(parse('call +geart')).toMatchObject({ title: 'call +geart', assignees: [] })
+  })
+
+  it('asks who can be named for the project the task goes into', () => {
+    const asked: (number | null)[] = []
+    const peopleFor = (id: number | null) => (asked.push(id), id === 8 ? hop : [])
+    expect(readLine('ship +geart #side', projects, today, { due: null, projectId: null }, [], peopleFor)).toMatchObject({
+      title: 'ship',
+      projectId: 8,
+      assignees: ['1002'],
+    })
+    // In the view of another project, the view's project decides.
+    expect(readLine('ship +geart', projects, today, { due: null, projectId: 7 }, [], peopleFor)).toMatchObject({ title: 'ship +geart', assignees: [] })
+    expect(asked).toEqual([8, 7])
+  })
+
+  it('suggests people while "+" is typed and marks the names read', () => {
+    expect(suggestPeople('call +', 6, hop)?.people.map((p) => p.id)).toEqual(['1001', '1002'])
+    expect(suggestPeople('call +ge', 8, hop)).toEqual({ start: 5, end: 8, people: [hop[1]] })
+    expect(suggestPeople('call +geart', 11, hop)).toBeNull()
+    expect(suggestPeople('a+b', 3, hop)).toBeNull()
+    const s = suggestPeople('call +ge now', 8, hop)!
+    expect(takePerson('call +ge now', s, hop[1])).toEqual({ text: 'call +geart now', caret: 12 })
+    expect(peopleSpans('call +geart and +nobody', hop)).toEqual([{ start: 5, end: 11 }])
   })
 })

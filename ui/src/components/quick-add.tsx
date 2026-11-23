@@ -7,12 +7,14 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Separator } from '@/components/ui/separator'
 import { PriorityDot, ProjectDot } from '@/components/marks'
+import { Avatar } from '@/components/avatars'
 import { useFocus } from '@/hooks/use-focus'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { carryDismissed, dismissOnBackspace, type Dismissed } from '@/lib/date-phrases'
 import { describeDay, spellDay, TODAY } from '@/lib/days'
-import { projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/quick-add'
+import { peopleSpans, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
+import { defaultProjectFor, handleOf, workspaceOf } from '@/lib/team'
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -20,7 +22,7 @@ import { addDefaults } from '@/lib/view-filter'
 import { useViewFilter } from '@/components/view-filter'
 
 function QuickAdd() {
-  const { data, ui, update, closeAll } = useApp()
+  const { data, team, me, scope, ui, update, closeAll } = useApp()
   const [text, setText] = useState('')
   // Date phrases the user said are not dates, by pressing Backspace after them.
   const [dismissed, setDismissed] = useState<Dismissed[]>([])
@@ -29,27 +31,43 @@ function QuickAdd() {
   const mirrorRef = useRef<HTMLDivElement>(null)
   // Where the caret is, for suggesting a project while "@" is typed.
   const [caret, setCaret] = useState(0)
+  // Who "+name" can name: the members of the workspace the task goes into
+  // (its project's), or of the workspace being looked at when it has no
+  // project yet. Nobody for one's own space.
+  const peopleFor = (projectId: number | null): Person[] => {
+    const project = projectId === null ? undefined : data.projects.find((p) => p.id === projectId)
+    const space = project ? workspaceOf(project.spaceId, team) : typeof scope === 'number' ? workspaceOf(scope, team) : undefined
+    return (space?.members ?? []).map((m) => ({ id: m.id, handle: handleOf(m), name: m.name || m.email }))
+  }
+  // In a workspace a task needs a project: the Inbox is one's own.
+  const workspaceProject = defaultProjectFor(scope, data.projects)
   // What a new task gets when the typed line does not say: the view you are in.
+  const fallback = {
+    due: null,
+    projectId: null,
+    // On a filtered Board or Timeline: what keeps the new task on the page
+    // it was added on (the one project, the one priority, a date in the window).
+    ...(ui.view.kind === 'board' || ui.view.kind === 'timeline' ? addDefaults(filter, TODAY) : {}),
+    ...(ui.view.kind === 'today' || ui.asGoal ? { due: TODAY } : {}),
+    ...(ui.view.kind === 'project' ? { projectId: ui.view.id } : {}),
+  }
   const read = readLine(
     text,
     data.projects,
     TODAY,
-    {
-      due: null,
-      projectId: null,
-      // On a filtered Board or Timeline: what keeps the new task on the page
-      // it was added on (the one project, the one priority, a date in the window).
-      ...(ui.view.kind === 'board' || ui.view.kind === 'timeline' ? addDefaults(filter, TODAY) : {}),
-      ...(ui.view.kind === 'today' || ui.asGoal ? { due: TODAY } : {}),
-      ...(ui.view.kind === 'project' ? { projectId: ui.view.id } : {}),
-    },
+    { ...fallback, projectId: fallback.projectId ?? workspaceProject },
     dismissed,
+    peopleFor,
   )
 
+  const people = peopleFor(read.projectId)
   const suggestion = suggestProjects(text, caret, data.projects)
-  // The date and the project, marked in the field where they were typed.
+  const personSuggestion = suggestion ? null : suggestPeople(text, caret, people)
+  // The date, the project and the people, marked in the field where they were typed.
   const project = projectSpan(text, data.projects)
-  const marks = [read.date && { start: read.date.start, end: read.date.end }, project].filter((m): m is { start: number; end: number } => !!m).sort((a, b) => a.start - b.start)
+  const marks = [read.date && { start: read.date.start, end: read.date.end }, project, ...peopleSpans(text, people)]
+    .filter((m): m is { start: number; end: number } => !!m)
+    .sort((a, b) => a.start - b.start)
 
   // A long line scrolls inside the field; the highlight behind it has to
   // scroll with it. Done after every render as well as on scroll, because
@@ -65,6 +83,16 @@ function QuickAdd() {
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Tab takes the suggested person: "+ge" becomes "+geart ".
+    if (event.key === 'Tab' && !event.shiftKey && personSuggestion) {
+      event.preventDefault()
+      const taken = takePerson(text, personSuggestion, personSuggestion.people[0])
+      play('confirm')
+      type(taken.text)
+      setCaret(taken.caret)
+      requestAnimationFrame(() => inputRef.current?.setSelectionRange(taken.caret, taken.caret))
+      return
+    }
     // Tab takes the suggested project: "@ha" becomes "@hackathons.team ".
     if (event.key === 'Tab' && !event.shiftKey && suggestion) {
       event.preventDefault()
@@ -85,6 +113,12 @@ function QuickAdd() {
     setDismissed([...dismissed, gone])
   }
 
+  const memberOf = (id: string) => {
+    const m = people.find((p) => p.id === id)
+    const full = team?.spaces.flatMap((s) => s.members).find((x) => x.id === id)
+    return { id, name: m?.name ?? full?.name ?? 'Someone', email: full?.email ?? '', picture: full?.picture ?? '' }
+  }
+
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!read.title) return
@@ -92,7 +126,7 @@ function QuickAdd() {
     play('add')
     update((d) => {
       const added = addTask(d, read)
-      return ui.asGoal ? setGoal(added, id, TODAY) : added
+      return ui.asGoal ? setGoal(added, id, TODAY, me) : added
     }, id)
     // Named as today's goal: there is only one, so the box closes after it.
     if (ui.asGoal) return closeAll()
@@ -178,6 +212,33 @@ function QuickAdd() {
             ))}
           </div>
         )}
+        {/* The people a "+" could be, the first taken with Tab. */}
+        {personSuggestion && (
+          <div className="flex flex-wrap items-center gap-1 text-xs" aria-live="polite">
+            {personSuggestion.people.slice(0, 5).map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const taken = takePerson(text, personSuggestion, p)
+                  play('confirm')
+                  type(taken.text)
+                  setCaret(taken.caret)
+                  requestAnimationFrame(() => {
+                    inputRef.current?.focus()
+                    inputRef.current?.setSelectionRange(taken.caret, taken.caret)
+                  })
+                }}
+                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
+              >
+                <Avatar who={memberOf(p.id)} size="xs" />
+                {p.name}
+                {i === 0 && <Kbd className="ml-1 h-4 px-1 text-[10px] max-md:hidden">Tab</Kbd>}
+              </button>
+            ))}
+          </div>
+        )}
         {/* What was read out of the line, shown as it is typed. */}
         <div className="flex min-h-6 flex-wrap items-center gap-1 text-xs text-faint">
           {!text.trim() ? (
@@ -207,6 +268,12 @@ function QuickAdd() {
                 <ProjectDot id={read.projectId} />
                 {read.projectId ? projectName(data.projects, read.projectId) : 'Inbox'}
               </Badge>
+              {read.assignees.map((id) => (
+                <Badge key={id} variant="outline">
+                  <Avatar who={memberOf(id)} size="xs" />
+                  {memberOf(id).name}
+                </Badge>
+              ))}
               {!read.title && <span>Add a title</span>}
             </>
           )}
