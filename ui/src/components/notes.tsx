@@ -257,6 +257,18 @@ export function Notes() {
 
   const folders = folderList(notes ?? [], kept)
 
+  // A folder kept here while empty is forgotten once a note with something
+  // in it is filed there: from then on the notes say it exists, and if it is
+  // renamed or deleted on another device, this one follows instead of
+  // holding on to the old name.
+  useEffect(() => {
+    if (!notes) return
+    const stillEmpty = kept.filter((k) => !notes.some((n) => n.folder && sameFolder(n.folder, k) && !isBlank(n.text)))
+    if (stillEmpty.length !== kept.length) setKept(stillEmpty)
+    // Only when the notes change; kept is read as it is then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes])
+
   const createFolder = (typed: string) => {
     const name = cleanFolder(typed)
     if (!name) return
@@ -285,9 +297,18 @@ export function Notes() {
     setFolder(null)
     setAtFolders(true)
     play('delete')
+    // Puts back only the folder, on each note as it is now: its text may
+    // have changed since the folder was deleted, and Undo must not take that
+    // typing back. A note deleted since stays deleted.
     const bringBack = () => {
-      for (const note of before) write(note)
-      setNotes((all) => all && all.map((n) => before.find((b) => b.id === n.id) ?? n))
+      flush()
+      const now = latest.current ?? []
+      const restored = before.flatMap((b) => {
+        const current = now.find((n) => n.id === b.id)
+        return current ? [{ ...current, folder: b.folder }] : []
+      })
+      for (const note of restored) write(note)
+      setNotes((all) => all && all.map((n) => restored.find((r) => r.id === n.id) ?? n))
       setKept(wasKept)
     }
     recordStep(bringBack)
@@ -467,7 +488,17 @@ export function Notes() {
   return (
     <div>
       {isMobile && (
-        <Button variant="ghost" size="sm" className="mb-1 -ml-2.5 text-primary" onClick={() => setAtFolders(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mb-1 -ml-2.5 text-primary"
+          onClick={() => {
+            // Back on the folders, no folder is open, so New note there files
+            // into none rather than the folder just left.
+            setAtFolders(true)
+            setFolder(null)
+          }}
+        >
           <ChevronLeftIcon />
           Folders
         </Button>

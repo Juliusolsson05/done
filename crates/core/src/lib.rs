@@ -150,11 +150,16 @@ pub struct Note {
     /// a task does, and is then simply not in one.
     #[serde(default)]
     pub project_id: Option<i64>,
-    /// The folder it is filed in, by name, if any. A name on the note rather
-    /// than a folder table: it travels with the note through sync, and a
-    /// folder exists exactly as long as a note is in it.
-    #[serde(default)]
-    pub folder: Option<String>,
+    /// The folder it is filed in, by name: `Some(None)` for no folder. A name
+    /// on the note rather than a folder table: it travels with the note
+    /// through sync, and a folder exists exactly as long as a note is in it.
+    ///
+    /// `None` means the sender did not say. An app from before folders sends
+    /// notes without the field; read as "no folder", its next edit to a filed
+    /// note would take the note out of its folder on every device. So a note
+    /// that does not mention its folder leaves the folder as it is.
+    #[serde(default, deserialize_with = "said", skip_serializing_if = "Option::is_none")]
+    pub folder: Option<Option<String>>,
 }
 
 /// A note as a window sends it: without an id it is a new note.
@@ -167,8 +172,16 @@ pub struct SaveNote {
     pub updated_at: i64,
     #[serde(default)]
     pub project_id: Option<i64>,
-    #[serde(default)]
-    pub folder: Option<String>,
+    /// As on `Note`: `None` leaves the folder as it is, `Some(None)` takes the
+    /// note out of its folder.
+    #[serde(default, deserialize_with = "said")]
+    pub folder: Option<Option<String>>,
+}
+
+/// Reads a field that may be left out: left out is `None`, null is
+/// `Some(None)`, a value is `Some(Some(value))`.
+fn said<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
 }
 
 /// A folder name as it is kept: trimmed, runs of spaces made one, and a
@@ -449,7 +462,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder FROM note ORDER BY updated_at DESC, id DESC")?;
         let notes = stmt
-            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: r.get(4)? }))?
+            .query_map([], |r| Ok(Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?) }))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(notes)
     }
@@ -461,14 +474,16 @@ impl Store {
     /// what Undo does.
     pub fn save_note(&self, note: SaveNote) -> Result<Note, Error> {
         let conn = self.conn.lock().unwrap();
-        let folder = clean_folder(note.folder.as_deref());
+        // Whether the folder was said at all; if not, an existing note keeps its own.
+        let said = note.folder.is_some();
+        let folder = clean_folder(note.folder.flatten().as_deref());
         let id = match note.id {
             Some(id) => {
                 conn.execute(
                     "INSERT INTO note (id, text, updated_at, project_id, folder) VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at,
-                       project_id = excluded.project_id, folder = excluded.folder",
-                    params![id, note.text, note.updated_at, note.project_id, folder],
+                       project_id = excluded.project_id, folder = CASE WHEN ?6 THEN excluded.folder ELSE note.folder END",
+                    params![id, note.text, note.updated_at, note.project_id, folder, said],
                 )?;
                 id
             }
@@ -482,7 +497,9 @@ impl Store {
                 id
             }
         };
-        Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id, folder })
+        // Read back: a note that did not say its folder kept the one it had.
+        let folder: Option<String> = conn.query_row("SELECT folder FROM note WHERE id = ?1", [id], |r| r.get(0))?;
+        Ok(Note { id, text: note.text, updated_at: note.updated_at, project_id: note.project_id, folder: Some(folder) })
     }
 
     pub fn delete_note(&self, id: i64) -> Result<(), Error> {
@@ -962,17 +979,22 @@ mod tests {
         s.delete_note(n.id).unwrap();
         assert!(s.notes().unwrap().is_empty());
         s.save_note(note(Some(n.id), "Funds", 1)).unwrap();
-        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: None }]);
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None) }]);
     }
 
     #[test]
     fn a_note_keeps_its_folder_and_a_blank_folder_is_none() {
         let s = store();
-        let filed = |folder: Option<&str>| SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: None, folder: folder.map(Into::into) };
+        let filed = |folder: Option<&str>| SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(folder.map(Into::into)) };
         let n = s.save_note(filed(Some("  Fund   raising "))).unwrap();
-        assert_eq!(n.folder.as_deref(), Some("Fund raising"));
-        assert_eq!(s.notes().unwrap()[0].folder.as_deref(), Some("Fund raising"));
-        assert_eq!(s.save_note(filed(Some("   "))).unwrap().folder, None);
+        assert_eq!(n.folder.clone().flatten().as_deref(), Some("Fund raising"));
+        assert_eq!(s.notes().unwrap()[0].folder.clone().flatten().as_deref(), Some("Fund raising"));
+        assert_eq!(s.save_note(filed(Some("   "))).unwrap().folder, Some(None));
+        // Saved again without saying its folder (an app from before folders):
+        // it stays where it was. Saying none takes it out.
+        let again = |folder| SaveNote { id: Some(n.id), text: "Funds, edited".into(), updated_at: 2, project_id: None, folder };
+        assert_eq!(s.save_note(again(None)).unwrap().folder, Some(Some("Fund raising".into())));
+        assert_eq!(s.save_note(again(Some(None))).unwrap().folder, Some(None));
         assert_eq!(clean_folder(Some(&"x".repeat(200))).map(|f| f.chars().count()), Some(60));
     }
 
@@ -990,7 +1012,7 @@ mod tests {
         let n = s.save_note(SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: Some(1), folder: None }).unwrap();
         assert_eq!(s.notes().unwrap()[0].project_id, Some(1));
         s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
-        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: None }]);
+        assert_eq!(s.notes().unwrap(), vec![Note { id: n.id, text: "Funds".into(), updated_at: 1, project_id: None, folder: Some(None) }]);
     }
 
     #[test]

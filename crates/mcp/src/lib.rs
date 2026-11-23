@@ -241,7 +241,7 @@ fn title_of(text: &str) -> String {
 
 fn describe_note(note: &Note, projects: &[Project]) -> Value {
     let project = note.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
-    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder, "updatedAt": note.updated_at })
+    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder.clone().flatten(), "updatedAt": note.updated_at })
 }
 
 /// The folder an agent named for a note: Some(None) for an explicit null,
@@ -254,7 +254,7 @@ fn note_folder(args: &Value, notes: &[Note]) -> Option<Option<String>> {
         Some(Value::Null) => Some(None),
         Some(v) => {
             let wanted = done_core::clean_folder(v.as_str());
-            Some(wanted.map(|w| notes.iter().filter_map(|n| n.folder.clone()).find(|f| f.to_lowercase() == w.to_lowercase()).unwrap_or(w)))
+            Some(wanted.map(|w| notes.iter().filter_map(|n| n.folder.clone().flatten()).find(|f| f.to_lowercase() == w.to_lowercase()).unwrap_or(w)))
         }
     }
 }
@@ -432,10 +432,11 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         "list_notes" => {
             let words: Vec<String> = args.get("search").and_then(Value::as_str).unwrap_or("")
                 .split_whitespace().map(str::to_lowercase).collect();
-            let folder = args.get("folder").and_then(Value::as_str).map(str::to_lowercase);
+            // Cleaned as stored names are, so "Fund  raising" finds "Fund raising".
+            let folder = done_core::clean_folder(args.get("folder").and_then(Value::as_str)).map(|f| f.to_lowercase());
             let found: Vec<Note> = store.notes().map_err(|e| e.to_string())?.into_iter()
                 .filter(|n| { let text = n.text.to_lowercase(); words.iter().all(|w| text.contains(w.as_str())) })
-                .filter(|n| folder.as_ref().is_none_or(|f| n.folder.as_ref().is_some_and(|nf| nf.to_lowercase() == f.trim())))
+                .filter(|n| folder.as_ref().is_none_or(|f| n.folder.clone().flatten().is_some_and(|nf| nf.to_lowercase() == *f)))
                 .collect();
             let state = current_state(store)?;
             let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects)).collect();
@@ -466,7 +467,7 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let text = note_text(args)?;
             let state = current_state(store)?;
             let project_id = note_project(args, &state)?.flatten();
-            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?).flatten();
+            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
             let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
             Ok(describe_note(&note, &state.projects))
         }
@@ -475,7 +476,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let state = current_state(store)?;
             let text = if args.get("text").is_some() { note_text(args)? } else { note.text.clone() };
             let project_id = note_project(args, &state)?.unwrap_or(note.project_id);
-            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?).unwrap_or(note.folder.clone());
+            // Not said: the note keeps its folder.
+            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
             let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
             Ok(describe_note(&note, &state.projects))
         }
@@ -633,18 +635,18 @@ mod tests {
     fn an_agent_can_file_notes_in_folders_list_one_and_take_a_note_out() {
         let store = Store::open(Path::new(":memory:")).unwrap();
         let replies = talk(&store, &[
-            tool(1, "add_note", json!({ "text": "Seed round funds", "folder": "Fundraising" })),
+            tool(1, "add_note", json!({ "text": "Seed round funds", "folder": "Fund raising" })),
             // Another case of the same name is the same folder, not a second one.
-            tool(2, "add_note", json!({ "text": "Angel list", "folder": "fundraising " })),
+            tool(2, "add_note", json!({ "text": "Angel list", "folder": "fund raising " })),
             tool(3, "add_note", json!({ "text": "Groceries" })),
         ]);
-        assert_eq!(said(&replies[0])["folder"], "Fundraising");
-        assert_eq!(said(&replies[1])["folder"], "Fundraising");
+        assert_eq!(said(&replies[0])["folder"], "Fund raising");
+        assert_eq!(said(&replies[1])["folder"], "Fund raising");
         let first = said(&replies[0])["id"].as_i64().unwrap();
         let replies = talk(&store, &[
-            tool(4, "list_notes", json!({ "folder": "FUNDRAISING" })),
+            tool(4, "list_notes", json!({ "folder": " FUND  RAISING " })),
             tool(5, "update_note", json!({ "id": first, "folder": null })),
-            tool(6, "list_notes", json!({ "folder": "Fundraising" })),
+            tool(6, "list_notes", json!({ "folder": "Fund raising" })),
         ]);
         let titles = |v: &Value| v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!(titles(&said(&replies[0])), vec!["Angel list", "Seed round funds"]);

@@ -31,7 +31,9 @@ Ruling: a folder exists because a note is in it; a folder made on this device an
 
 Ruling: renaming and deleting a folder re-save each note in it through the existing `save_note`, rather than a new call — the notes in one folder are few, and every write then syncs as an ordinary note edit — cost if wrong: renaming a folder of hundreds of notes is hundreds of writes.
 
-Ruling: `{table}_edited` triggers are dropped and made again each time a file is opened, so their column list always matches `TABLES` — a file from before folders would otherwise not count a folder-only change as a change to sync — cost if wrong: none found; the triggers hold no state.
+Ruling: a `{table}_edited` trigger whose column list is not the current one is made again when a file is opened, in one `BEGIN IMMEDIATE` transaction — a file from before folders would otherwise not count a folder-only change as a change to sync, and a drop and create outside a transaction left a moment with no trigger at all for another process to write in (review) — cost if wrong: none found; the triggers hold no state.
+
+Ruling: a note that does not mention its folder keeps the one it has (`Option<Option<String>>`: left out is "not said", null is "no folder") — an app or hosted server from before folders sends notes without the field, and reading that as "no folder" would take a note out of its folder on every device the next time an old device edited it (review) — cost if wrong: a client that means "no folder" has to say null, which the interface and MCP always do.
 
 ## Design
 
@@ -60,3 +62,4 @@ Nested folders, dragging notes onto folders, folder icons or colours, sharing a 
 
 - Scope correction (owner, 2026-11-23): "it does not work that well when we have the 4 sidebars". Of three layouts offered (folders in the app sidebar, a switcher above the list, drill-down in the list), the owner chose the sidebar. The Notes page publishes its folders and their actions through `ui/src/lib/note-folder-panel.ts`; `AppSidebar` lists them under Notes and the right-click menu gains a `folder` target. The page owns the notes, so the sidebar never holds a copy.
 - Checked in the web preview on a copy of the owner's tasks: make a folder from the sidebar, file a note with the picker, type in it (folder kept), rename by right-click, delete (notes kept) and Undo.
+- Review round (one reviewer, read-only): six findings, all fixed. (1) An older device or server wiped folders — fixed by the ruling above, with a test that fails without it. (2) Undoing Delete folder re-saved old text — Undo now puts back only the folder, on each note as it is now. (3) The trigger rebuild was not atomic — fixed by the ruling above. (4) Empty folders kept on a device were never forgotten — forgotten once a note with text is filed there. (5) On a phone, New note on the folders screen filed into the folder just left — leaving a folder now clears it. (6) MCP's folder filter did not collapse spaces — it now cleans the name as stored names are. The Timeline branch had no findings.
