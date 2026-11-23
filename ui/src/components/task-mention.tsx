@@ -2,15 +2,17 @@
 // when the note is read, as chips above the text while it is written, and
 // offered in a list under the caret after an @.
 import { useEffect, useState, type ReactNode } from 'react'
-import { CheckIcon, CircleIcon, ListChecksIcon, StarIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon, CircleIcon, ListChecksIcon, StarIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectDot } from '@/components/marks'
+import { NotesText } from '@/components/notes-text'
 import { TaskCheck } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
 import { loadFinished } from '@/lib/backend'
 import { shortDay, TODAY } from '@/lib/days'
 import { mentionDetails, type Detail } from '@/lib/mentions'
-import type { Task } from '@/lib/tasks'
+import { toggleExpanded, useExpanded } from '@/lib/expanded'
+import { subtasksOf, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The window only holds open tasks and those finished today. A mention of a
@@ -51,6 +53,9 @@ const hit = (task: Task) => ({ kind: 'task' as const, id: task.id, title: task.t
 export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode }) {
   const { data, complete, reopen, reveal } = useApp()
   const task = useMentioned(id)
+  // Whether its subtasks show: the same state as in the lists, so a task
+  // opened here is open there too.
+  const open = useExpanded(id)
   if (!task)
     return (
       <span className="text-muted-foreground" title={task === null ? 'This task was deleted' : undefined}>
@@ -59,6 +64,8 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
     )
   const done = !!task.done
   const details = mentionDetails(task, data.tasks, data.projects, TODAY)
+  const subtasks = subtasksOf(data.tasks, task.id)
+  const toggle = (t: Task) => (t.done ? reopen(t.id) : complete(t.id))
   // Spans only, laid out as a card: it sits inside a paragraph, a list item
   // or a table cell, where a block element would be invalid HTML.
   return (
@@ -66,7 +73,7 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
       data-mention={task.id}
       className="my-0.5 inline-flex max-w-full min-w-0 items-start gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-2.5 py-1.5 align-middle leading-snug"
     >
-      <TaskCheck task={task} checked={done} onChange={() => (done ? reopen(task.id) : complete(task.id))} className="mt-0.5" />
+      <TaskCheck task={task} checked={done} onChange={() => toggle(task)} className="mt-0.5" />
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1.5">
           <button
@@ -79,16 +86,47 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
           {task.goalDay === TODAY && !done && <StarIcon className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Today’s goal" />}
         </span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          {details.map((detail) => (
-            <MentionDetail key={detail.kind} detail={detail} />
-          ))}
+          {details.map((detail) =>
+            detail.kind === 'subtasks' ? (
+              // The count is also the way to show or hide the subtasks.
+              <button
+                key="subtasks"
+                type="button"
+                aria-expanded={open}
+                aria-label={`${open ? 'Hide' : 'Show'} subtasks of ${task.title}`}
+                onClick={() => toggleExpanded(task.id)}
+                className="flex items-center gap-1 rounded tabular-nums hover:text-foreground"
+              >
+                <ChevronRightIcon className={cn('size-3 transition-transform', open && 'rotate-90')} />
+                <ListChecksIcon className="size-3" />
+                {detail.done}/{detail.total}
+              </button>
+            ) : (
+              <MentionDetail key={detail.kind} detail={detail} />
+            ),
+          )}
         </span>
+        {/* The whole description, as written, with its web links clickable. */}
+        {task.notes.trim() && <NotesText notes={task.notes.trim()} onEdit={() => reveal(hit(task))} className="mt-0.5 whitespace-pre-wrap" />}
+        {open && subtasks.length > 0 && (
+          <span className="mt-1 flex flex-col gap-1" aria-label={`Subtasks of ${task.title}`}>
+            {subtasks.map((sub) => (
+              <span key={sub.id} data-task={sub.id} className="flex min-w-0 items-start gap-2">
+                <TaskCheck task={sub} checked={!!sub.done} onChange={() => toggle(sub)} className="mt-0.5 size-3.5" />
+                <span className="flex min-w-0 flex-col">
+                  <span className={cn('min-w-0 text-sm', sub.done && 'text-muted-foreground line-through')}>{sub.title}</span>
+                  {sub.notes.trim() && <NotesText notes={sub.notes.trim()} onEdit={() => reveal(hit(task))} className="whitespace-pre-wrap" />}
+                </span>
+              </span>
+            ))}
+          </span>
+        )}
       </span>
     </span>
   )
 }
 
-function MentionDetail({ detail }: { detail: Detail }) {
+function MentionDetail({ detail }: { detail: Exclude<Detail, { kind: 'subtasks' }> }) {
   switch (detail.kind) {
     case 'project':
       return (
@@ -99,17 +137,8 @@ function MentionDetail({ detail }: { detail: Detail }) {
       )
     case 'when':
       return <span className={cn('tabular-nums', detail.late && 'text-overdue')}>{detail.text}</span>
-    case 'subtasks':
-      return (
-        <span className="flex items-center gap-1 tabular-nums">
-          <ListChecksIcon className="size-3" />
-          {detail.done}/{detail.total}
-        </span>
-      )
     case 'doing':
       return <span className="text-primary">In progress</span>
-    case 'notes':
-      return <span className="max-w-[40ch] truncate italic">{detail.text}</span>
   }
 }
 

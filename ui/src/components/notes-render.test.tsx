@@ -12,11 +12,26 @@ vi.hoisted(() => {
 })
 import { MARKDOWN } from '@/components/notes'
 import { AppContext, type App } from '@/lib/app-context'
+import { toggleExpanded } from '@/lib/expanded'
 import type { Task } from '@/lib/tasks'
 
 const BANK = 1795306779859023
+const DESCRIPTION = 'Ask about the loan terms, the fixed rate and when the first payment is due.\nBring last year’s statement.'
 const tasks: Task[] = [
-  { id: BANK, title: 'Call the bank (renamed)', notes: '', projectId: null, start: null, due: '2026-11-27', priority: 1 },
+  { id: BANK, title: 'Call the bank (renamed)', notes: DESCRIPTION, projectId: null, start: null, due: '2026-11-27', priority: 1 },
+  { id: 10, title: 'Find the account number', notes: '', projectId: null, start: null, due: null, priority: 4, parentId: BANK },
+  {
+    id: 11,
+    title: 'Book a time',
+    notes: '',
+    projectId: null,
+    start: null,
+    due: null,
+    priority: 4,
+    parentId: BANK,
+    done: true,
+    doneDay: '2026-11-23',
+  },
   { id: 2, title: 'Ship sync', notes: '', projectId: null, start: null, due: null, priority: 4, done: true, doneDay: '2026-11-23' },
 ]
 // Only what a mention reads from the app.
@@ -59,5 +74,21 @@ describe('a note with mentions', () => {
   it('shows a mention of a task no one has as the words it was written with', () => {
     // Not in the window; the lookup in the Completed list happens later, in the browser.
     expect(draw('[Old task](done:task/999)')).toContain('Old task')
+  })
+
+  it('shows the whole description, every line of it', () => {
+    expect(draw(`[Call the bank](done:task/${BANK})`)).toContain(DESCRIPTION)
+  })
+
+  it('shows the subtasks, each with its own check, once they are opened', () => {
+    const closed = draw(`[Call the bank](done:task/${BANK})`)
+    expect(closed).toContain('1/2')
+    expect(closed).not.toContain('Find the account number')
+    toggleExpanded(BANK)
+    const opened = draw(`[Call the bank](done:task/${BANK})`)
+    expect(opened).toContain('Find the account number')
+    expect(opened).toMatch(/data-task="11"[\s\S]*?aria-checked="true"/)
+    expect(opened).toMatch(/data-task="10"[\s\S]*?aria-checked="false"/)
+    toggleExpanded(BANK)
   })
 })

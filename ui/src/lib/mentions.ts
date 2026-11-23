@@ -105,17 +105,14 @@ export function suggestions(tasks: Task[], query: string, limit = 8): Task[] {
 }
 
 // What a mentioned task's card says under its title, in order: where it
-// lives, when it is due (or when it was done), how far its subtasks are,
-// whether it is under way, and how its notes begin. Each part only when it
-// has something to say.
+// lives, when it is due (or when it was done), how far its subtasks are, and
+// whether it is under way. Each part only when it has something to say. Its
+// description is shown whole, under these (see the card).
 export type Detail =
   | { kind: 'project'; id: number | null; name: string }
   | { kind: 'when'; text: string; late: boolean }
   | { kind: 'subtasks'; done: number; total: number }
   | { kind: 'doing' }
-  | { kind: 'notes'; text: string }
-
-const NOTES_SHOWN = 60
 
 export function mentionDetails(task: Task, tasks: Task[], projects: { id: number; name: string }[], today: Day): Detail[] {
   const details: Detail[] = [{ kind: 'project', id: task.projectId, name: projects.find((p) => p.id === task.projectId)?.name ?? 'Inbox' }]
@@ -130,10 +127,5 @@ export function mentionDetails(task: Task, tasks: Task[], projects: { id: number
   const under = tasks.filter((t) => t.parentId === task.id)
   if (under.length) details.push({ kind: 'subtasks', done: under.filter((t) => t.done).length, total: under.length })
   if (!task.done && task.status === 'doing') details.push({ kind: 'doing' })
-  const notes = task.notes
-    .split('\n')
-    .find((line) => line.trim())
-    ?.trim()
-  if (notes) details.push({ kind: 'notes', text: notes.length > NOTES_SHOWN ? notes.slice(0, NOTES_SHOWN - 1).trimEnd() + '…' : notes })
   return details
 }

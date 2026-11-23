@@ -115,7 +115,7 @@ describe("a mentioned task's card", () => {
   const today = '2026-11-22'
   const projects = [{ id: 9, name: 'Catch Up' }]
 
-  it('says where it lives, that it is late, its subtasks, that it is under way, and how its notes begin', () => {
+  it('says where it lives, that it is late, its subtasks and that it is under way', () => {
     const promises = task(1, 'Keep the promises', {
       projectId: 9,
       due: '2026-11-18',
@@ -128,7 +128,6 @@ describe("a mentioned task's card", () => {
       { kind: 'when', text: 'Late · 18 Nov', late: true },
       { kind: 'subtasks', done: 1, total: 2 },
       { kind: 'doing' },
-      { kind: 'notes', text: 'Go through sent mail and answer everyone who is still waiti…' },
     ])
   })
 
