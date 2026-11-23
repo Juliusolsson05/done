@@ -2,6 +2,7 @@
 // no such component, so the grid is plain elements; its controls are not.
 import { useRef, useState, type PointerEvent } from 'react'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { PriorityDot, ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
@@ -9,7 +10,7 @@ import { TaskCheck, useFinish } from '@/components/task-row'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
-import { dragBar, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
+import { dragBar, patchTask, timelineGroups, type DragMode, type Task, type TimelineOrder } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The width of one day in pixels. Every left and width below is a number of
@@ -26,6 +27,17 @@ function textWidth(text: string): number {
   return ruler.measureText(text).width
 }
 
+// The order is a habit of the person, not of the moment, so it is
+// remembered on this device. Anything else in storage means the default.
+const ORDER_KEY = 'done-timeline-group'
+function storedOrder(): TimelineOrder {
+  try {
+    return localStorage.getItem(ORDER_KEY) === 'date' ? 'date' : 'project'
+  } catch {
+    return 'project'
+  }
+}
+
 interface Drag {
   id: number
   mode: DragMode
@@ -36,7 +48,7 @@ interface Drag {
   length: number
 }
 
-function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | null; bar: BarHandlers }) {
+function Row({ task, days, drag, bar, showProject }: { task: Task; days: Day[]; drag: Drag | null; bar: BarHandlers; showProject: boolean }) {
   const { data, ui, noticed, edit, update } = useApp()
   const [leaving, finish] = useFinish(task.id)
   const first = task.start ?? task.due
@@ -95,6 +107,8 @@ function Row({ task, days, drag, bar }: { task: Task; days: Day[]; drag: Drag | 
     <div data-task={task.id} className={cn('relative flex h-9', leaving && 'opacity-0 transition-opacity delay-150 duration-150')}>
       <div className="sticky left-0 z-30 flex w-64 shrink-0 max-md:w-36 items-center gap-2.5 border-r bg-background px-3">
         <TaskCheck task={task} checked={leaving} onChange={finish} />
+        {/* By date, projects are mixed in one list, so each row says its own. */}
+        {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
         <Button
           variant="ghost"
           onClick={() => edit(task.id)}
@@ -123,7 +137,16 @@ export function Timeline() {
   const [drag, setDrag] = useState<Drag | null>(null)
   const days = Array.from({ length: DAYS }, (_, i) => addDays(ui.tlStart, i))
   const width = DAYS * DAY_WIDTH
-  const groups = timelineGroups(data.projects, data.tasks)
+  const [order, setOrderState] = useState(storedOrder)
+  const setOrder = (next: TimelineOrder) => {
+    setOrderState(next)
+    try {
+      localStorage.setItem(ORDER_KEY, next)
+    } catch {
+      // Private windows may refuse storage; the order still applies for now.
+    }
+  }
+  const groups = timelineGroups(data.projects, data.tasks, order)
 
   // How many whole days the pointer is from where it went down.
   const daysMoved = (from: Drag, x: number) => {
@@ -165,6 +188,15 @@ export function Timeline() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ViewHeader title="Timeline" sub={`${shortDay(ui.tlStart)} to ${shortDay(addDays(ui.tlStart, DAYS - 1))}`}>
+        <Select value={order} onValueChange={(value) => setOrder(value as TimelineOrder)}>
+          <SelectTrigger size="sm" aria-label="Group by" className="h-8 border-0 text-muted-foreground shadow-none hover:bg-accent">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="project">Project first</SelectItem>
+            <SelectItem value="date">Date first</SelectItem>
+          </SelectContent>
+        </Select>
         <HeaderButton onClick={() => setTlStart(addDays(ui.tlStart, -7))}>Earlier</HeaderButton>
         <HeaderButton
           onClick={() => {
@@ -224,16 +256,16 @@ export function Timeline() {
           </div>
 
           {groups.map((group) => (
-            <div key={group.id ?? 'inbox'}>
+            <div key={group.key}>
               <div className="relative mt-1 flex h-8">
                 <div className="sticky left-0 z-30 flex w-64 shrink-0 max-md:w-36 items-center gap-2 border-r bg-background px-3 text-xs font-semibold text-muted-foreground">
-                  <ProjectDot id={group.id} />
+                  {group.id !== undefined && <ProjectDot id={group.id} />}
                   {group.name}
                   <span className="font-normal text-faint">{group.tasks.length}</span>
                 </div>
               </div>
               {group.tasks.map((task) => (
-                <Row key={task.id} task={task} days={days} drag={drag} bar={bar} />
+                <Row key={task.id} task={task} days={days} drag={drag} bar={bar} showProject={group.id === undefined} />
               ))}
             </div>
           ))}

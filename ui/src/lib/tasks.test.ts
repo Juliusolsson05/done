@@ -133,6 +133,33 @@ describe('timelineGroups', () => {
     expect(groups.map((g) => g.name)).toEqual(['Inbox', 'Home'])
     expect(ids(groups[0].tasks)).toEqual([3, 2, 1])
   })
+
+  it('by date, lists every project in one list by day, a tie by project then priority, undated last', () => {
+    const projects = [
+      { id: 8, name: 'Hop' },
+      { id: 9, name: 'Home' },
+    ]
+    const groups = timelineGroups(
+      projects,
+      [
+        task(1, { projectId: 9, due: '2026-11-20' }),
+        task(2, { projectId: 8, due: '2026-11-20', priority: 2 }),
+        task(3, { projectId: 8, due: '2026-11-20', priority: 1 }),
+        task(4, { due: '2026-11-20' }),
+        task(5, { projectId: 9, start: '2026-11-15', due: '2026-11-30' }),
+        task(6, { projectId: 9 }),
+        task(7),
+      ],
+      'date',
+    )
+    expect(groups.map((g) => [g.name, g.id])).toEqual([
+      ['Scheduled', undefined],
+      ['No date', undefined],
+    ])
+    // 5 starts first; on the 20th the Inbox, then Hop by priority, then Home.
+    expect(ids(groups[0].tasks)).toEqual([5, 4, 3, 2, 1])
+    expect(ids(groups[1].tasks)).toEqual([7, 6])
+  })
 })
 
 describe("today's goal", () => {
