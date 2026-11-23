@@ -80,7 +80,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         leaving && 'opacity-0 transition-opacity delay-150 duration-150',
       )}
     >
-      <TaskCheck task={task} checked={leaving} onChange={finish} className={goal ? 'mt-1 size-5 border-primary' : 'mt-px'} />
+      <TaskCheck task={task} checked={leaving} onChange={finish} className={goal ? 'mt-1 size-5' : 'mt-px'} />
       <div className="flex min-w-0 flex-1 flex-col items-start">
         <Button
           variant="ghost"
