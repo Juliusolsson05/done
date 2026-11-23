@@ -291,13 +291,7 @@ function ProjectMenu({ id }: { id: number }) {
         Rename
       </ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuSub>
-        <ContextMenuSubTrigger>
-          <span className="flex-1">Colour</span>
-          {current !== null && <span style={colorStyle(current)} className="mr-1 size-2.5 rounded-xs bg-project" />}
-        </ContextMenuSubTrigger>
-        <ContextMenuSubContent>
-      <ContextMenuGroup className="grid grid-cols-4 gap-1 p-1">
+      <ContextMenuGroup className="flex gap-1 p-1" aria-label="Colour">
         {Array.from({ length: COLOR_COUNT }, (_, i) => (
           <ContextMenuItem
             key={i}
@@ -312,8 +306,7 @@ function ProjectMenu({ id }: { id: number }) {
           </ContextMenuItem>
         ))}
       </ContextMenuGroup>
-        </ContextMenuSubContent>
-      </ContextMenuSub>
+      <ContextMenuSeparator />
       {/* A quick way into a filtered Board or Timeline: only this project. */}
       <ContextMenuSub>
         <ContextMenuSubTrigger>Show only this</ContextMenuSubTrigger>

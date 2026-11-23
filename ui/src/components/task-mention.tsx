@@ -12,7 +12,7 @@ import { loadFinished } from '@/lib/backend'
 import { play } from '@/lib/sounds'
 import { change } from '@/lib/store'
 import { recordStep } from '@/lib/undo'
-import { shortDay, TODAY } from '@/lib/days'
+import { describeDay, shortDay, TODAY } from '@/lib/days'
 import { mentionDetails, type Detail } from '@/lib/mentions'
 import { toggleExpanded, useExpanded } from '@/lib/expanded'
 import { markOpen, subtasksOf, type Task } from '@/lib/tasks'
@@ -155,6 +155,44 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
           </span>
         )}
       </span>
+    </span>
+  )
+}
+
+// A mentioned task inside a sentence: its check and title, in a line with
+// the words around it, and its date only when it is late. The full card is
+// for a mention on a line of its own (see markInline in lib/mentions).
+export function TaskMentionInline({ id, fallback }: { id: number; fallback: ReactNode }) {
+  const goTo = useGoTo()
+  const toggle = useToggle()
+  const task = useMentioned(id)
+  if (!task)
+    return (
+      <span className="text-muted-foreground" title={task === null ? 'Finished a while ago, or deleted' : undefined}>
+        {fallback}
+      </span>
+    )
+  const done = !!task.done
+  const late = !done && task.due !== null && task.due < TODAY
+  return (
+    <span data-mention={task.id} className="inline rounded-md bg-primary/6 px-1 py-px [box-decoration-break:clone]">
+      <TaskCheck task={task} checked={done} onChange={() => toggle(task)} className="mr-1.5 inline-flex size-3.5 -translate-y-px align-middle max-md:size-3.5 max-md:after:-inset-2" />
+      {/* Text, not a button, so a long title wraps with the sentence. */}
+      <span
+        role="link"
+        tabIndex={0}
+        onClick={() => goTo(task)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            goTo(task)
+          }
+        }}
+        className={cn('cursor-pointer font-medium text-foreground [overflow-wrap:anywhere] hover:underline focus-visible:underline focus-visible:outline-none', done && 'text-muted-foreground line-through')}
+      >
+        {task.title}
+      </span>
+      {late && task.due && <span className="ml-1.5 text-xs text-overdue tabular-nums">{describeDay(task.due, TODAY)}</span>}
     </span>
   )
 }
