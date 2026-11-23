@@ -134,7 +134,7 @@ interface BarHandlers {
 }
 
 export function Timeline() {
-  const { data, ui, dragging, setTlStart, edit, update } = useApp()
+  const { ui, dragging, setTlStart, edit, update, shown: inScope } = useApp()
   const scroller = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   const days = Array.from({ length: DAYS }, (_, i) => addDays(ui.tlStart, i))
@@ -151,12 +151,12 @@ export function Timeline() {
   // The filter only changes what is drawn; see lib/view-filter.
   const filter = useViewFilter()
   const groups = timelineGroups(
-    data.projects,
-    data.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    inScope.projects,
+    inScope.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
     order,
   )
   const shown = groups.reduce((n, g) => n + g.tasks.length, 0)
-  const total = timelineGroups(data.projects, data.tasks, order).reduce((n, g) => n + g.tasks.length, 0)
+  const total = timelineGroups(inScope.projects, inScope.tasks, order).reduce((n, g) => n + g.tasks.length, 0)
 
   // How many whole days the pointer is from where it went down.
   const daysMoved = (from: Drag, x: number) => {

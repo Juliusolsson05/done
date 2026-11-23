@@ -116,11 +116,11 @@ function Reminders() {
 // Starts the first block in Up next, naming it and its length. Nothing
 // when the list is empty.
 function StartNext({ variant }: { variant: 'default' | 'outline' }) {
-  const { data } = useApp()
+  const { shown: { tasks } } = useApp()
   const next = useSyncExternalStore(subscribeFocus, getUpNext)[0]
   if (!next) return null
   return (
-    <Button variant={variant} className="max-w-full" onClick={() => startNext(data.tasks)}>
+    <Button variant={variant} className="max-w-full" onClick={() => startNext(tasks)}>
       <span className="truncate">Start next: {next.title}</span>
       <span className="opacity-70 tabular-nums">· {minutesText(next.minutes * 60000)}</span>
     </Button>
@@ -132,10 +132,10 @@ function StartNext({ variant }: { variant: 'default' | 'outline' }) {
 const MORE = [5, 10, 15]
 
 function Setup() {
-  const { data, ui, chooseFocus } = useApp()
+  const { shown, me, ui, chooseFocus } = useApp()
   const [typed, setTyped] = useState('')
-  const tasks = focusTasks(data.tasks, TODAY)
-  const goal = goalTask(data.tasks, TODAY)
+  const tasks = focusTasks(shown.tasks, TODAY)
+  const goal = goalTask(shown.tasks, TODAY, me)
   const wanted = ui.focusPick ?? (goal && !goal.done ? String(goal.id) : NOTHING)
   // The task chosen earlier may have been finished or deleted since.
   const pick = tasks.some((t) => String(t.id) === wanted) ? wanted : NOTHING

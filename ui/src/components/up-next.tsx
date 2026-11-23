@@ -19,8 +19,8 @@ const MINUTE = 60000
 const NOTHING = 'none'
 
 function AddBlock() {
-  const { data } = useApp()
-  const tasks = focusTasks(data.tasks, TODAY)
+  const { shown } = useApp()
+  const tasks = focusTasks(shown.tasks, TODAY)
   const [pick, setPick] = useState(NOTHING)
   const [minutes, setMinutes] = useState('')
   // The task chosen may have been finished or deleted since.

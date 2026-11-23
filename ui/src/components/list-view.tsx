@@ -44,9 +44,9 @@ export function HeaderButton({ danger = false, ...props }: { danger?: boolean; o
 // in the app drawn larger than the others, because it is the only one that
 // is more important than the others.
 function GoalBlock() {
-  const { data, ui, addGoal, focusOn } = useApp()
+  const { shown, me, ui, addGoal, focusOn } = useApp()
   const isMobile = useIsMobile()
-  const task = goalTask(data.tasks, TODAY)
+  const task = goalTask(shown.tasks, TODAY, me)
   if (!task) {
     return (
       <Button
@@ -111,25 +111,29 @@ const EMPTY: Record<string, [string, string]> = {
   inbox: ['Inbox is empty', 'Anything you add without a project lands here.'],
   today: ['Nothing due today', 'Tasks with today’s date show up here, along with anything overdue.'],
   upcoming: ['Nothing scheduled', 'Give a task a date and it appears here, grouped by day.'],
+  mine: ['Nothing assigned to you', 'When someone in a workspace puts you on a task, it shows up here.'],
 }
 
 export function ListView() {
-  const { data, ui, rename, askDelete, closeAll, removeProject } = useApp()
+  const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject } = useApp()
   const view = ui.view
-  const list = sections(view, data.tasks, TODAY)
+  // Assigned to me: the tasks someone put you on, in the scope.
+  const source = view.kind === 'mine' ? shown.tasks.filter((t) => me !== null && (t.assignees ?? []).includes(me)) : shown.tasks
+  const list = sections(view, source, TODAY, keep)
   const count = list.reduce((n, s) => n + s.tasks.length, 0)
   const addUnderSection = list.some((s) => s.addHere)
   const empty =
     view.kind === 'project'
       ? ['No tasks in this project yet', `Add one below, or type @${tagOf(projectName(data.projects, view.id))} when adding a task anywhere.`]
       : EMPTY[view.kind]
-  const hasGoal = view.kind === 'today' && goalTask(data.tasks, TODAY) !== undefined
+  const hasGoal = view.kind === 'today' && goalTask(shown.tasks, TODAY, me) !== undefined
 
   return (
     <div className="max-w-3xl">
       {view.kind === 'inbox' && <ViewHeader title="Inbox" />}
       {view.kind === 'today' && <ViewHeader title="Today" sub={fullDay(TODAY)} />}
       {view.kind === 'upcoming' && <ViewHeader title="Upcoming" />}
+      {view.kind === 'mine' && <ViewHeader title="Assigned to me" />}
       {view.kind === 'project' && (
         <ViewHeader title={<ProjectTitle id={view.id} />}>
           {ui.confirmDelete ? (

@@ -1,7 +1,8 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, useMemo } from 'react'
+import { inScope, spaceForNew } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -55,9 +56,17 @@ function storedKept(): string[] {
 }
 
 export function Notes() {
-  const { ui, data } = useApp()
+  const { ui, data, scope, team } = useApp()
   const isMobile = useIsMobile()
-  const [notes, setNotes] = useState<Note[] | null>(null)
+  const [stored, setNotes] = useState<Note[] | null>(null)
+  // The notes of the space the picker is on. A note is where its project is,
+  // else where it was written.
+  const notes = useMemo(
+    () =>
+      stored &&
+      stored.filter((n) => inScope(n.projectId != null ? (data.projects.find((p) => p.id === n.projectId)?.spaceId ?? n.spaceId) : n.spaceId, scope, team)),
+    [stored, scope, team, data.projects],
+  )
   const [openId, setOpenId] = useState<number | null>(null)
   // What is typed in the search field. Kept while notes are opened, so going
   // through the matches one by one does not lose it.
@@ -210,7 +219,7 @@ export function Notes() {
     leave(openId)
     try {
       await queue.current
-      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into })
+      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into, spaceId: spaceForNew(scope) })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
       setOpenId(note.id)

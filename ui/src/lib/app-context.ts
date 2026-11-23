@@ -4,7 +4,8 @@ import type { Info } from '@/lib/backend'
 import type { Day } from '@/lib/days'
 import type { Session } from '@/lib/focus'
 import type { Hit } from '@/lib/search'
-import { colorIndex, type Data, type Project, type View } from '@/lib/tasks'
+import { colorIndex, type Data, type Project, type Task, type View } from '@/lib/tasks'
+import type { Scope, Shown, Team } from '@/lib/team'
 
 // What is on screen right now. Not saved: a reload always starts in Today.
 export interface Ui {
@@ -27,8 +28,23 @@ export interface Ui {
 }
 
 export interface App {
+  // Everything this window holds. Changes go through `update`, always on all
+  // of it; what a view lists comes from `shown`.
   data: Data
   info: Info
+  // With an account: the spaces, members and notifications; null without.
+  team: Team | null
+  // This person's account id, for "assigned to me" and whose goal is whose.
+  me: string | null
+  // Where the picker is, and what each view lists there.
+  scope: Scope
+  setScope(scope: Scope): void
+  shown: Shown
+  // Narrows Today and Upcoming: in All, someone else's workspace tasks are left out.
+  keep(task: Task): boolean
+  // Runs a workspace call on the server and brings the window up to date. A
+  // refusal is said in its own words; true when it worked.
+  teamAct(run: () => Promise<unknown>, said?: string): Promise<boolean>
   ui: Ui
   zoom: number
   // The focus session that is running, paused or just ended, if any.

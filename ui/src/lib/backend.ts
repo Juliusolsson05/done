@@ -129,6 +129,24 @@ export async function replicate(): Promise<boolean> {
   return arrived || outbox.renumbered > 0
 }
 
+// Workspaces: made, changed and joined on the hosted server, never on a
+// device's own file (a device learns the result at its next sync). Only for a
+// window that has an account: its data has a team.
+export const workspaceCalls = {
+  create: (name: string) => post<{ space: number }>('/api/workspaces', { name }),
+  rename: (space: number, name: string) => post<unknown>('/api/workspaces/rename', { space, name }),
+  remove: (space: number) => post<unknown>('/api/workspaces/delete', { space }),
+  invite: (space: number, email: string) => post<{ invite: number; link: string }>('/api/workspaces/invite', { space, email }),
+  link: (invite: number) => post<{ invite: number; link: string }>('/api/workspaces/invite-link', { invite }),
+  revoke: (invite: number) => post<unknown>('/api/workspaces/revoke', { invite }),
+  accept: (invite: number) => post<{ space: number }>('/api/invites/accept', { invite }),
+  decline: (invite: number) => post<unknown>('/api/invites/decline', { invite }),
+  removeMember: (space: number, account: string) => post<unknown>('/api/workspaces/remove', { space, account }),
+  leave: (space: number) => post<unknown>('/api/workspaces/leave', { space }),
+  moveProject: (project: number, space: number) => post<unknown>('/api/projects/move', { project, space }),
+  read: () => post<unknown>('/api/notifications/read', {}),
+}
+
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
 export const signOut = async (): Promise<void> => {

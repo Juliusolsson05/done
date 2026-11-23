@@ -82,13 +82,14 @@ export function Board() {
   // The filter only changes what is drawn. Subtasks go through untouched:
   // the board shows top-level tasks, and a subtask is judged with its task.
   const filter = useViewFilter()
+  const shownTasks = useApp().shown.tasks
   const columns = lanes(
-    data.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    shownTasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
     TODAY,
   )
   const count = (c: Record<LaneKey, Task[]>) => c.todo.length + c.doing.length + c.done.length
   const shown = count(columns)
-  const total = count(lanes(data.tasks, TODAY))
+  const total = count(lanes(shownTasks, TODAY))
 
   const onDrag = (id: number | null) => {
     setCard(id)

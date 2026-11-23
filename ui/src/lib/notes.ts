@@ -12,6 +12,8 @@ export interface Note {
   projectId?: number | null
   // The folder it is filed in, by name, if any.
   folder?: string | null
+  // The space it lives in: its project's, or the workspace it was written in.
+  spaceId?: number | null
 }
 
 // What a window sends to save a note: without an id it is a new one.
@@ -21,6 +23,8 @@ export interface SaveNote {
   updatedAt: number
   projectId?: number | null
   folder?: string | null
+  // For a new note: the workspace it is written in; none is your own.
+  spaceId?: number | null
 }
 
 // The first line with something on it names the note in the list, without

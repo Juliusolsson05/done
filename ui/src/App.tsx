@@ -11,6 +11,8 @@ import { FocusView } from '@/components/focus-view'
 import { ListView } from '@/components/list-view'
 import { isTab, ListsScreen, NewTaskButton, TabBar, useEdgeSwipeBack } from '@/components/phone'
 import { MobileQuickAdd } from '@/components/quick-add'
+import { MoveProjectDialog } from '@/components/move-project'
+import { NotificationsScreen } from '@/components/notifications'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
 import { TaskEditorDialog, TaskSheet } from '@/components/task-editor'
@@ -25,7 +27,9 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
-import { change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } from '@/lib/store'
+import { caughtUp, change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } from '@/lib/store'
+import { setScope, useScope } from '@/lib/scope-store'
+import { forMe, shownFor, validScope } from '@/lib/team'
 import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -83,6 +87,10 @@ export default function App() {
   const dragging = useRef(false)
   const menuOpen = useRef(false)
   const isMobile = useIsMobile()
+  const team = data.team ?? null
+  const me = team?.me ?? null
+  const scope = validScope(useScope(), team)
+  const shown = shownFor(data, scope, team)
 
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
   // The page a phone swipes back from.
@@ -122,6 +130,28 @@ export default function App() {
   const app: AppValue = {
     data,
     info,
+    team,
+    me,
+    scope,
+    shown,
+    setScope: (next) => {
+      setScope(next)
+      // A project of another space is not on the page any more.
+      setUi((u) => ({ ...u, ...CLOSED, view: u.view.kind === 'project' || (u.view.kind === 'inbox' && typeof next === 'number') ? { kind: 'today' } : u.view }))
+    },
+    keep: (task) => scope !== 'all' || forMe(task, me),
+    async teamAct(run, said) {
+      try {
+        await run()
+        await caughtUp()
+        if (said) say(said)
+        return true
+      } catch (error) {
+        play('error')
+        say(error instanceof Error && error.message !== 'failed' ? error.message : 'That did not work. Check the connection and try again.')
+        return false
+      }
+    },
     ui,
     zoom,
     focus,
@@ -137,7 +167,7 @@ export default function App() {
         ...u,
         ...CLOSED,
         view:
-          u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' || u.view.kind === 'lists'
+          u.view.kind === 'settings' || u.view.kind === 'focus' || u.view.kind === 'timesheet' || u.view.kind === 'completed' || u.view.kind === 'notes' || u.view.kind === 'lists' || u.view.kind === 'notifications'
             ? { kind: 'inbox' }
             : u.view,
         adding: true,
@@ -471,15 +501,18 @@ export default function App() {
                   {view.kind === 'notes' && <Notes />}
                   {view.kind === 'completed' && <Completed />}
                   {view.kind === 'settings' && <Settings />}
+                  {view.kind === 'notifications' && <NotificationsScreen />}
                   {!wide &&
                     view.kind !== 'focus' &&
                     view.kind !== 'timesheet' &&
                     view.kind !== 'completed' &&
                     view.kind !== 'notes' &&
                     view.kind !== 'settings' &&
+                    view.kind !== 'notifications' &&
                     view.kind !== 'lists' && <ListView />}
                 </div>
                 <TaskEditorDialog task={editing} />
+                <MoveProjectDialog />
                 <SearchDialog />
                 <FindBar />
               </SidebarInset>

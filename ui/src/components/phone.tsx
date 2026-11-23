@@ -146,9 +146,9 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
 
 // The tab bar: the three lists used every day, and Lists for the rest.
 export function TabBar() {
-  const { data, ui, openView } = useApp()
+  const { shown, keep, ui, openView } = useApp()
   // Red, like any badge on iOS, so only for what is overdue.
-  const late = openTasks(data.tasks).filter((t) => t.due !== null && t.due < TODAY).length
+  const late = openTasks(shown.tasks).filter((t) => keep(t) && t.due !== null && t.due < TODAY).length
   const current = isTab(ui.view) ? ui.view.kind : 'lists'
   // Out of the way while something is being written: the keyboard is up.
   if (ui.adding || ui.editing !== null) return null
@@ -254,8 +254,8 @@ function Card({ icon: Icon, name, count, color, onClick }: { icon: LucideIcon; n
 
 // Everything that is not a tab: the lists, the projects and the other views.
 export function ListsScreen() {
-  const { data, openView, search, newProject } = useApp()
-  const count = counts(data.tasks, TODAY)
+  const { shown, keep, openView, search, newProject } = useApp()
+  const count = counts(shown.tasks, TODAY, keep)
   const go = (view: View) => {
     tick()
     openView(view)
@@ -286,8 +286,8 @@ export function ListsScreen() {
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">My Lists</h2>
         <Group>
-          {data.projects.map((p) => (
-            <div key={p.id} style={colorStyle(colorIndex(data.projects, p.id))} className="contents">
+          {shown.projects.map((p) => (
+            <div key={p.id} style={colorStyle(colorIndex(shown.projects, p.id))} className="contents">
               <GroupRow
                 icon={<ListIcon className="size-4" strokeWidth={2.6} />}
                 name={p.name}
@@ -296,7 +296,7 @@ export function ListsScreen() {
               />
             </div>
           ))}
-          {data.projects.length === 0 && <p className="px-4 py-3 text-subhead text-tertiary">No lists yet.</p>}
+          {shown.projects.length === 0 && <p className="px-4 py-3 text-subhead text-tertiary">No lists yet.</p>}
         </Group>
         <button type="button" onClick={newProject} className="self-end px-1 text-body text-primary active:opacity-40">
           Add List
