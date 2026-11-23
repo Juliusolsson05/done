@@ -487,7 +487,7 @@ export function Notes() {
       {notes && (
         <div className="flex items-start gap-6">
           {/* The folders and the list stay where they are while a long note scrolls past them. */}
-          {!isMobile && !reading && <div className="w-44 shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:overflow-y-auto">{folderNav(false)}</div>}
+          {!isMobile && !reading && <div className="w-44 shrink-0 overflow-x-hidden md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:overflow-y-auto">{folderNav(false)}</div>}
           <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
             {notes.length > 0 && (
               <div className="relative mb-4">

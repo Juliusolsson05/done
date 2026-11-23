@@ -104,12 +104,13 @@ export function FolderNav({ folders, total, selected, onSelect, onCreate, onRena
           )}
           {/* The chosen folder's own actions sit right under it. */}
           {!large && selected !== null && sameFolder(selected, folder.name) && editing !== folder.name && (
-            <div className="flex gap-1 pb-1 pl-8">
+            // Short words: the column is narrow, and the folder above says what they act on.
+            <div className="flex flex-wrap gap-0.5 pb-1 pl-6">
               <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setEditing(folder.name)}>
                 Rename
               </Button>
               <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(folder.name)}>
-                Delete folder
+                Delete
               </Button>
             </div>
           )}
