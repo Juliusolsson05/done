@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { NotesText } from '@/components/notes-text'
 import { Subtasks } from '@/components/subtasks'
+import { TaskFaces, WorkspaceTag } from '@/components/assignees'
 import { SwipeRow } from '@/components/swipe-row'
 import { TaskEditor } from '@/components/task-editor'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -70,7 +71,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
     <div
       data-task={task.id}
       className={cn(
-        'flex items-start gap-2.5 rounded-lg p-2 md:hover:bg-muted',
+        'group/row flex items-start gap-2.5 rounded-lg p-2 md:hover:bg-muted',
         // A phone: Reminders' row. The text in iOS's body size, a hairline
         // under it that starts where the text starts, and the grey of a
         // row being pressed.
@@ -134,6 +135,9 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             {projectName(data.projects, task.projectId)}
           </span>
         )}
+        {/* In All, which workspace; on a workspace's task, who is on it. */}
+        <WorkspaceTag task={task} />
+        <TaskFaces task={task} ring={isMobile ? 'ring-background' : 'ring-background group-hover/row:ring-muted'} />
       </div>
     </div>
   )

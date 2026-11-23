@@ -7,14 +7,21 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
 } from '@/components/ui/context-menu'
+import { Avatar } from '@/components/avatars'
+import { useTaskPeople } from '@/components/assignees'
+import { askMove } from '@/lib/move-store'
+import { isPersonal, workspaces } from '@/lib/team'
 import { PriorityDot } from '@/components/marks'
 import { colorStyle, useApp } from '@/lib/app-context'
 import { addDays, nextWeekday, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { expand } from '@/lib/expanded'
 import { getFolderPanel, nameFolder, NEW_FOLDER } from '@/lib/note-folder-panel'
-import { COLOR_COUNT, colorIndex, isSubtask, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
+import { COLOR_COUNT, colorIndex, isSubtask, patchProject, patchTask, setAssignees, setGoal, toggleAssignee, type Task, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 import { NO_FILTER } from '@/lib/view-filter'
 import { setViewFilter } from '@/lib/view-filter-store'
@@ -45,8 +52,33 @@ export function menuTargetOf(element: Element): MenuTarget {
 const CHOICE = 'flex-1 justify-center bg-muted'
 const CHOSEN = 'bg-primary text-primary-foreground focus:bg-primary focus:text-primary-foreground'
 
+// Who is on a workspace's task, from the menu: each member with a check, and Nobody.
+function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<ReturnType<typeof useApp>['update']>[0], notice?: number) => void }) {
+  const { me } = useApp()
+  const { space } = useTaskPeople(task)
+  if (!space) return null
+  const on = task.assignees ?? []
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>Assign</ContextMenuSubTrigger>
+      <ContextMenuSubContent className="min-w-48">
+        {space.members.map((m) => (
+          <ContextMenuCheckboxItem key={m.id} checked={on.includes(m.id)} onSelect={() => change((d) => toggleAssignee(d, task.id, m.id), task.id)}>
+            <Avatar who={m} size="xs" />
+            {m.id === me ? 'Me' : m.name || m.email}
+          </ContextMenuCheckboxItem>
+        ))}
+        <ContextMenuSeparator />
+        <ContextMenuCheckboxItem checked={on.length === 0} onSelect={() => change((d) => setAssignees(d, task.id, []), task.id)}>
+          Nobody
+        </ContextMenuCheckboxItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  )
+}
+
 function TaskMenu({ task }: { task: Task }) {
-  const { data, edit, focusOn, complete, reopen, removeTask, update } = useApp()
+  const { data, me, edit, focusOn, complete, reopen, removeTask, update } = useApp()
   // Every change made from the menu is confirmed with the same quiet tick.
   const change: typeof update = (fn, notice) => {
     play('confirm')
@@ -104,11 +136,12 @@ function TaskMenu({ task }: { task: Task }) {
       {task.goalDay === TODAY ? (
         <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { goalDay: null }))}>Remove as today’s goal</ContextMenuItem>
       ) : (
-        <ContextMenuItem onSelect={() => change((d) => setGoal(d, task.id, TODAY), task.id)}>Make today’s goal</ContextMenuItem>
+        <ContextMenuItem onSelect={() => change((d) => setGoal(d, task.id, TODAY, me), task.id)}>Make today’s goal</ContextMenuItem>
       )}
       <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { status: doing ? undefined : 'doing' }))}>
         {doing ? 'Move back to To do' : 'Mark as in progress'}
       </ContextMenuItem>
+      <AssignMenu task={task} change={change} />
       <ContextMenuSeparator />
       <ContextMenuLabel>Due</ContextMenuLabel>
       {due('Today', TODAY)}
@@ -142,6 +175,29 @@ function TaskMenu({ task }: { task: Task }) {
   )
 }
 
+// Moving a project to another space: into each workspace it is not in, and
+// out of a workspace back to one's own. The dialog that confirms it says who
+// gains or loses it (components/move-project.tsx).
+function MoveMenu({ id }: { id: number }) {
+  const { data, team } = useApp()
+  const project = data.projects.find((p) => p.id === id)
+  const spaces = workspaces(team)
+  if (!project || !team || spaces.length === 0) return null
+  const mine = isPersonal(project.spaceId, team)
+  const targets = spaces.filter((s) => s.id !== project.spaceId)
+  return (
+    <>
+      <ContextMenuSeparator />
+      {targets.map((s) => (
+        <ContextMenuItem key={s.id} onSelect={() => askMove({ project: id, to: s.id })}>
+          Move to {s.name}
+        </ContextMenuItem>
+      ))}
+      {!mine && <ContextMenuItem onSelect={() => askMove({ project: id, to: team.personal })}>Move to my own space</ContextMenuItem>}
+    </>
+  )
+}
+
 function ProjectMenu({ id }: { id: number }) {
   const { data, openView, add, rename, removeProject, update } = useApp()
   const open = () => openView({ kind: 'project', id })
@@ -165,6 +221,7 @@ function ProjectMenu({ id }: { id: number }) {
       >
         Rename
       </ContextMenuItem>
+      <MoveMenu id={id} />
       <ContextMenuSeparator />
       <ContextMenuLabel>Colour</ContextMenuLabel>
       <ContextMenuGroup className="flex gap-1 p-1">
