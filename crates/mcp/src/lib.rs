@@ -110,7 +110,7 @@ fn tools() -> Value {
         { "name": "list_projects", "description": "List the projects.", "inputSchema": { "type": "object", "properties": {} } },
         { "name": "add_project", "description": "Create a project.",
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title. Each note lists the tasks it mentions, with whether they are done.",
+        { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title. Each note lists the tasks it mentions, with whether they are done (found: false means finished a while ago, or deleted).",
           "inputSchema": { "type": "object", "properties": {
               "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." },
               "folder": { "type": "string", "description": "Only notes in this folder, case ignored." } } } },
@@ -288,7 +288,10 @@ fn describe_note(note: &Note, projects: &[Project], known: &[Task]) -> Value {
         .into_iter()
         .map(|id| match known.iter().find(|t| t.id == id) {
             Some(t) => json!({ "id": id, "title": t.title, "done": t.done }),
-            None => json!({ "id": id, "deleted": true }),
+            // Not open, not finished recently: finished long ago, or deleted.
+            // Which one cannot be told, so an agent is not told it was deleted
+            // (it might then "fix" the note).
+            None => json!({ "id": id, "found": false, "why": "finished a while ago, or deleted" }),
         })
         .collect();
     let project = note.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
@@ -720,7 +723,7 @@ mod tests {
         assert_eq!(tasks.as_array().unwrap().len(), 3);
         assert_eq!((tasks[0]["id"].as_i64(), tasks[0]["done"].as_bool()), (Some(bank), Some(false)));
         assert_eq!((tasks[1]["id"].as_i64(), tasks[1]["done"].as_bool()), (Some(sync), Some(true)));
-        assert_eq!(tasks[2]["deleted"], true);
+        assert_eq!(tasks[2]["found"], false);
     }
 
     #[test]

@@ -629,6 +629,8 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
   // The @ the list was closed for with Esc (where it starts), so it stays closed.
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [chosen, setChosen] = useState(0)
+  // The list only shows while the note is being written in: clicking away closes it.
+  const [writing, setWriting] = useState(false)
   // Where the caret goes once a mention has been put in.
   const nextCaret = useRef<number | null>(null)
   useLayoutEffect(() => {
@@ -647,13 +649,32 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
   // The @ picker: open while an @ is being typed and some task fits it. It
   // only ever inserts plain text (a Markdown link); see lib/mentions.
   const at = atQuery(note.text, caret)
-  const offered = at && at.start !== dismissed ? suggestions(data.tasks, at.query) : []
+  const offered = writing && at && at.start !== dismissed ? suggestions(data.tasks, at.query) : []
   const query = at?.query
   useEffect(() => setChosen(0), [query])
+  // Esc closes the list for that one @. Once it is gone, a new @ in the same
+  // place opens the list again.
+  const atStart = at?.start ?? null
+  useEffect(() => {
+    if (atStart === null) setDismissed(null)
+  }, [atStart])
   const point = offered.length > 0 && field.current && at ? caretPoint(field.current, at.start) : null
   const pick = (task: Task) => {
-    if (!at) return
+    const el = field.current
+    if (!at || !el) return
     const next = insertMention(note.text, at.start, caret, task)
+    // Put in the way typing does, so Cmd+Z in the note can still take it
+    // (and what was typed before it) back: setting the field's value from
+    // code would wipe the field's own undo history. The input event this
+    // fires carries the new text through onChange as usual.
+    el.setSelectionRange(at.start, caret)
+    const inserted = next.text.slice(at.start, next.text.length - (note.text.length - caret))
+    if (document.execCommand?.('insertText', false, inserted)) {
+      el.setSelectionRange(next.caret, next.caret)
+      setCaret(next.caret)
+      return
+    }
+    // Where insertText is not supported, set the text directly.
     nextCaret.current = next.caret
     onChange(next.text)
   }
@@ -686,8 +707,13 @@ function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; o
         }}
         onSelect={follow}
         onKeyUp={follow}
+        onFocus={() => setWriting(true)}
+        onBlur={() => setWriting(false)}
         onKeyDown={(event) => {
           if (offered.length === 0 || !at) return
+          // Enter that finishes a word in a Japanese or Chinese input method,
+          // and Enter or Tab with a modifier, are not a choice from the list.
+          if (event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
             const step = event.key === 'ArrowDown' ? 1 : -1

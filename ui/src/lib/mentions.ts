@@ -37,7 +37,10 @@ const MENTION = /\[((?:\\.|[^\]\\\n])*)\]\(done:task\/(\d{1,20})\)/g
 
 // Code is shown as written, so a mention inside it is text, not a task: the
 // same rule the Markdown parser follows when it draws the note.
-const withoutCode = (text: string): string => text.replace(/^(```|~~~)[^\n]*\n[\s\S]*?(^\1[^\n]*$|(?![\s\S]))/gm, '').replace(/`[^`\n]*`/g, '')
+// Fences may be indented (inside a list item, say), and a code span may use
+// more than one backtick (``a `b` c``).
+const withoutCode = (text: string): string =>
+  text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?(^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, '').replace(/(`+)[^\n]*?\1/g, '')
 
 // The tasks a note mentions, in the order they first appear, once each.
 export function mentionsIn(text: string): number[] {
@@ -78,7 +81,9 @@ export function insertMention(text: string, start: number, caret: number, task: 
   const after = text.slice(caret)
   const space = after.startsWith(' ') || after.startsWith('\n') ? '' : ' '
   const next = text.slice(0, start) + link + space + after
-  return { text: next, caret: start + link.length + 1 }
+  // Past the space added, or right after the link when the line ends there,
+  // so the caret never jumps to the next line.
+  return { text: next, caret: start + link.length + space.length }
 }
 
 // The open tasks that fit what has been typed after the @: a title that

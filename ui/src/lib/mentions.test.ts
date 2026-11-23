@@ -54,6 +54,9 @@ describe('the tasks a note mentions', () => {
   it('leave out what is written inside code', () => {
     const note = ['Inline `[x](done:task/1)` stays text.', '```', '[y](done:task/2)', '```', '[z](done:task/3)'].join('\n')
     expect(mentionsIn(note)).toEqual([3])
+    // A fence indented under a list item, and a span of two backticks, are code too.
+    const nested = ['- Step', '  ```', '  [y](done:task/2)', '  ```', 'Double ``[x](done:task/1)`` span', '[z](done:task/3)'].join('\n')
+    expect(mentionsIn(nested)).toEqual([3])
   })
 })
 
@@ -84,8 +87,12 @@ describe('typing @', () => {
     expect(at).not.toBeNull()
     const done = insertMention(text, at!.start, 11, task(BANK, 'Call the bank'))
     expect(done.text).toBe(`- [Call the bank](done:task/${BANK})\nNext line`)
-    expect(done.text.slice(0, done.caret)).toBe(`- [Call the bank](done:task/${BANK})\n`)
+    expect(done.text.slice(0, done.caret)).toBe(`- [Call the bank](done:task/${BANK})`)
     expect(insertMention('@x', 0, 2, task(1, 'A')).text).toBe('[A](done:task/1) ')
+    // At the end of a line the caret stays on that line (it used to jump to the next).
+    const atEnd = insertMention('- @a\nnext', 2, 4, task(1, 'A'))
+    expect(atEnd.text).toBe('- [A](done:task/1)\nnext')
+    expect(atEnd.text.slice(atEnd.caret)).toBe('\nnext')
   })
 })
 

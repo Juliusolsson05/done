@@ -9,10 +9,13 @@ import { NotesText } from '@/components/notes-text'
 import { TaskCheck } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
 import { loadFinished } from '@/lib/backend'
+import { play } from '@/lib/sounds'
+import { change } from '@/lib/store'
+import { recordStep } from '@/lib/undo'
 import { shortDay, TODAY } from '@/lib/days'
 import { mentionDetails, type Detail } from '@/lib/mentions'
 import { toggleExpanded, useExpanded } from '@/lib/expanded'
-import { subtasksOf, type Task } from '@/lib/tasks'
+import { markOpen, subtasksOf, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The window only holds open tasks and those finished today. A mention of a
@@ -47,25 +50,53 @@ function useMentioned(id: number): Task | null | undefined {
 
 const hit = (task: Task) => ({ kind: 'task' as const, id: task.id, title: task.title, detail: '', done: !!task.done })
 
+// Going to a mentioned task: in its list if the window has it; a task
+// finished on an earlier day is only on the Completed page.
+function useGoTo() {
+  const { data, reveal, openView } = useApp()
+  return (task: Task) => (data.tasks.some((t) => t.id === task.id) ? reveal(hit(task)) : openView({ kind: 'completed' }))
+}
+
+// Finishing or reopening from a note. A task finished on an earlier day is
+// not in the window, so reopening it brings it back in open, as the
+// Completed page's Put back does; undone by finishing it again on the day it
+// was finished.
+function useToggle() {
+  const { data, complete, reopen } = useApp()
+  return (task: Task) => {
+    if (!task.done) return complete(task.id)
+    if (data.tasks.some((t) => t.id === task.id)) return reopen(task.id)
+    play('reopen')
+    finished = null
+    change((d) => markOpen({ ...d, tasks: [...d.tasks, task] }, task.id), false)
+    recordStep(() =>
+      change((d) => ({ ...d, tasks: d.tasks.map((t) => (t.id === task.id ? { ...t, done: true, doneDay: task.doneDay } : t)) }), false),
+    )
+  }
+}
+
 // A mentioned task in a note being read: its round check, its title as it is
 // now, its due date and project. The check finishes or reopens it; the title
 // takes you to it in its list.
 export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode }) {
-  const { data, complete, reopen, reveal } = useApp()
+  const { data } = useApp()
+  const goTo = useGoTo()
+  const toggle = useToggle()
   const task = useMentioned(id)
   // Whether its subtasks show: the same state as in the lists, so a task
   // opened here is open there too.
   const open = useExpanded(id)
   if (!task)
     return (
-      <span className="text-muted-foreground" title={task === null ? 'This task was deleted' : undefined}>
+      // Neither open, finished today nor in the Completed list: finished long
+      // ago, or deleted. Which one cannot be told, so neither is claimed.
+      <span className="text-muted-foreground" title={task === null ? 'Finished a while ago, or deleted' : undefined}>
         {fallback}
       </span>
     )
   const done = !!task.done
   const details = mentionDetails(task, data.tasks, data.projects, TODAY)
   const subtasks = subtasksOf(data.tasks, task.id)
-  const toggle = (t: Task) => (t.done ? reopen(t.id) : complete(t.id))
   // Spans only, laid out as a card: it sits inside a paragraph, a list item
   // or a table cell, where a block element would be invalid HTML.
   return (
@@ -78,7 +109,7 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
         <span className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
-            onClick={() => reveal(hit(task))}
+            onClick={() => goTo(task)}
             // Wraps rather than being cut: on a phone a long title is read whole.
             className={cn('min-w-0 text-left font-medium [overflow-wrap:anywhere] hover:underline', done && 'text-muted-foreground line-through')}
           >
@@ -109,7 +140,7 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
           )}
         </span>
         {/* The whole description, as written, with its web links clickable. */}
-        {task.notes.trim() && <NotesText notes={task.notes.trim()} onEdit={() => reveal(hit(task))} className="mt-0.5 whitespace-pre-wrap" />}
+        {task.notes.trim() && <NotesText notes={task.notes.trim()} onEdit={() => goTo(task)} className="mt-0.5 whitespace-pre-wrap" />}
         {open && subtasks.length > 0 && (
           <span className="mt-1 flex flex-col gap-1" aria-label={`Subtasks of ${task.title}`}>
             {subtasks.map((sub) => (
@@ -117,7 +148,7 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
                 <TaskCheck task={sub} checked={!!sub.done} onChange={() => toggle(sub)} className="mt-0.5 size-3.5" />
                 <span className="flex min-w-0 flex-col">
                   <span className={cn('min-w-0 text-sm', sub.done && 'text-muted-foreground line-through')}>{sub.title}</span>
-                  {sub.notes.trim() && <NotesText notes={sub.notes.trim()} onEdit={() => reveal(hit(task))} className="whitespace-pre-wrap" />}
+                  {sub.notes.trim() && <NotesText notes={sub.notes.trim()} onEdit={() => goTo(task)} className="whitespace-pre-wrap" />}
                 </span>
               </span>
             ))}
@@ -145,11 +176,11 @@ function MentionDetail({ detail }: { detail: Exclude<Detail, { kind: 'subtasks' 
 }
 
 function MentionChip({ id }: { id: number }) {
-  const { reveal } = useApp()
+  const goTo = useGoTo()
   const task = useMentioned(id)
   if (!task) return null
   return (
-    <Button variant="outline" size="xs" onClick={() => reveal(hit(task))} className="max-w-64 font-normal text-muted-foreground">
+    <Button variant="outline" size="xs" onClick={() => goTo(task)} className="max-w-64 font-normal text-muted-foreground">
       {task.done ? <CheckIcon /> : <CircleIcon />}
       <span className={cn('truncate', task.done && 'line-through')}>{task.title}</span>
     </Button>
