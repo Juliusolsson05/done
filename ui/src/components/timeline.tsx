@@ -510,7 +510,7 @@ function TimelineItem({
   onCancel: () => void
   showProject: boolean
 }) {
-  const { data, noticed } = useApp()
+  const { data, noticed, edit } = useApp()
   const [leaving, finish] = useFinish(task.id)
   // The block is as long as the task's days, never narrower than its check.
   const block = Math.max(width, 22)
@@ -551,7 +551,16 @@ function TimelineItem({
       {inside ? (
         <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5">{label}</span>
       ) : (
-        <span className="pointer-events-none absolute top-1/2 left-full ml-2 flex -translate-y-1/2 items-center gap-1.5 text-foreground">{label}</span>
+        // Beside the block: a click on it opens the task, as a click on the block does.
+        <span
+          role="button"
+          tabIndex={-1}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => edit(task.id)}
+          className="absolute top-1/2 left-full ml-2 flex -translate-y-1/2 cursor-pointer items-center gap-1.5 text-foreground hover:underline"
+        >
+          {label}
+        </span>
       )}
       {range && <span data-grip="end" className="absolute inset-y-0 right-0 w-2 cursor-ew-resize" />}
     </div>
