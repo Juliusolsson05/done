@@ -307,13 +307,12 @@ export function Timeline() {
     if (moved && moved.mode !== 'end') left += moved.days * px
     if (moved?.mode === 'end') barWidth += moved.days * px
     if (moved?.mode === 'start') barWidth -= moved.days * px
-    const w = Math.max(barWidth, pillWidth(task))
     return (
       <TimelineItem
         key={task.id}
         task={task}
         left={left}
-        width={w}
+        width={barWidth}
         range={length > 1}
         lifted={!!moved && moved.days !== 0}
         onDown={(e) => bar.down(e, task)}
@@ -510,9 +509,10 @@ function TimelineItem({
     <div
       data-task={task.id}
       title={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
-      style={{ ...projectStyle(data.projects, task.projectId), left, width }}
+      // As wide as what is in it, and at least as long as the days it takes.
+      style={{ ...projectStyle(data.projects, task.projectId), left, minWidth: width }}
       className={cn(
-        'absolute top-1 z-10 flex h-6 cursor-grab touch-none items-center gap-1.5 border pr-2 pl-1 text-xs font-medium whitespace-nowrap select-none',
+        'absolute top-1 z-10 flex h-6 w-max cursor-grab touch-none items-center gap-1.5 border pr-2 pl-1 text-xs font-medium whitespace-nowrap select-none',
         range ? 'rounded-md border-project-edge bg-project-tint' : 'rounded-full border-border bg-background',
         lifted && 'z-20 cursor-grabbing shadow-md',
         leaving && 'opacity-0 transition-opacity duration-150',
@@ -529,7 +529,7 @@ function TimelineItem({
       </span>
       {/* On one timeline for everything, which project it is in. */}
       {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
-      <span className="pointer-events-none min-w-0 flex-1 truncate">{task.title}</span>
+      <span className="pointer-events-none max-w-[420px] min-w-0 flex-1 truncate">{task.title}</span>
       <span className="pointer-events-none shrink-0">
         <TaskFaces task={task} ring="ring-background" />
       </span>
