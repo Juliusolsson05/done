@@ -61,8 +61,8 @@ function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<Retu
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger>
-        Assign
-        <ContextMenuShortcut className="ml-auto pl-4 tracking-normal">
+        <span className="flex-1">Assign</span>
+        <ContextMenuShortcut className="pl-4 tracking-normal">
           {on.length === 0 ? 'Nobody' : on.length === 1 ? (on[0] === me ? 'Me' : (space.members.find((m) => m.id === on[0])?.name.split(' ')[0] ?? '1 person')) : `${on.length} people`}
         </ContextMenuShortcut>
       </ContextMenuSubTrigger>
@@ -133,7 +133,7 @@ function TaskMenu({ task }: { task: Task }) {
   const doing = task.status === 'doing'
   // Each kind of change is one row that opens on hover, with what it is now
   // on the right; the choices themselves wait in the submenu.
-  const now = (text: string) => <ContextMenuShortcut className="ml-auto pl-4 tracking-normal">{text}</ContextMenuShortcut>
+  const now = (text: string) => <ContextMenuShortcut className="pl-4 tracking-normal">{text}</ContextMenuShortcut>
   const spaces = workspaces(team)
   const project = data.projects.find((p) => p.id === task.projectId)
   return (
@@ -150,7 +150,7 @@ function TaskMenu({ task }: { task: Task }) {
       <ContextMenuSeparator />
       <ContextMenuSub>
         <ContextMenuSubTrigger>
-          Status
+          <span className="flex-1">Status</span>
           {now(doing ? 'In progress' : 'To do')}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="min-w-44">
@@ -166,7 +166,7 @@ function TaskMenu({ task }: { task: Task }) {
       </ContextMenuSub>
       <ContextMenuSub>
         <ContextMenuSubTrigger>
-          Due
+          <span className="flex-1">Due</span>
           {now(task.due ? describeDay(task.due, TODAY) : 'No date')}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="min-w-44">
@@ -181,7 +181,7 @@ function TaskMenu({ task }: { task: Task }) {
       </ContextMenuSub>
       <ContextMenuSub>
         <ContextMenuSubTrigger>
-          Priority
+          <span className="flex-1">Priority</span>
           {now(task.priority < 4 ? `P${task.priority}` : 'None')}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="min-w-44">
@@ -195,7 +195,7 @@ function TaskMenu({ task }: { task: Task }) {
       </ContextMenuSub>
       <ContextMenuSub>
         <ContextMenuSubTrigger>
-          Project
+          <span className="flex-1">Project</span>
           {now(project?.name ?? 'Inbox')}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="max-h-[min(28rem,var(--radix-context-menu-content-available-height))] min-w-52 overflow-y-auto">
@@ -239,15 +239,17 @@ function MoveMenu({ id }: { id: number }) {
   const mine = isPersonal(project.spaceId, team)
   const targets = spaces.filter((s) => s.id !== project.spaceId)
   return (
-    <>
-      <ContextMenuSeparator />
-      {targets.map((s) => (
-        <ContextMenuItem key={s.id} onSelect={() => askMove({ project: id, to: s.id })}>
-          Move to {s.name}
-        </ContextMenuItem>
-      ))}
-      {!mine && <ContextMenuItem onSelect={() => askMove({ project: id, to: team.personal })}>Move to my own space</ContextMenuItem>}
-    </>
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
+      <ContextMenuSubContent className="min-w-44">
+        {targets.map((s) => (
+          <ContextMenuItem key={s.id} onSelect={() => askMove({ project: id, to: s.id })}>
+            {s.name}
+          </ContextMenuItem>
+        ))}
+        {!mine && <ContextMenuItem onSelect={() => askMove({ project: id, to: team.personal })}>My own space</ContextMenuItem>}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   )
 }
 
@@ -274,10 +276,14 @@ function ProjectMenu({ id }: { id: number }) {
       >
         Rename
       </ContextMenuItem>
-      <MoveMenu id={id} />
       <ContextMenuSeparator />
-      <ContextMenuLabel>Colour</ContextMenuLabel>
-      <ContextMenuGroup className="flex gap-1 p-1">
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Colour</span>
+          {current !== null && <span style={colorStyle(current)} className="mr-1 size-2.5 rounded-xs bg-project" />}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+      <ContextMenuGroup className="grid grid-cols-4 gap-1 p-1">
         {Array.from({ length: COLOR_COUNT }, (_, i) => (
           <ContextMenuItem
             key={i}
@@ -292,24 +298,31 @@ function ProjectMenu({ id }: { id: number }) {
           </ContextMenuItem>
         ))}
       </ContextMenuGroup>
-      <ContextMenuSeparator />
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       {/* A quick way into a filtered Board or Timeline: only this project. */}
-      <ContextMenuItem
-        onSelect={() => {
-          setViewFilter({ ...NO_FILTER, projects: [id] })
-          openView({ kind: 'board' })
-        }}
-      >
-        Show only this on the Board
-      </ContextMenuItem>
-      <ContextMenuItem
-        onSelect={() => {
-          setViewFilter({ ...NO_FILTER, projects: [id] })
-          openView({ kind: 'timeline' })
-        }}
-      >
-        Show only this on the Timeline
-      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Show only this</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="min-w-40">
+          <ContextMenuItem
+            onSelect={() => {
+              setViewFilter({ ...NO_FILTER, projects: [id] })
+              openView({ kind: 'board' })
+            }}
+          >
+            On the Board
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setViewFilter({ ...NO_FILTER, projects: [id] })
+              openView({ kind: 'timeline' })
+            }}
+          >
+            On the Timeline
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <MoveMenu id={id} />
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => removeProject(id)}>
         Delete project
