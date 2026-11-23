@@ -171,22 +171,47 @@ export function lanes(all: Task[], today: Day): Record<LaneKey, Task[]> {
   }
 }
 
+// How the Timeline lists its rows: by project, then date inside each (the
+// default); or by date across every project, then project for a tie.
+export type TimelineOrder = 'project' | 'date'
+
 export interface TimelineGroup {
-  id: number | null
+  key: string
+  // The project the group is, for its dot: null is the Inbox. Undefined for
+  // a group that is not a project ("Scheduled", "No date").
+  id?: number | null
   name: string
   tasks: Task[]
 }
-export function timelineGroups(projects: Project[], all: Task[]): TimelineGroup[] {
-  // Dated tasks first, in date order, so each group reads left to right; the
-  // undated ones sit underneath, waiting for a click on a day.
-  const order = (a: Task, b: Task) =>
-    (a.due ? 0 : 1) - (b.due ? 0 : 1) ||
-    (a.start ?? a.due ?? '').localeCompare(b.start ?? b.due ?? '') ||
-    byPriority(a, b)
+
+const firstDay = (t: Task): string => t.start ?? t.due ?? ''
+
+export function timelineGroups(projects: Project[], all: Task[], order: TimelineOrder = 'project'): TimelineGroup[] {
   const open = openTasks(all)
-  return [{ id: null, name: 'Inbox' }, ...projects]
-    .map((g) => ({ id: g.id, name: g.name, tasks: open.filter((t) => t.projectId === g.id).sort(order) }))
-    .filter((g) => g.tasks.length > 0)
+  const groups: TimelineGroup[] =
+    order === 'project'
+      ? [{ id: null, name: 'Inbox' }, ...projects].map((g) => ({
+          key: 'p' + (g.id ?? 'inbox'),
+          id: g.id,
+          name: g.name,
+          // Dated tasks first, in date order, so each group reads left to
+          // right; the undated ones sit underneath, waiting for a click on a day.
+          tasks: open
+            .filter((t) => t.projectId === g.id)
+            .sort((a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || firstDay(a).localeCompare(firstDay(b)) || byPriority(a, b)),
+        }))
+      : (() => {
+          // A tie on the day goes to the project, in the sidebar's order with
+          // the Inbox first, so one project's tasks on a day stay together.
+          const place = (t: Task) => (t.projectId === null ? -1 : projects.findIndex((p) => p.id === t.projectId))
+          const byDate = (a: Task, b: Task) => firstDay(a).localeCompare(firstDay(b)) || place(a) - place(b) || byPriority(a, b)
+          const byProject = (a: Task, b: Task) => place(a) - place(b) || byPriority(a, b)
+          return [
+            { key: 'dated', name: 'Scheduled', tasks: open.filter((t) => t.due).sort(byDate) },
+            { key: 'undated', name: 'No date', tasks: open.filter((t) => !t.due).sort(byProject) },
+          ]
+        })()
+  return groups.filter((g) => g.tasks.length > 0)
 }
 
 // ---------- Changes ----------
