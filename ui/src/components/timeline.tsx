@@ -510,7 +510,7 @@ function TimelineItem({
   onCancel: () => void
   showProject: boolean
 }) {
-  const { data, noticed, edit } = useApp()
+  const { data, noticed } = useApp()
   const [leaving, finish] = useFinish(task.id)
   // The block is as long as the task's days, never narrower than its check.
   const block = Math.max(width, 22)
@@ -534,7 +534,7 @@ function TimelineItem({
       title={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
       style={{ ...projectStyle(data.projects, task.projectId), left, width: block }}
       className={cn(
-        'absolute top-1 z-10 flex h-6 cursor-grab touch-none items-center gap-1.5 rounded-md bg-project-tint pr-2 pl-1 text-xs font-medium whitespace-nowrap select-none',
+        'absolute top-1 z-10 flex h-6 cursor-grab touch-none items-center gap-1.5 rounded-md bg-project-tint pr-2.5 pl-1.5 text-xs font-medium whitespace-nowrap select-none',
         lifted && 'z-20 cursor-grabbing shadow-md',
         leaving && 'opacity-0 transition-opacity duration-150',
         noticed === task.id && 'animate-noticed',
@@ -544,25 +544,19 @@ function TimelineItem({
       onPointerUp={onUp}
       onPointerCancel={onCancel}
     >
-      {range && <span data-grip="start" className="absolute inset-y-0 left-0 w-2 cursor-ew-resize" />}
+      {range && <span data-grip="start" className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md hover:bg-project-edge" />}
       <span data-check className="flex">
         <TaskCheck task={task} checked={leaving} onChange={finish} className="size-3.5" />
       </span>
       {inside ? (
         <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5">{label}</span>
       ) : (
-        // Beside the block: a click on it opens the task, as a click on the block does.
-        <span
-          role="button"
-          tabIndex={-1}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => edit(task.id)}
-          className="absolute top-1/2 left-full ml-2 flex -translate-y-1/2 cursor-pointer items-center gap-1.5 text-foreground hover:underline"
-        >
-          {label}
-        </span>
+        // Beside the block, and part of it: dragging the title moves the
+        // task, and a click on it opens it, as on the block itself.
+        <span className="absolute top-1/2 left-full ml-2 flex -translate-y-1/2 items-center gap-1.5 text-foreground hover:underline">{label}</span>
       )}
-      {range && <span data-grip="end" className="absolute inset-y-0 right-0 w-2 cursor-ew-resize" />}
+      {/* Stretched from its end into more days, whatever its length now. */}
+      <span data-grip="end" className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize rounded-r-md hover:bg-project-edge" />
     </div>
   )
 }
