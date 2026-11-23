@@ -54,7 +54,10 @@ jobs:
 
       - name: Test
         if: steps.plan.outputs.build == 'true'
-        run: cargo test -p done-core -p done-mcp -p done-server
+        # What the Mac app is made of. The hosted server is not in it, and its
+        # tests need a Postgres that a Mac runner cannot run as a service; CI
+        # runs them, with one, on every change before it reaches main.
+        run: cargo test -p done-core -p done-mcp
 
       # The update archive is signed with the updater key. An installed app
       # refuses any update that was not, so a release cannot be swapped for
