@@ -125,9 +125,15 @@ export function readLine(
   text: string,
   projects: Project[],
   today: Day,
-  fallback: { due: Day | null; projectId: number | null },
+  fallback: { due: Day | null; projectId: number | null; priority?: number | null },
   dismissed: Dismissed[] = [],
 ): Read {
   const p = parseQuickAdd(text, projects, today, dismissed)
-  return { title: p.title, due: p.due ?? fallback.due, date: p.date, priority: p.priority ?? 4, projectId: p.projectId ?? fallback.projectId }
+  return {
+    title: p.title,
+    due: p.due ?? fallback.due,
+    date: p.date,
+    priority: p.priority ?? fallback.priority ?? 4,
+    projectId: p.projectId ?? fallback.projectId,
+  }
 }

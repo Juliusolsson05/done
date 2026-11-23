@@ -10,7 +10,9 @@ import { TaskCheck, useFinish } from '@/components/task-row'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
-import { dragBar, patchTask, timelineGroups, type DragMode, type Task, type TimelineOrder } from '@/lib/tasks'
+import { dragBar, isSubtask, patchTask, timelineGroups, type DragMode, type Task, type TimelineOrder } from '@/lib/tasks'
+import { isFiltering, matchesFilter } from '@/lib/view-filter'
+import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
 import { cn } from '@/lib/utils'
 
 // The width of one day in pixels. Every left and width below is a number of
@@ -146,7 +148,15 @@ export function Timeline() {
       // Private windows may refuse storage; the order still applies for now.
     }
   }
-  const groups = timelineGroups(data.projects, data.tasks, order)
+  // The filter only changes what is drawn; see lib/view-filter.
+  const filter = useViewFilter()
+  const groups = timelineGroups(
+    data.projects,
+    data.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY)),
+    order,
+  )
+  const shown = groups.reduce((n, g) => n + g.tasks.length, 0)
+  const total = timelineGroups(data.projects, data.tasks, order).reduce((n, g) => n + g.tasks.length, 0)
 
   // How many whole days the pointer is from where it went down.
   const daysMoved = (from: Drag, x: number) => {
@@ -207,8 +217,13 @@ export function Timeline() {
           Today
         </HeaderButton>
         <HeaderButton onClick={() => setTlStart(addDays(ui.tlStart, 7))}>Later</HeaderButton>
+        <FilterButton />
       </ViewHeader>
+      <FilterBar shown={shown} total={total} />
 
+      {isFiltering(filter) && shown === 0 ? (
+        <NothingMatches />
+      ) : (
       <div ref={scroller} className="min-h-0 overflow-auto rounded-xl border">
         <div className="relative w-max min-w-full">
           {/* The day columns behind every row: weekends shaded, today marked. */}
@@ -271,6 +286,7 @@ export function Timeline() {
           ))}
         </div>
       </div>
+      )}
       <p className="mt-2 text-xs text-faint">
         Drag a bar to move it. Drag either end to make it longer or shorter. Click a day in an empty row to give that task a date.
       </p>

@@ -16,6 +16,8 @@ import { expand } from '@/lib/expanded'
 import { getFolderPanel, nameFolder, NEW_FOLDER } from '@/lib/note-folder-panel'
 import { COLOR_COUNT, colorIndex, isSubtask, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
+import { NO_FILTER } from '@/lib/view-filter'
+import { setViewFilter } from '@/lib/view-filter-store'
 
 export type MenuTarget =
   | { kind: 'task'; id: number }
@@ -180,6 +182,24 @@ function ProjectMenu({ id }: { id: number }) {
           </ContextMenuItem>
         ))}
       </ContextMenuGroup>
+      <ContextMenuSeparator />
+      {/* A quick way into a filtered Board or Timeline: only this project. */}
+      <ContextMenuItem
+        onSelect={() => {
+          setViewFilter({ ...NO_FILTER, projects: [id] })
+          openView({ kind: 'board' })
+        }}
+      >
+        Show only this on the Board
+      </ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() => {
+          setViewFilter({ ...NO_FILTER, projects: [id] })
+          openView({ kind: 'timeline' })
+        }}
+      >
+        Show only this on the Timeline
+      </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => removeProject(id)}>
         Delete project

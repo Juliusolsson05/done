@@ -16,6 +16,8 @@ import { projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/qu
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
+import { addDefaults } from '@/lib/view-filter'
+import { useViewFilter } from '@/components/view-filter'
 
 function QuickAdd() {
   const { data, ui, update, closeAll } = useApp()
@@ -23,6 +25,7 @@ function QuickAdd() {
   // Date phrases the user said are not dates, by pressing Backspace after them.
   const [dismissed, setDismissed] = useState<Dismissed[]>([])
   const inputRef = useFocus()
+  const filter = useViewFilter()
   const mirrorRef = useRef<HTMLDivElement>(null)
   // Where the caret is, for suggesting a project while "@" is typed.
   const [caret, setCaret] = useState(0)
@@ -32,8 +35,13 @@ function QuickAdd() {
     data.projects,
     TODAY,
     {
-      due: ui.view.kind === 'today' || ui.asGoal ? TODAY : null,
-      projectId: ui.view.kind === 'project' ? ui.view.id : null,
+      due: null,
+      projectId: null,
+      // On a filtered Board or Timeline: what keeps the new task on the page
+      // it was added on (the one project, the one priority, a date in the window).
+      ...(ui.view.kind === 'board' || ui.view.kind === 'timeline' ? addDefaults(filter, TODAY) : {}),
+      ...(ui.view.kind === 'today' || ui.asGoal ? { due: TODAY } : {}),
+      ...(ui.view.kind === 'project' ? { projectId: ui.view.id } : {}),
     },
     dismissed,
   )
