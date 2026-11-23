@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atQuery, insertMention, mentionId, mentionLink, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
+import { atQuery, insertMention, mentionDetails, mentionId, mentionLink, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
 import type { Task } from '@/lib/tasks'
 
 const task = (id: number, title: string, fields: Partial<Task> = {}): Task => ({
@@ -108,5 +108,43 @@ describe('the tasks offered', () => {
     expect(suggestions(tasks, '').map((t) => t.id)[0]).toBe(6)
     expect(suggestions(tasks, '').map((t) => t.id)).not.toContain(4)
     expect(suggestions(tasks, '').map((t) => t.id)).not.toContain(5)
+  })
+})
+
+describe("a mentioned task's card", () => {
+  const today = '2026-11-22'
+  const projects = [{ id: 9, name: 'Catch Up' }]
+
+  it('says where it lives, that it is late, its subtasks, that it is under way, and how its notes begin', () => {
+    const promises = task(1, 'Keep the promises', {
+      projectId: 9,
+      due: '2026-11-18',
+      status: 'doing',
+      notes: '\nGo through sent mail and answer everyone who is still waiting on something from me',
+    })
+    const subtasks = [task(2, 'Anna', { parentId: 1, done: true, doneDay: today }), task(3, 'Ben', { parentId: 1 })]
+    expect(mentionDetails(promises, [promises, ...subtasks], projects, today)).toEqual([
+      { kind: 'project', id: 9, name: 'Catch Up' },
+      { kind: 'when', text: 'Late · 18 Nov', late: true },
+      { kind: 'subtasks', done: 1, total: 2 },
+      { kind: 'doing' },
+      { kind: 'notes', text: 'Go through sent mail and answer everyone who is still waiti…' },
+    ])
+  })
+
+  it('says a span from start to due, the Inbox, and only what it has', () => {
+    const plain = task(4, 'Plan', { start: '2026-11-23', due: '2026-11-25' })
+    expect(mentionDetails(plain, [plain], projects, today)).toEqual([
+      { kind: 'project', id: null, name: 'Inbox' },
+      { kind: 'when', text: 'Tomorrow – Wednesday', late: false },
+    ])
+  })
+
+  it('says when a finished task was done, and not that it is late', () => {
+    const finished = task(5, 'Ship', { due: '2026-11-01', done: true, doneDay: today, status: 'doing' })
+    expect(mentionDetails(finished, [finished], projects, today)).toEqual([
+      { kind: 'project', id: null, name: 'Inbox' },
+      { kind: 'when', text: 'Done today', late: false },
+    ])
   })
 })

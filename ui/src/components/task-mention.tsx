@@ -2,13 +2,14 @@
 // when the note is read, as chips above the text while it is written, and
 // offered in a list under the caret after an @.
 import { useEffect, useState, type ReactNode } from 'react'
-import { CheckIcon, CircleIcon } from 'lucide-react'
+import { CheckIcon, CircleIcon, ListChecksIcon, StarIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { ProjectDot } from '@/components/marks'
+import { TaskCheck } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
 import { loadFinished } from '@/lib/backend'
 import { shortDay, TODAY } from '@/lib/days'
+import { mentionDetails, type Detail } from '@/lib/mentions'
 import type { Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -48,7 +49,7 @@ const hit = (task: Task) => ({ kind: 'task' as const, id: task.id, title: task.t
 // now, its due date and project. The check finishes or reopens it; the title
 // takes you to it in its list.
 export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode }) {
-  const { complete, reopen, reveal } = useApp()
+  const { data, complete, reopen, reveal } = useApp()
   const task = useMentioned(id)
   if (!task)
     return (
@@ -57,31 +58,59 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
       </span>
     )
   const done = !!task.done
+  const details = mentionDetails(task, data.tasks, data.projects, TODAY)
+  // Spans only, laid out as a card: it sits inside a paragraph, a list item
+  // or a table cell, where a block element would be invalid HTML.
   return (
     <span
       data-mention={task.id}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 px-1.5 align-[-0.2em] leading-6"
+      className="my-0.5 inline-flex max-w-full min-w-0 items-start gap-2.5 rounded-lg border border-border/70 bg-muted/30 px-2.5 py-1.5 align-middle leading-snug"
     >
-      <Checkbox
-        checked={done}
-        onCheckedChange={() => (done ? reopen(task.id) : complete(task.id))}
-        aria-label={`${done ? 'Reopen' : 'Complete'}: ${task.title}`}
-        className="size-3.5 rounded-full"
-      />
-      <button
-        type="button"
-        onClick={() => reveal(hit(task))}
-        className={cn('min-w-0 truncate text-left hover:underline', done && 'text-muted-foreground line-through')}
-      >
-        {task.title}
-      </button>
-      {/* Late is red, as everywhere else in the app. */}
-      {task.due && !done && (
-        <span className={cn('shrink-0 text-xs tabular-nums', task.due < TODAY ? 'text-overdue' : 'text-muted-foreground')}>{shortDay(task.due)}</span>
-      )}
-      {task.projectId != null && <ProjectDot id={task.projectId} className="size-1.5 shrink-0" />}
+      <TaskCheck task={task} checked={done} onChange={() => (done ? reopen(task.id) : complete(task.id))} className="mt-0.5" />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => reveal(hit(task))}
+            className={cn('min-w-0 truncate text-left font-medium hover:underline', done && 'text-muted-foreground line-through')}
+          >
+            {task.title}
+          </button>
+          {task.goalDay === TODAY && !done && <StarIcon className="size-3.5 shrink-0 fill-current text-amber-500" aria-label="Today’s goal" />}
+        </span>
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {details.map((detail) => (
+            <MentionDetail key={detail.kind} detail={detail} />
+          ))}
+        </span>
+      </span>
     </span>
   )
+}
+
+function MentionDetail({ detail }: { detail: Detail }) {
+  switch (detail.kind) {
+    case 'project':
+      return (
+        <span className="flex items-center gap-1">
+          <ProjectDot id={detail.id} className="size-1.5" />
+          {detail.name}
+        </span>
+      )
+    case 'when':
+      return <span className={cn('tabular-nums', detail.late && 'text-overdue')}>{detail.text}</span>
+    case 'subtasks':
+      return (
+        <span className="flex items-center gap-1 tabular-nums">
+          <ListChecksIcon className="size-3" />
+          {detail.done}/{detail.total}
+        </span>
+      )
+    case 'doing':
+      return <span className="text-primary">In progress</span>
+    case 'notes':
+      return <span className="max-w-[40ch] truncate italic">{detail.text}</span>
+  }
 }
 
 function MentionChip({ id }: { id: number }) {

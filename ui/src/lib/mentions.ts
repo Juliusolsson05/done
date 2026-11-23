@@ -7,6 +7,7 @@
 // element changes. Mixing a custom parser with Markdown rendering is what has
 // gone wrong before. The text also stays readable everywhere a note goes: the
 // editor, older versions of the app, other devices, an AI agent over MCP.
+import { describeDay, type Day } from '@/lib/days'
 import { byPriority, openTasks, type Task } from '@/lib/tasks'
 
 const SCHEME = 'done:task/'
@@ -101,4 +102,38 @@ export function suggestions(tasks: Task[], query: string, limit = 8): Task[] {
     .filter((t) => words.every((w) => t.title.toLowerCase().includes(w)))
     .sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
     .slice(0, limit)
+}
+
+// What a mentioned task's card says under its title, in order: where it
+// lives, when it is due (or when it was done), how far its subtasks are,
+// whether it is under way, and how its notes begin. Each part only when it
+// has something to say.
+export type Detail =
+  | { kind: 'project'; id: number | null; name: string }
+  | { kind: 'when'; text: string; late: boolean }
+  | { kind: 'subtasks'; done: number; total: number }
+  | { kind: 'doing' }
+  | { kind: 'notes'; text: string }
+
+const NOTES_SHOWN = 60
+
+export function mentionDetails(task: Task, tasks: Task[], projects: { id: number; name: string }[], today: Day): Detail[] {
+  const details: Detail[] = [{ kind: 'project', id: task.projectId, name: projects.find((p) => p.id === task.projectId)?.name ?? 'Inbox' }]
+  if (task.done) {
+    if (task.doneDay) details.push({ kind: 'when', text: 'Done ' + describeDay(task.doneDay, today).toLowerCase(), late: false })
+  } else if (task.due) {
+    const late = task.due < today
+    const due = describeDay(task.due, today)
+    const start = task.start && task.start !== task.due ? describeDay(task.start, today) + ' – ' : ''
+    details.push({ kind: 'when', text: late ? `Late · ${due}` : start + due, late })
+  }
+  const under = tasks.filter((t) => t.parentId === task.id)
+  if (under.length) details.push({ kind: 'subtasks', done: under.filter((t) => t.done).length, total: under.length })
+  if (!task.done && task.status === 'doing') details.push({ kind: 'doing' })
+  const notes = task.notes
+    .split('\n')
+    .find((line) => line.trim())
+    ?.trim()
+  if (notes) details.push({ kind: 'notes', text: notes.length > NOTES_SHOWN ? notes.slice(0, NOTES_SHOWN - 1).trimEnd() + '…' : notes })
+  return details
 }
