@@ -1,37 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { around, grown, onScreen, reaching, GROW } from '@/lib/timeline-window'
+import { AFTER, BEFORE, LEAST, onScreen, spanFor } from '@/lib/timeline-window'
 
-const start = around('2026-11-19')
+const today = '2026-11-23'
 
-describe('the timeline as far back and forward as one scrolls', () => {
-  it('starts with room to go back at once', () => {
-    expect(start).toEqual({ start: '2026-10-29', days: GROW + 35 })
+describe('the days the Timeline draws', () => {
+  it('runs from a week before the earliest task to four weeks after the latest', () => {
+    const span = spanFor([{ start: '2026-09-01', due: '2026-09-20' }, { due: '2026-12-10' }], today)
+    expect(span.start).toBe('2026-08-25')
+    expect(span.days).toBe(108 + AFTER)
   })
 
-  it('adds three weeks in front near the start, and says how far to move', () => {
-    expect(grown(start, 2, 20)).toEqual({ span: { start: '2026-10-08', days: start.days + GROW }, shift: GROW })
-    // Again and again: there is no end to it.
-    const twice = grown(grown(start, 0, 20).span, 0, 20)
-    expect(twice.span.start).toBe('2026-09-17')
+  it('always has today in it, with room before, even when every task is later', () => {
+    const span = spanFor([{ due: '2027-02-01' }], today)
+    expect(span.start).toBe('2026-11-12')
+    expect(spanFor([], today)).toEqual({ start: '2026-11-12', days: Math.max(LEAST, 12 + AFTER) })
   })
 
-  it('adds three weeks after near the end, without moving anything', () => {
-    expect(grown(start, start.days - 22, 20)).toEqual({ span: { start: start.start, days: start.days + GROW }, shift: 0 })
-  })
-
-  it('leaves it as it is in the middle', () => {
-    expect(grown(start, 21, 20)).toEqual({ span: start, shift: 0 })
-  })
-
-  it('reaches back to where a task began, with a few days before it', () => {
-    const back = reaching(start, '2026-09-01')
-    expect(back.shift % GROW).toBe(0)
-    expect(back.span.start <= '2026-08-28').toBe(true)
-    expect(reaching(start, '2026-11-10')).toEqual({ span: start, shift: 0 })
+  it('counts a task with only a start, or only a due date', () => {
+    expect(spanFor([{ start: '2026-10-01' }], today).start).toBe('2026-09-24')
+    expect(BEFORE).toBe(7)
   })
 
   it('names the days on screen', () => {
-    expect(onScreen(start, 21, 14)).toEqual(['2026-11-19', '2026-12-02'])
-    expect(onScreen(start, 20.5, 14)).toEqual(['2026-11-18', '2026-12-02'])
+    const span = spanFor([], today)
+    expect(onScreen(span, 11, 14)).toEqual(['2026-11-23', '2026-12-06'])
   })
 })

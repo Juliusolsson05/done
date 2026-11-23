@@ -1,6 +1,6 @@
 // Timeline: the coming weeks as a grid of days, one row per task. shadcn has
 // no such component, so the grid is plain elements; its controls are not.
-import { useLayoutEffect, useRef, useState, type PointerEvent, type UIEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { ChevronLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -15,7 +15,7 @@ import { dragBar, isSubtask, patchTask, timelineGroups, type DragMode, type Task
 import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
 import { cn } from '@/lib/utils'
-import { around, grown, NEAR, onScreen, reaching, type Span } from '@/lib/timeline-window'
+import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
 
 // The width of one day in pixels. Every left and width below is a number of
 // days times this, which is why they are style props and not classes.
@@ -184,61 +184,44 @@ interface BarHandlers {
 }
 
 export function Timeline() {
-  const { ui, dragging, edit, update, shown: inScope, me } = useApp()
+  const { dragging, edit, update, shown: inScope, me } = useApp()
   const scroller = useRef<HTMLDivElement>(null)
   const label = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
-  // The days drawn: they grow as far back and forward as one scrolls (lib/timeline-window).
-  const [span, setSpan] = useState<Span>(() => around(ui.tlStart))
+  // The days drawn: from a week before the earliest task to four weeks
+  // after the latest, all at once, so the scrollbar shows the whole range
+  // (lib/timeline-window).
+  const open = inScope.tasks.filter((t) => !t.done)
+  const span = useMemo(() => spanFor(open, TODAY), [open.map((t) => `${t.start}|${t.due}`).join(',')])
   const days = Array.from({ length: span.days }, (_, i) => addDays(span.start, i))
   const width = span.days * DAY_WIDTH
-  // Days put in front since the last drawing, to move the scroll by; and a
-  // day to bring into view once drawn.
-  const shift = useRef(0)
-  const goTo = useRef<Day | null>(null)
   // Where the scroll is, in days from the first drawn, and how many show.
   const view = () => {
     const el = scroller.current
     if (!el) return { left: 0, width: 0 }
     return { left: el.scrollLeft / DAY_WIDTH, width: (el.clientWidth - (label.current?.offsetWidth ?? 0)) / DAY_WIDTH }
   }
-  const [range, setRange] = useState<[Day, Day]>(() => onScreen(span, NEAR, 30))
-  // First drawing: the usual first day at the left edge, with weeks before it to scroll back into.
-  useLayoutEffect(() => {
-    if (scroller.current) scroller.current.scrollLeft = daysBetween(span.start, ui.tlStart) * DAY_WIDTH
-    // Once, on opening.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const [range, setRange] = useState<[Day, Day]>(() => onScreen(span, daysBetween(span.start, addDays(TODAY, -LEAD)), 30))
+  // The first day drawn when last drawn: when it moves (a task added before
+  // it), the scroll moves by as much, so what is on screen stays put.
+  const drawnFrom = useRef<Day | null>(null)
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    if (shift.current) {
-      // Days were put in front: move by as much, so nothing on screen moves.
-      el.scrollLeft += shift.current * DAY_WIDTH
-      shift.current = 0
-    }
-    if (goTo.current) {
-      el.scrollTo({ left: (daysBetween(span.start, goTo.current) - NEAR) * DAY_WIDTH, behavior: 'smooth' })
-      goTo.current = null
-    }
+    if (drawnFrom.current === null) el.scrollLeft = daysBetween(span.start, addDays(TODAY, -LEAD)) * DAY_WIDTH
+    else if (drawnFrom.current !== span.start) el.scrollLeft += daysBetween(span.start, drawnFrom.current) * DAY_WIDTH
+    drawnFrom.current = span.start
     const { left, width } = view()
     setRange(onScreen(span, left, width))
-  }, [span])
-  const onScroll = (_: UIEvent<HTMLDivElement>) => {
+    // The scroller is laid out anew whenever the range changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [span.start, span.days])
+  const onScroll = () => {
     const { left, width } = view()
-    const next = grown(span, left, width)
     setRange(onScreen(span, left, width))
-    if (next.span.days === span.days) return
-    shift.current += next.shift
-    setSpan(next.span)
   }
-  const showDay = (day: Day) => {
-    const next = reaching(span, day)
-    shift.current += next.shift
-    goTo.current = day
-    if (next.shift) setSpan(next.span)
-    else scroller.current?.scrollTo({ left: (daysBetween(span.start, day) - NEAR) * DAY_WIDTH, behavior: 'smooth' })
-  }
+  // Brings a day near the left edge, with a few days before it.
+  const showDay = (day: Day) => scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - LEAD) * DAY_WIDTH, behavior: 'smooth' })
   const byWeek = (weeks: number) => scroller.current?.scrollBy({ left: weeks * 7 * DAY_WIDTH, behavior: 'smooth' })
   const [order, setOrderState] = useState(storedOrder)
   const setOrder = (next: TimelineOrder) => {
@@ -309,7 +292,7 @@ export function Timeline() {
           </SelectContent>
         </Select>
         <HeaderButton onClick={() => byWeek(-1)}>Earlier</HeaderButton>
-        <HeaderButton onClick={() => showDay(addDays(TODAY, -4 + NEAR))}>Today</HeaderButton>
+        <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
         <HeaderButton onClick={() => byWeek(1)}>Later</HeaderButton>
         <FilterButton />
       </ViewHeader>
