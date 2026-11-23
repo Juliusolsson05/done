@@ -257,9 +257,11 @@ pub struct Collab {
 }
 
 impl Collab {
-    pub fn new(db: Arc<Db>, key: Key, public_url: &str) -> Arc<Self> {
+    /// `also`: more addresses the web app is reached at (DONE_COLLAB_ORIGINS).
+    pub fn new(db: Arc<Db>, key: Key, public_url: &str, also: &[String]) -> Arc<Self> {
         let mut origins = vec!["tauri://localhost".to_string(), "http://tauri.localhost".into(), "https://tauri.localhost".into()];
         origins.push(public_url.trim_end_matches('/').to_string());
+        origins.extend(also.iter().map(|o| o.trim().trim_end_matches('/').to_string()).filter(|o| !o.is_empty()));
         Arc::new(Self { db, key, origins, rooms: Mutex::new(HashMap::new()), next: AtomicU64::new(1) })
     }
 
@@ -669,7 +671,7 @@ mod tests {
             .await
             .unwrap()
             .id;
-        let live = Collab::new(db.clone(), Key::from(&KEY), "http://127.0.0.1:1");
+        let live = Collab::new(db.clone(), Key::from(&KEY), "http://127.0.0.1:1", &[]);
         tokio::spawn(live.clone().keep());
         tokio::spawn(live.clone().listen(config));
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();

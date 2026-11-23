@@ -457,7 +457,8 @@ async fn main() {
         }
         let url = database();
         let db = Arc::new(Db::connect(&url).await.unwrap_or_else(|e| fail_start(e)));
-        let live = collab::Collab::new(db, axum_extra::extract::cookie::Key::from(key.as_bytes()), &public_url);
+        let also: Vec<String> = read("DONE_COLLAB_ORIGINS").split(',').map(String::from).collect();
+        let live = collab::Collab::new(db, axum_extra::extract::cookie::Key::from(key.as_bytes()), &public_url, &also);
         tokio::spawn(live.clone().keep());
         tokio::spawn(live.clone().listen(url));
         let local = public_url.starts_with("http://127.0.0.1:") || public_url.starts_with("http://localhost:");

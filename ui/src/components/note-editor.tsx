@@ -75,6 +75,7 @@ export function NoteEditor({
   tasks,
   live,
   readOnly = false,
+  onActivity,
 }: {
   // The note's text. Only read when the editor is made, and when it changes
   // from outside (another device's save arriving) while nothing is being typed.
@@ -86,6 +87,9 @@ export function NoteEditor({
   // A workspace note's live document. Without it the note is this window's alone.
   live?: LiveBinding
   readOnly?: boolean
+  // Told when something is done in the note (typing, the cursor, the
+  // pointer), so the others see you as active.
+  onActivity?: () => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -95,6 +99,8 @@ export function NoteEditor({
   latest.current.picker = picker
   latest.current.onChange = onChange
   latest.current.tasks = tasks
+  const activity = useRef(onActivity)
+  activity.current = onActivity
   const editable = useRef(new Compartment())
 
   // What the @ before the caret asks for, worked out after every change or move.
@@ -171,9 +177,15 @@ export function NoteEditor({
         live ? yCollab(live.text, live.awareness, { undoManager: live.undo }) : [],
         EditorView.updateListener.of((update) => {
           if (update.docChanged) latest.current.onChange(update.state.doc.toString())
+          // Only what you did, not the others' typing arriving.
+          if (update.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete') || t.isUserEvent('select') || t.isUserEvent('move'))) activity.current?.()
           if (update.docChanged || update.selectionSet || update.focusChanged) lookAt(update.view)
         }),
         EditorView.domEventHandlers({
+          pointermove() {
+            activity.current?.()
+            return false
+          },
           // Cmd-click on an address opens it, as in a code editor; a plain
           // click places the cursor as usual.
           mousedown(event, v) {

@@ -2,7 +2,7 @@
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
 import { Fragment, useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
-import { inScope, spaceForNew } from '@/lib/team'
+import { inScope, spaceForNew, workspaceOf, workspaces } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -38,6 +38,7 @@ import { mentionId, mentionsIn } from '@/lib/mentions'
 import { TaskMention } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
+import { Faces, LiveBar, useLiveNote, useLiveStatus, usePresence } from '@/components/live-note'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
@@ -242,6 +243,13 @@ export function Notes() {
     pending.current = { note, timer: setTimeout(flush, QUIET_MS) }
   }
 
+  // A live note's text, as the room has it: only shown here, never saved
+  // from this window (the room saves it).
+  const typeLive = (text: string) => {
+    if (openId === null) return
+    setNotes((all) => all && all.map((n) => (n.id === openId && n.text !== text ? { ...n, text, updatedAt: Date.now() } : n)))
+  }
+
   // Changes the open note's project or folder. Saved at once.
   const refileOpen = (fields: Partial<Pick<Note, 'projectId' | 'folder'>>) => {
     const was = latest.current?.find((n) => n.id === openId)
@@ -370,6 +378,12 @@ export function Notes() {
     })
   }
 
+  // Who is in which workspace note now, for the faces in the list.
+  const watched = workspaces(team)
+    .map((w) => w.id)
+    .filter((id) => scope === 'all' || scope === id)
+  const presence = usePresence(watched, team?.me ?? null)
+
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)
   const now = Date.now()
@@ -480,7 +494,7 @@ export function Notes() {
             </Button>
           </div>
         </div>
-        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />}
+        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
       </div>
     )
   }
@@ -584,11 +598,15 @@ export function Notes() {
                           note.id === openId && 'bg-primary/10 hover:bg-primary/10',
                         )}
                       >
-                        <span
-                          data-findable
-                          className={cn('w-full truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
-                        >
-                          {titleOf(note.text)}
+                        <span className="flex w-full min-w-0 items-center gap-2">
+                          <span
+                            data-findable
+                            className={cn('min-w-0 flex-1 truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                          >
+                            {titleOf(note.text)}
+                          </span>
+                          {/* Who has it open now, active or idle. */}
+                          <Faces people={presence.get(note.id) ?? []} size="xs" className="shrink-0" />
                         </span>
                         <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
                           {whenText(note.updatedAt, now)}
@@ -620,7 +638,7 @@ export function Notes() {
               {reading ? (
                 <NoteDocument text={current.text} />
               ) : (
-                <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} />
+                <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} onLive={typeLive} />
               )}
             </div>
           )}
@@ -632,16 +650,37 @@ export function Notes() {
 
 // The note's text, always ready for typing. It grows with the text, so a
 // long note scrolls with the page instead of inside a box of its own.
-function NoteText({ note, focused, onChange }: { note: Note; focused: boolean; onChange: (text: string) => void }) {
-  const { data } = useApp()
+// A note in a workspace is written live with the others in it (lib/collab.ts):
+// its text then comes from the room, and is never saved from here (the room
+// saves it), so `onLive` only keeps the list's title up to date.
+function NoteText({ note, focused, onChange, onLive }: { note: Note; focused: boolean; onChange: (text: string) => void; onLive: (text: string) => void }) {
+  const { data, team } = useApp()
   const links = linksIn(note.text)
+  const shared = workspaceOf(spaceOfNote(note, data.projects), team) !== undefined
+  const live = useLiveNote(shared ? note.id : null, team)
+  useLiveStatus(live)
+  const binding = useMemo(() => (live ? { text: live.text, awareness: live.awareness, undo: live.undo } : undefined), [live])
+  const writtenLive = live !== null && live.status !== 'off'
   return (
     <div className="relative">
+      {writtenLive && <LiveBar live={live} />}
       <NoteRefs note={note.id} tasks={mentionsIn(note.text)} links={links} />
-      <NoteEditor text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} />
+      {!writtenLive ? (
+        <NoteEditor key="own" text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} />
+      ) : live.synced ? (
+        <NoteEditor key="live" text={note.text} onChange={onLive} focused={focused} tasks={data.tasks} live={binding} onActivity={() => live.active()} />
+      ) : (
+        // Until the room's copy has arrived there is nothing to type into:
+        // the note as stored, to read.
+        <NoteEditor key="waiting" text={note.text} onChange={() => {}} focused={false} tasks={data.tasks} readOnly />
+      )}
     </div>
   )
 }
+
+// Where a note lives: its project's space, else the one it was written in.
+const spaceOfNote = (note: Note, projects: { id: number; spaceId?: number | null }[]): number | null =>
+  note.projectId != null ? (projects.find((p) => p.id === note.projectId)?.spaceId ?? note.spaceId ?? null) : (note.spaceId ?? null)
 
 // The note shown formatted, as a document to read. Markdown: # headings,
 // lists, **bold**, links and so on.

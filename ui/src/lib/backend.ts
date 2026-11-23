@@ -147,6 +147,10 @@ export const workspaceCalls = {
   read: () => post<unknown>('/api/notifications/read', {}),
 }
 
+// A two-minute ticket to the live notes service, for one workspace note (to
+// write it with the others) or a workspace (to see who is in which note).
+export const liveTicket = (ask: { note?: number; space?: number }) => post<{ ticket: string; url: string }>('/api/live/ticket', ask)
+
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
 export const signOut = async (): Promise<void> => {
