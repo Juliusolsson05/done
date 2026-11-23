@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workspaces mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400..700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+/* done's own tokens, copied from ui/src/index.css. */
+:root {
+  --background: #fcfcfa; --foreground: #1e1f1d; --popover: #fff; --muted: #f3f3f0; --muted-foreground: #62645f;
+  --faint: #9a9c96; --secondary: #ebebe7; --accent: #efefeb; --border: rgb(30 31 29 / 0.09); --input: rgb(30 31 29 / 0.16);
+  --primary: #1e4fbf; --destructive: #d2402f; --p1: #d2402f; --p2: #c98010; --p3: #3a6fd8;
+  --sidebar: #ededea; --sidebar-accent: #e2e2de; --grouped: #f2f2f7; --tertiary: #8e8e93;
+  --project-0: #3d6fdc; --project-1: #d27a2c; --project-2: #7c63d6; --project-3: #2f9a5c; --project-4: #cf4d7c; --project-5: #2495a3;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --display: "Familjen Grotesk", var(--sans);
+  --julius: #1e4fbf; --geart: #2f9a5c; --ana: #cf4d7c; --max: #b08d16;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #e6e6e1; color: var(--foreground); font: 14px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+svg.lucide { width: 15px; height: 15px; stroke-width: 2; flex-shrink: 0; }
+
+/* The review shell around the frames. */
+.shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+.index { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 22px 18px 40px; border-right: 1px solid var(--border); background: #f1f1ed; }
+.index h1 { font: 600 20px/1.2 var(--display); letter-spacing: -0.02em; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; }
+.index p { margin: 0 0 18px; color: var(--muted-foreground); font-size: 13px; }
+.index h2 { font-size: 12px; font-weight: 600; color: var(--muted-foreground); margin: 18px 0 4px; }
+.index a { display: block; padding: 3px 8px; margin: 0 -8px; border-radius: 6px; color: var(--foreground); text-decoration: none; font-size: 13px; }
+.index a:hover { background: var(--sidebar-accent); }
+.index a.on { background: rgb(30 79 191 / 0.1); color: var(--primary); }
+main { padding: 32px 40px 120px; display: flex; flex-direction: column; gap: 56px; min-width: 0; }
+.intro { max-width: 760px; }
+.intro h1 { font: 600 32px/1.15 var(--display); letter-spacing: -0.02em; margin: 0 0 10px; }
+.intro p { margin: 0 0 8px; color: var(--muted-foreground); max-width: 70ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 13px; color: var(--muted-foreground); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.group-title { font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; margin: 0 0 -32px; padding-top: 8px; border-top: 1px solid var(--input); }
+section.sc { display: flex; flex-direction: column; gap: 14px; scroll-margin-top: 20px; }
+.sc-head { max-width: 760px; }
+.sc-head h3 { margin: 0 0 4px; font: 600 18px/1.3 var(--display); letter-spacing: -0.01em; }
+.sc-head p { margin: 0; color: var(--muted-foreground); max-width: 72ch; }
+.check { margin: 6px 0 0; padding-left: 18px; color: var(--muted-foreground); font-size: 13px; }
+.check li { margin: 2px 0; }
+.check b { color: var(--foreground); font-weight: 600; }
+.frames { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+
+/* A Mac window. */
+.win { width: 920px; max-width: 100%; height: 680px; display: flex; border-radius: 12px; overflow: hidden; background: var(--background); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.12), 0 18px 40px -12px rgb(0 0 0 / 0.25); position: relative; }
+.win.short { height: 440px; }
+.win.tall { height: 720px; }
+.mid { flex: 1; min-height: 0; overflow: hidden; }
+.side { width: 236px; flex-shrink: 0; background: var(--sidebar); display: flex; flex-direction: column; padding: 10px 8px 8px; color: #2b2c29; user-select: none; }
+.lights { display: flex; gap: 7px; padding: 2px 6px 10px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; background: #d9d9d5; }
+.word { display: flex; align-items: center; gap: 8px; padding: 0 8px 8px; font: 600 19px/1 var(--display); letter-spacing: -0.02em; }
+.nav { display: flex; flex-direction: column; gap: 1px; }
+.nav .it { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13.5px; }
+.nav .it svg { color: var(--muted-foreground); opacity: .75; }
+.nav .it.on { background: rgb(30 79 191 / 0.1); }
+.nav .it.on svg { color: var(--primary); opacity: 1; }
+.nav .it .n { margin-left: auto; font-size: 12px; color: var(--faint); }
+.nav .it .n.late { color: var(--p1); }
+.glabel { font-size: 12px; color: var(--faint); padding: 14px 8px 4px; font-weight: 500; display: flex; justify-content: space-between; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, #9a9aa3); flex-shrink: 0; margin: 0 3px; }
+.foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 8px; }
+.picker { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-radius: 8px; font-size: 13.5px; font-weight: 500; }
+.picker:hover, .picker.open { background: var(--sidebar-accent); }
+.picker .chev { margin-left: auto; color: var(--faint); }
+.picker .sub { display: block; font-size: 11.5px; color: var(--faint); font-weight: 400; line-height: 1.1; }
+.bell { position: relative; }
+.badge { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
+
+.content { flex: 1; min-width: 0; padding: 28px 36px; position: relative; }
+.vh { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+.vh h1 { margin: 0; font: 600 30px/1.15 var(--display); letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+.vh .sub { color: var(--muted-foreground); font-size: 13px; }
+.vh .acts { margin-left: auto; display: flex; gap: 4px; align-self: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 6px; font: 500 13px var(--sans); border: 0; background: transparent; color: var(--muted-foreground); cursor: default; white-space: nowrap; }
+.btn.outline { border: 1px solid var(--input); background: var(--background); color: var(--foreground); }
+.btn.primary { background: var(--primary); color: #fff; }
+.btn.danger { background: var(--destructive); color: #fff; }
+.btn.ghost-danger { color: var(--destructive); }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12.5px; }
+.btn.on { background: rgb(30 79 191 / 0.1); color: var(--primary); }
+
+.sect { font-size: 13px; font-weight: 600; color: var(--foreground); padding: 14px 8px 4px; display: flex; gap: 8px; align-items: baseline; }
+.sect span { color: var(--faint); font-weight: 400; }
+.sect.late { color: var(--p1); }
+.row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: 8px; }
+.row:hover { background: var(--muted); }
+.ck { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--faint); flex-shrink: 0; margin-top: 1px; }
+.ck.p1 { border-color: var(--p1); background: rgb(210 64 47 / .1); }
+.ck.p2 { border-color: var(--p2); background: rgb(201 128 16 / .1); }
+.ck.p3 { border-color: var(--p3); background: rgb(58 111 216 / .1); }
+.row .t { flex: 1; min-width: 0; }
+.row .t small { display: block; color: var(--muted-foreground); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; line-height: 20px; }
+.meta .late { color: var(--p1); }
+.meta .proj { display: inline-flex; align-items: center; gap: 5px; }
+.tag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 4px; background: var(--secondary); color: var(--muted-foreground); font-size: 11px; font-weight: 500; }
+
+/* Google pictures (drawn as initials here; the real thing is the photo). */
+.av { width: 20px; height: 20px; border-radius: 50%; background: var(--c); color: #fff; font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 0 0 2px var(--ring-bg, var(--background)); letter-spacing: 0; }
+.av.lg { width: 28px; height: 28px; font-size: 12px; }
+.av.xl { width: 36px; height: 36px; font-size: 14px; }
+.av.sm { width: 16px; height: 16px; font-size: 8.5px; }
+.av.ws { border-radius: 6px; }
+.stack { display: inline-flex; align-items: center; }
+.stack .av + .av { margin-left: -6px; }
+.stack .more { margin-left: 4px; font-size: 11.5px; color: var(--muted-foreground); }
+.side .av { --ring-bg: var(--sidebar); }
+
+/* Floating things. */
+.pop { position: absolute; background: var(--popover); border-radius: 10px; box-shadow: 0 0 0 1px rgb(0 0 0 / .08), 0 12px 32px -8px rgb(0 0 0 / .22); padding: 6px; z-index: 5; font-size: 13.5px; }
+.pop .mi { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px; border-radius: 6px; }
+.pop .mi.hi { background: var(--accent); }
+.pop .mi svg { color: var(--muted-foreground); }
+.pop .mi .r { margin-left: auto; color: var(--faint); font-size: 12px; }
+.pop .mi .sel { margin-left: auto; color: var(--primary); }
+.pop .sep { height: 1px; background: var(--border); margin: 5px 4px; }
+.pop .lab { font-size: 11.5px; color: var(--faint); padding: 6px 9px 2px; font-weight: 500; }
+.dim { position: absolute; inset: 0 0 0 -236px; background: rgb(30 31 29 / .28); z-index: 4; }
+.dialog { position: absolute; left: calc(50% - 118px); top: 50%; transform: translate(-50%, -50%); width: 420px; background: var(--popover); border-radius: 12px; padding: 20px 22px 18px; z-index: 6; box-shadow: 0 24px 60px -12px rgb(0 0 0 / .35); }
+.dialog h4 { margin: 0 0 8px; font: 600 18px/1.3 var(--display); letter-spacing: -0.01em; }
+.dialog p { margin: 0 0 10px; color: var(--muted-foreground); }
+.dialog .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.input { height: 32px; border: 1px solid var(--input); border-radius: 6px; padding: 0 10px; display: flex; align-items: center; background: #fff; font-size: 13.5px; gap: 6px; }
+.input.focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(30 79 191 / .15); }
+.input .ph { color: var(--faint); }
+.caret { display: inline-block; width: 1.5px; height: 16px; background: var(--foreground); vertical-align: middle; margin-left: 1px; }
+.toast { position: absolute; bottom: 18px; left: calc(50% - 118px); transform: translateX(-50%); background: #1e1f1d; color: #fff; border-radius: 8px; padding: 9px 14px; font-size: 13px; display: flex; gap: 14px; align-items: center; z-index: 7; white-space: nowrap; box-shadow: 0 8px 24px -8px rgb(0 0 0 / .4); }
+.toast b { color: #9db8f5; font-weight: 600; }
+
+/* Settings. */
+.pane { max-width: 600px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
+.pane h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pane p { margin: 0; color: var(--muted-foreground); }
+.list { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.li { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border); }
+.li .who { flex: 1; min-width: 0; }
+.li .who small { display: block; color: var(--muted-foreground); font-size: 12px; }
+.li .role { color: var(--muted-foreground); font-size: 12.5px; }
+.crumb { color: var(--muted-foreground); font-size: 13px; display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+
+/* Board. */
+.cols { display: flex; gap: 14px; }
+.col { width: 220px; display: flex; flex-direction: column; gap: 8px; }
+.col h5 { margin: 0 0 2px; font-size: 13px; font-weight: 600; display: flex; gap: 8px; }
+.col h5 span { color: var(--faint); font-weight: 400; }
+.card { background: #fff; border-radius: 8px; padding: 10px 11px; box-shadow: 0 0 0 1px var(--border); display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.card .ft { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
+.card .ft .stack { margin-left: auto; --ring-bg: #fff; }
+
+/* Notes. */
+.notes { display: flex; height: 100%; margin: -28px -36px; }
+.nlist { width: 250px; border-right: 1px solid var(--border); padding: 18px 10px; display: flex; flex-direction: column; gap: 1px; }
+.nlist .ni { padding: 8px 10px; border-radius: 8px; }
+.nlist .ni.on { background: var(--muted); }
+.nlist .ni b { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 13.5px; }
+.nlist .ni small { color: var(--faint); font-size: 12px; display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.nlist .ni .stack { margin-left: auto; --ring-bg: var(--background); }
+.nlist .ni.on .stack { --ring-bg: var(--muted); }
+.editor { flex: 1; padding: 22px 34px; min-width: 0; position: relative; }
+.ebar { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 12.5px; margin-bottom: 18px; }
+.ebar .stack { margin-left: auto; }
+.md { font: 14px/2 var(--sans); color: var(--foreground); }
+.md .h { font: 600 24px/1.3 var(--display); letter-spacing: -0.015em; }
+.md .mh { color: var(--faint); }
+.md .h2 { font-weight: 600; font-size: 15px; }
+.rc { position: relative; display: inline-block; width: 2px; height: 18px; vertical-align: -3px; background: var(--c); }
+.rc::after { content: attr(data-n); position: absolute; left: -1px; top: -16px; background: var(--c); color: #fff; font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 4px 4px 4px 0; line-height: 15px; white-space: nowrap; }
+.rsel { background: color-mix(in srgb, var(--c) 18%, transparent); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px; border-radius: 6px; background: var(--muted); box-shadow: 0 0 0 1px var(--border); font-size: 13px; line-height: 22px; vertical-align: 1px; }
+.chip .ck { width: 13px; height: 13px; margin: 0; border-width: 1.5px; }
+.chip.private { color: var(--faint); }
+.banner { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: 12.5px; margin-bottom: 14px; }
+
+/* An iPhone. */
+.phone { width: 300px; height: 620px; border-radius: 42px; background: #111; padding: 10px; box-shadow: 0 18px 40px -12px rgb(0 0 0 / .35); flex-shrink: 0; }
+.scr { width: 100%; height: 100%; border-radius: 33px; overflow: hidden; background: var(--grouped); position: relative; font-size: 15px; display: flex; flex-direction: column; }
+.status { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; font-weight: 600; font-size: 14px; flex-shrink: 0; }
+.ph-title { font: 700 30px/1.1 var(--sans); letter-spacing: -0.02em; padding: 6px 18px 10px; }
+.ph-group { margin: 0 14px 18px; background: #fff; border-radius: 12px; overflow: hidden; }
+.ph-row { display: flex; align-items: center; gap: 11px; padding: 0 14px; height: 44px; position: relative; }
+.ph-row + .ph-row::before { content: ""; position: absolute; top: 0; right: 0; left: 46px; height: 1px; background: var(--border); }
+.ph-row .ic { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--c); flex-shrink: 0; }
+.ph-row .ic svg { width: 16px; height: 16px; }
+.ph-row .r { margin-left: auto; color: var(--tertiary); display: flex; align-items: center; gap: 4px; }
+.ph-lab { font-size: 13px; color: var(--tertiary); padding: 0 30px 6px; text-transform: none; }
+.seg { margin: 0 14px 16px; background: rgb(118 118 128 / .12); border-radius: 9px; padding: 2px; display: flex; font-size: 13px; font-weight: 500; }
+.seg div { flex: 1; text-align: center; padding: 6px 0; border-radius: 7px; display: flex; gap: 5px; justify-content: center; align-items: center; }
+.seg div.on { background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
+.tabbar { margin-top: auto; height: 72px; background: rgb(250 250 250 / .94); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding-top: 8px; font-size: 10px; color: var(--tertiary); }
+.tabbar div { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.tabbar div.on { color: var(--primary); }
+.tabbar svg { width: 22px; height: 22px; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 70px; background: #fff; border-radius: 14px 14px 0 0; z-index: 3; padding: 8px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .18); }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: #d6d6d6; margin: 0 auto 10px; }
+.ph-dim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 2; }
+
+@media (max-width: 900px) { .shell { grid-template-columns: 1fr; } .index { position: static; height: auto; } main { padding: 24px 16px 80px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="index" id="index"></nav>
+  <main id="main">
+    <div class="intro">
+      <h1>Workspaces, in done</h1>
+      <p>Every screen and state the workspaces plan adds or changes, drawn in done's own colours, type and spacing. Nothing here works; it is for checking direction before any code is written.</p>
+      <p>Each scenario says what is happening and what to look at. Write down anything that feels wrong — a word, a place, a flow — and it goes into the plan before building starts.</p>
+      <div class="legend">
+        <span><span class="av sm" style="--c:var(--julius)">J</span> Julius (you)</span>
+        <span><span class="av sm" style="--c:var(--geart)">G</span> Geart</span>
+        <span><span class="av sm" style="--c:var(--ana)">A</span><span class="av sm" style="--c:var(--max)">M</span> example members, to show bigger teams</span>
+        <span>Initials stand in for the Google photo.</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// Pieces used by every frame. Static markup, built once on load.
+const P = {
+  J: { n: 'Julius Olsson', i: 'J', c: 'var(--julius)', e: 'julius@hop.dev' },
+  G: { n: 'Geart', i: 'G', c: 'var(--geart)', e: 'geart@hop.dev' },
+  A: { n: 'Ana Lind', i: 'A', c: 'var(--ana)', e: 'ana@hop.dev' },
+  M: { n: 'Max Berg', i: 'M', c: 'var(--max)', e: 'max@hop.dev' },
+}
+const ic = (name, extra = '') => `<i data-lucide="${name}" ${extra}></i>`
+const av = (k, cls = '') => `<span class="av ${cls}" style="--c:${P[k].c}" title="${P[k].n}">${P[k].i}</span>`
+const stack = (keys, cls = '') => {
+  const shown = keys.slice(0, 3).map((k) => av(k, cls)).join('')
+  return `<span class="stack">${shown}${keys.length > 3 ? `<span class="more">+${keys.length - 3}</span>` : ''}</span>`
+}
+const hop = (cls = '') => `<span class="av ws ${cls}" style="--c:#1e1f1d">H</span>`
+const mark = `<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="10" fill="var(--primary)"/><path d="M5.6 10.3l3 3 5.8-6.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+const PROJECTS = {
+  personal: [['Home', 'var(--project-1)', 4], ['done', 'var(--project-0)', 9]],
+  hop: [['Launch', 'var(--project-3)', 7], ['Hardware', 'var(--project-2)', 5], ['Fundraise', 'var(--project-4)', 3]],
+}
+
+// The sidebar. `space` is 'all' | 'personal' | 'hop' | 'none' (never joined a workspace).
+function sidebar({ space = 'all', view = 'today', picker = 'closed', bell = 2 } = {}) {
+  const it = (icon, label, kind, n = '', late = false) =>
+    `<div class="it ${view === kind ? 'on' : ''}">${ic(icon)}<span>${label}</span>${n ? `<span class="n ${late ? 'late' : ''}">${n}</span>` : ''}</div>`
+  const projects =
+    space === 'hop' ? PROJECTS.hop : space === 'personal' || space === 'none' ? PROJECTS.personal : [...PROJECTS.personal, ...PROJECTS.hop]
+  const projRows = projects
+    .map(([n, c, k]) => `<div class="it ${view === n ? 'on' : ''}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n">${k}</span></div>`)
+    .join('')
+  const groupLabel =
+    space === 'all'
+      ? `<div class="glabel">Your projects</div><div class="nav">${PROJECTS.personal.map(([n, c, k]) => `<div class="it ${view === n ? 'on' : ''}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n">${k}</span></div>`).join('')}</div><div class="glabel">Hop</div><div class="nav">${PROJECTS.hop.map(([n, c, k]) => `<div class="it ${view === n ? 'on' : ''}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n">${k}</span></div>`).join('')}</div>`
+      : `<div class="glabel">Projects <span>${ic('plus')}</span></div><div class="nav">${projRows}</div>`
+  const who =
+    space === 'hop'
+      ? `${hop()}<span>Hop<span class="sub">2 members</span></span>`
+      : space === 'personal'
+        ? `${av('J')}<span>Julius Olsson<span class="sub">Only you</span></span>`
+        : `<span class="av ws" style="--c:var(--secondary);color:var(--foreground);box-shadow:none">${ic('layers', 'style="width:12px;height:12px"')}</span><span>All<span class="sub">You and Hop</span></span>`
+  const foot =
+    space === 'none'
+      ? `<div class="nav">${it('sliders-horizontal', 'Settings', 'settings')}</div>`
+      : `<div class="nav"><div class="it bell">${ic('bell')}<span>Notifications</span>${bell ? `<span class="badge">${bell}</span>` : ''}</div>${it('sliders-horizontal', 'Settings', 'settings')}</div>
+         <div class="picker ${picker === 'open' ? 'open' : ''}">${who}<span class="chev">${ic('chevrons-up-down')}</span></div>`
+  return `<aside class="side"><div class="lights"><i></i><i></i><i></i></div><div class="word">${mark}done</div>
+    <div class="mid"><div class="nav">${it('search', 'Search', 'search', '⌘K')}${it('inbox', 'Inbox', 'inbox', space === 'hop' ? '' : 3)}${it('calendar', 'Today', 'today', space === 'hop' ? 4 : 6, true)}${it('calendar-days', 'Upcoming', 'upcoming', 12)}${space === 'hop' ? it('user-check', 'Assigned to me', 'mine', 5) : ''}${it('chart-gantt', 'Timeline', 'timeline')}${it('columns-3', 'Board', 'board')}${it('notebook-pen', 'Notes', 'notes')}</div>
+    ${groupLabel}
+    <div class="glabel">Extras</div><div class="nav">${it('timer', 'Focus', 'focus')}${it('clipboard-list', 'Time sheet', 'timesheet')}${it('circle-check', 'Completed', 'completed')}</div></div>
+    <div class="foot">${foot}</div></aside>`
+}
+
+// A task row. `who`: assignee keys; `ws`: show the workspace tag (in All); `proj`: [name, colour].
+function row({ t, p = 4, note = '', due = '', late = false, proj = null, who = [], ws = false, sub = '' }) {
+  const meta = [
+    sub ? `<span>${ic('chevron-right', 'style="width:13px;height:13px"')} ${sub}</span>` : '',
+    due ? `<span class="${late ? 'late' : ''}">${due}</span>` : '',
+    proj ? `<span class="proj"><span class="dot" style="--c:${proj[1]};margin:0"></span>${proj[0]}</span>` : '',
+    ws ? `<span class="tag">Hop</span>` : '',
+    who.length ? stack(who) : '',
+  ].join('')
+  return `<div class="row"><span class="ck ${p < 4 ? 'p' + p : ''}"></span><div class="t">${t}${note ? `<small>${note}</small>` : ''}</div><div class="meta">${meta}</div></div>`
+}
+const L = (n) => [n, PROJECTS.hop.concat(PROJECTS.personal).find((x) => x[0] === n)[1]]
+
+function win(side, content, cls = '') {
+  return `<div class="win ${cls}">${side}<div class="content">${content}</div></div>`
+}
+function phone(inner, tab = 'lists') {
+  const t = (i, n, k) => `<div class="${tab === k ? 'on' : ''}">${ic(i)}${n}</div>`
+  return `<div class="phone"><div class="scr"><div class="status"><span>9:41</span><span>${ic('wifi', 'style="width:14px;height:14px"')}</span></div>${inner}<div class="tabbar">${t('calendar', 'Today', 'today')}${t('calendar-days', 'Upcoming', 'upcoming')}${t('notebook-pen', 'Notes', 'notes')}${t('list', 'Lists', 'lists')}</div></div></div>`
+}
+
+// ---- The scenarios -------------------------------------------------------
+const S = []
+const group = (title) => S.push({ group: title })
+const sc = (id, title, what, checks, frames) => S.push({ id, title, what, checks, frames })
+
+group('The sidebar and the picker')
+
+sc('never', 'Someone who never uses workspaces', 'Exactly today\'s sidebar. No picker, no bell, no "Assigned to me". The only new thing is a Workspaces section in Settings.', [
+  'Nothing new competes for attention until you create or join a workspace.',
+], [win(sidebar({ space: 'none' }), `<div class="vh"><h1>Today</h1><span class="sub">Sunday 22 November</span></div>
+  <div class="sect late">Overdue</div>${row({ t: 'Renew passport', p: 2, due: 'Yesterday', late: true, proj: L('Home') })}
+  <div class="sect">Today</div>${row({ t: 'Ship the filter for Board and Timeline', p: 1, proj: L('done') })}${row({ t: 'Call the landlord', proj: L('Home') })}`)])
+
+sc('picker-closed', 'In a workspace: the picker at the bottom left', 'Once you belong to a workspace, the bottom of the sidebar holds the bell and the picker. It says where you are: All, your own space, or a workspace.', [
+  '<b>All</b> is the default. The projects list splits into "Your projects" and "Hop".',
+  'The bell shows a count only when something is unread.',
+], [win(sidebar({ space: 'all' }), `<div class="vh"><h1>Today</h1><span class="sub">Sunday 22 November</span></div>
+  <div class="sect">Today</div>${row({ t: 'Open the Mercury bank account', p: 1, proj: L('Fundraise'), ws: true, who: ['J'] })}${row({ t: 'Ship the filter for Board and Timeline', p: 1, proj: L('done') })}${row({ t: 'Book EF logistics call', proj: L('Launch'), ws: true })}`)])
+
+sc('picker-open', 'The picker, open', 'A click opens a short list: All, you, each workspace, and a way to make a new one. ⌘0 is All, ⌘⇧1–9 jump to a space.', [
+  'Your own space uses your Google picture and name; a workspace uses its first letter.',
+  'Does "Create workspace" belong here as well as in Settings? (Default: yes, it opens Settings → Workspaces.)',
+], [win(sidebar({ space: 'all', picker: 'open' }), `<div class="vh"><h1>Today</h1></div>${row({ t: 'Open the Mercury bank account', p: 1, proj: L('Fundraise'), ws: true, who: ['J'] })}
+  <div class="pop" style="left:-228px;bottom:58px;width:240px;position:absolute">
+    <div class="mi hi"><span class="av ws" style="--c:var(--secondary);color:var(--foreground);box-shadow:none">${ic('layers', 'style="width:12px;height:12px"')}</span>All<span class="sel">${ic('check')}</span></div>
+    <div class="mi">${av('J')}Julius Olsson<span class="r">Only you</span></div>
+    <div class="sep"></div><div class="lab">Workspaces</div>
+    <div class="mi">${hop()}Hop<span class="r">${stack(['J', 'G'], 'sm')}</span></div>
+    <div class="sep"></div>
+    <div class="mi">${ic('plus')}Create workspace</div>
+  </div>`)])
+
+sc('in-hop', 'Inside Hop', 'Choosing Hop narrows every view to Hop: its projects, its tasks, its notes. "Assigned to me" appears among the views.', [
+  'Inbox is personal, so it is hidden in a workspace. (Tasks added in Hop without a project go to its first project.)',
+  'No workspace tag on rows here: everything is Hop.',
+], [win(sidebar({ space: 'hop', view: 'Launch' }), `<div class="vh"><h1><span class="dot" style="--c:var(--project-3);width:11px;height:11px;border-radius:3px"></span>Launch</h1><span class="sub">7 tasks</span><div class="acts"><span class="btn">${ic('list-filter')}Filter</span><span class="btn">${ic('ellipsis')}</span></div></div>
+  ${row({ t: 'Book EF logistics call', p: 2, due: 'Wed', who: ['G'] })}
+  ${row({ t: 'Order equipment for the pilot', p: 1, due: 'Thu', who: ['J', 'G'], sub: '2/5' })}
+  ${row({ t: 'Write the onboarding guide', note: 'One page, plain words, screenshots of the three main steps', who: ['J', 'G', 'A', 'M', 'A'] })}
+  ${row({ t: 'Pick a launch date', who: [] })}
+  ${row({ t: 'Landing page copy', p: 3, due: 'Fri', who: ['G', 'A'] })}`)])
+
+group('Tasks and assignees')
+
+sc('all-today', 'Today, in All', 'Your tasks and Hop\'s together. A Hop task shows here only if it is yours or nobody\'s, so Geart\'s work does not fill your day.', [
+  'The small "Hop" tag says which space a task lives in. Only in All.',
+  'Pictures appear only on workspace tasks; personal tasks never show your own face.',
+], [win(sidebar({ space: 'all' }), `<div class="vh"><h1>Today</h1><span class="sub">Sunday 22 November</span></div>
+  <div class="sect late">Overdue <span>2</span></div>
+  ${row({ t: 'Send the cap table to Geart', p: 2, due: 'Friday', late: true, proj: L('Fundraise'), ws: true, who: ['J'] })}
+  ${row({ t: 'Renew passport', due: 'Yesterday', late: true, proj: L('Home') })}
+  <div class="sect">Today <span>4</span></div>
+  ${row({ t: 'Open the Mercury bank account', p: 1, proj: L('Fundraise'), ws: true, who: ['J', 'G'] })}
+  ${row({ t: 'Ship the filter for Board and Timeline', p: 1, proj: L('done'), sub: '3/4' })}
+  ${row({ t: 'Book EF logistics call', proj: L('Launch'), ws: true })}
+  ${row({ t: 'Call the landlord', proj: L('Home') })}`)])
+
+sc('board', 'Board', 'Cards carry the same pictures, at the bottom right.', ['Up to three pictures, then "+2".'], [
+  win(sidebar({ space: 'hop', view: 'board' }), `<div class="vh"><h1>Board</h1><div class="acts"><span class="btn on">${ic('list-filter')}Assignee: Geart</span></div></div>
+  <div class="cols">
+    <div class="col"><h5>To do <span>3</span></h5>
+      <div class="card">Pick a launch date<div class="ft"><span class="dot" style="--c:var(--project-3);margin:0"></span>Launch</div></div>
+      <div class="card">Landing page copy<div class="ft"><span>Fri</span><span class="dot" style="--c:var(--project-3);margin:0"></span>Launch${stack(['G', 'A'])}</div></div>
+    </div>
+    <div class="col"><h5>In progress <span>2</span></h5>
+      <div class="card">Book EF logistics call<div class="ft"><span>Wed</span>${stack(['G'])}</div></div>
+      <div class="card">Write the onboarding guide<div class="ft"><span>${ic('chevron-right', 'style="width:12px;height:12px"')}1/3</span>${stack(['J', 'G', 'A', 'M', 'A'])}</div></div>
+    </div>
+    <div class="col"><h5>Done <span>8</span></h5><div class="card" style="color:var(--faint)">Register the company<div class="ft">${stack(['G'])}</div></div></div>
+  </div>`),
+])
+
+sc('editor', 'Choosing assignees', 'In the open task, "Assignees" lists the workspace\'s members with a check each. Several can be checked.', [
+  'Geart gets a notification when you add him; you never get one for assigning yourself.',
+], [win(sidebar({ space: 'hop', view: 'Launch' }), `<div class="vh"><h1>Launch</h1></div>
+  <div style="border-radius:10px;box-shadow:0 0 0 1px var(--input);padding:12px 14px;max-width:560px;background:#fff">
+    <div style="display:flex;gap:10px;align-items:center"><span class="ck p1"></span><b style="font-weight:500">Order equipment for the pilot</b></div>
+    <div style="color:var(--faint);margin:6px 0 12px 28px">Notes</div>
+    <div style="display:flex;gap:6px;margin-left:28px;flex-wrap:wrap">
+      <span class="btn outline sm">${ic('calendar')}Thursday</span><span class="btn outline sm">${ic('flag')}Priority 1</span>
+      <span class="btn outline sm" style="border-color:var(--primary)">${stack(['J', 'G'], 'sm')}Julius, Geart</span><span class="btn outline sm"><span class="dot" style="--c:var(--project-3)"></span>Launch</span>
+    </div>
+  </div>
+  <div class="pop" style="left:262px;top:232px;width:250px">
+    <div class="input" style="margin:2px 2px 6px">${ic('search')}<span class="ph">Assign to…</span></div>
+    <div class="mi">${av('J')}Julius Olsson<span class="r">you</span><span class="sel">${ic('check')}</span></div>
+    <div class="mi hi">${av('G')}Geart<span class="sel">${ic('check')}</span></div>
+    <div class="mi">${av('A')}Ana Lind</div>
+    <div class="sep"></div><div class="mi" style="color:var(--muted-foreground)">${ic('user-x')}Nobody</div>
+  </div>`)])
+
+sc('quickadd', 'Quick add with +name', 'Type "+" and a name, as "#" picks a project. Several are fine: "+geart +julius".', [
+  'Only offered in a workspace project, or after a #project that is in one.',
+], [win(sidebar({ space: 'hop', view: 'Launch' }), `<div class="vh"><h1>Launch</h1></div>${row({ t: 'Book EF logistics call', p: 2, due: 'Wed', who: ['G'] })}
+  <div class="dim"></div>
+  <div class="dialog" style="top:30%;width:560px;padding:14px 16px">
+    <div style="font-size:16px">Send pilot invoices friday <span style="color:var(--primary);background:rgb(30 79 191/.08);border-radius:4px;padding:0 3px">+ge</span><span class="caret"></span></div>
+    <div style="display:flex;gap:6px;margin-top:12px"><span class="btn outline sm">${ic('calendar')}Friday</span><span class="btn outline sm"><span class="dot" style="--c:var(--project-3)"></span>Launch</span></div>
+    <div class="pop" style="left:200px;top:40px;width:220px"><div class="mi hi">${av('G')}Geart<span class="r">geart@hop.dev</span></div></div>
+  </div>`)])
+
+sc('filter', 'Filtering Board and Timeline by assignee', 'The existing filter gains an Assignee section: Me, Nobody, and each member.', [], [
+  win(sidebar({ space: 'hop', view: 'timeline' }), `<div class="vh"><h1>Timeline</h1><div class="acts"><span class="btn on">${ic('list-filter')}Filter · 1</span></div></div>
+  <div class="pop" style="right:36px;top:70px;width:260px">
+    <div class="lab">Project</div><div class="mi"><span class="dot" style="--c:var(--project-3)"></span>Launch</div><div class="mi"><span class="dot" style="--c:var(--project-2)"></span>Hardware</div>
+    <div class="sep"></div><div class="lab">Assignee</div>
+    <div class="mi hi">${av('J')}Me<span class="sel">${ic('check')}</span></div><div class="mi">${av('G')}Geart</div><div class="mi">${ic('user-x')}Nobody</div>
+    <div class="sep"></div><div class="lab">Priority</div><div class="mi"><span class="ck p1" style="width:14px;height:14px"></span>Priority 1</div>
+  </div>`),
+])
+
+sc('context', 'Right-click a task', 'Assign sits beside the other quick changes. Moving a single task to another space is not offered: projects move, tasks follow.', [], [
+  win(sidebar({ space: 'hop', view: 'Launch' }), `<div class="vh"><h1>Launch</h1></div>${row({ t: 'Book EF logistics call', p: 2, due: 'Wed', who: ['G'] })}${row({ t: 'Pick a launch date' })}
+  <div class="pop" style="left:180px;top:118px;width:210px">
+    <div class="mi">${ic('calendar')}Date<span class="r">›</span></div><div class="mi">${ic('flag')}Priority<span class="r">›</span></div>
+    <div class="mi hi">${ic('user-plus')}Assign<span class="r">›</span></div><div class="mi">${ic('folder')}Move to project<span class="r">›</span></div>
+    <div class="sep"></div><div class="mi">${ic('timer')}Focus on this</div><div class="mi" style="color:var(--destructive)">${ic('trash-2', 'style="color:var(--destructive)"')}Delete</div>
+  </div>
+  <div class="pop" style="left:396px;top:190px;width:190px">
+    <div class="mi">${av('J')}Me</div><div class="mi">${av('G')}Geart<span class="sel">${ic('check')}</span></div><div class="mi">${av('A')}Ana Lind</div>
+  </div>`),
+])
+
+sc('mine', 'Assigned to me', 'In a workspace: every task assigned to you there, by date. In All, the same view shows your tasks across all workspaces.', [], [
+  win(sidebar({ space: 'hop', view: 'mine' }), `<div class="vh"><h1>Assigned to me</h1><span class="sub">5 tasks in Hop</span></div>
+  <div class="sect late">Overdue</div>${row({ t: 'Send the cap table to Geart', p: 2, due: 'Friday', late: true, proj: L('Fundraise'), who: ['J'] })}
+  <div class="sect">Today</div>${row({ t: 'Open the Mercury bank account', p: 1, proj: L('Fundraise'), who: ['J', 'G'] })}
+  <div class="sect">This week</div>${row({ t: 'Order equipment for the pilot', p: 1, due: 'Thu', proj: L('Launch'), who: ['J', 'G'], sub: '2/5' })}${row({ t: 'Write the onboarding guide', proj: L('Launch'), who: ['J', 'G', 'A', 'M', 'A'] })}
+  <div class="sect">No date</div>${row({ t: 'Pick the battery supplier', proj: L('Hardware'), who: ['J'] })}`),
+])
+
+group('Notifications and invites')
+
+sc('bell', 'The bell', 'Invites and being assigned, nothing else. Opening the list marks them read. An invite can be answered right here.', [
+  'No email is ever sent. This list is the only place news arrives.',
+  '"Geart joined Hop" is one more kind than the plan lists: it tells the inviter the invite worked. Keep it? (Default: yes.)',
+], [win(sidebar({ space: 'all', bell: 2 }), `<div class="vh"><h1>Today</h1></div>${row({ t: 'Ship the filter for Board and Timeline', p: 1, proj: L('done') })}
+  <div class="pop" style="left:-228px;bottom:96px;width:340px;padding:8px">
+    <div style="display:flex;align-items:center;padding:4px 8px 8px"><b style="font-weight:600">Notifications</b><span style="margin-left:auto;color:var(--faint);font-size:12px">Mark all read</span></div>
+    <div style="display:flex;gap:10px;padding:10px 8px;border-radius:8px;background:rgb(30 79 191/.06)">${av('A', 'lg')}<div style="flex:1"><div><b style="font-weight:600">Ana Lind</b> invited you to <b style="font-weight:600">Studio</b></div><div style="color:var(--faint);font-size:12px;margin:2px 0 8px">2 minutes ago · 4 members</div><div style="display:flex;gap:6px"><span class="btn primary sm">Join Studio</span><span class="btn outline sm">Decline</span></div></div></div>
+    <div style="display:flex;gap:10px;padding:10px 8px;border-radius:8px;background:rgb(30 79 191/.06)">${av('G', 'lg')}<div><div><b style="font-weight:600">Geart</b> assigned you <b style="font-weight:600">Order equipment for the pilot</b></div><div style="color:var(--faint);font-size:12px;margin-top:2px">1 hour ago · Hop · Launch</div></div></div>
+    <div style="display:flex;gap:10px;padding:10px 8px;color:var(--muted-foreground)">${av('G', 'lg')}<div><div>Geart joined <b style="font-weight:600">Hop</b></div><div style="color:var(--faint);font-size:12px;margin-top:2px">Yesterday</div></div></div>
+  </div>`)])
+
+sc('link', 'An invite link, opened by someone signed out', 'For a person who is not on done yet: you copy the link in Settings and send it however you like. It opens a plain page at thedone.app.', [
+  'The page never shows the workspace\'s projects or tasks, only its name and who invited.',
+], [`<div class="win short" style="width:640px;justify-content:center;align-items:center"><div style="text-align:center;max-width:360px">
+  <div style="display:flex;justify-content:center;gap:8px;align-items:center;font:600 22px var(--display);margin-bottom:28px">${mark}done</div>
+  <div style="display:flex;justify-content:center;margin-bottom:14px">${av('J', 'xl')}</div>
+  <div style="font:600 22px/1.3 var(--display);letter-spacing:-.01em;margin-bottom:6px">Julius invited you to Hop</div>
+  <p style="color:var(--muted-foreground);margin:0 0 20px">Hop has 2 members. Sign in with g•••@hop.dev to join.</p>
+  <span class="btn primary" style="height:36px;padding:0 16px">Continue with Google</span>
+  <p style="color:var(--faint);font-size:12px;margin-top:16px">This invite works until 30 November.</p></div></div>`])
+
+sc('wrong', 'Signed in as someone else, or the link has run out', 'An invite is for one Google account. Opening it in another says so plainly, and says what to do.', [], [
+  `<div class="frames"><div class="win short" style="width:440px;justify-content:center;align-items:center"><div style="text-align:center;max-width:320px">
+    <div style="font:600 19px/1.3 var(--display);margin-bottom:6px">This invite is for another account</div>
+    <p style="color:var(--muted-foreground);margin:0 0 18px">It was sent to g•••@hop.dev. You are signed in as geart.private@gmail.com.</p>
+    <div style="display:flex;gap:8px;justify-content:center"><span class="btn primary">Switch account</span><span class="btn outline">Open done</span></div></div></div>
+  <div class="win short" style="width:440px;justify-content:center;align-items:center"><div style="text-align:center;max-width:320px">
+    <div style="font:600 19px/1.3 var(--display);margin-bottom:6px">This invite has expired</div>
+    <p style="color:var(--muted-foreground);margin:0 0 18px">Invites last 7 days. Ask Julius to send a new one.</p>
+    <span class="btn outline">Open done</span></div></div></div>`,
+])
+
+sc('joined', 'After joining', 'Joining switches the picker to the workspace and says so once. Its projects arrive within a few seconds.', [], [
+  win(sidebar({ space: 'hop', view: 'today', bell: 0 }), `<div class="vh"><h1>Today</h1><span class="sub">in Hop</span></div>
+  ${row({ t: 'Book EF logistics call', p: 2, proj: L('Launch'), who: ['G'] })}${row({ t: 'Open the Mercury bank account', p: 1, proj: L('Fundraise'), who: ['J', 'G'] })}
+  <div class="toast">You joined Hop<b>Undo</b></div>`),
+])
+
+group('Settings → Workspaces')
+
+sc('set-empty', 'Empty: you have no workspace', 'Shown to everyone with an account. One sentence and one button.', [], [
+  win(sidebar({ space: 'none', view: 'settings' }), `<div class="vh"><h1>Settings</h1></div>
+  <div class="pane"><h3>Account</h3><p>Signed in as Julius Olsson (julius@hop.dev).</p></div>
+  <div class="pane"><h3>Workspaces</h3><p>Work on projects together. Create a workspace, invite people, and move a project into it. Your other projects stay yours.</p><span class="btn outline" style="align-self:flex-start">${ic('plus')}Create workspace</span></div>
+  <div class="pane"><h3>Sounds</h3><p>Play a quiet sound when you finish, add or change a task</p></div>`),
+])
+
+sc('set-noaccount', 'The Mac app without an account', 'Workspaces live on thedone.app, so they need you signed in. The app says that instead of hiding the section.', [], [
+  win(sidebar({ space: 'none', view: 'settings' }), `<div class="vh"><h1>Settings</h1></div>
+  <div class="pane"><h3>Account</h3><p>Your tasks are kept on this device. Sign in to have the same tasks here, at thedone.app and on your phone.</p><span class="btn primary sm" style="align-self:flex-start">Sign in with Google</span></div>
+  <div class="pane"><h3>Workspaces</h3><p>Sign in to create a workspace or join one. Everything on this device stays yours.</p></div>`, 'short'),
+])
+
+sc('set-create', 'Creating one', 'A name, and that is all. It opens the workspace\'s page, ready to invite.', [], [
+  win(sidebar({ space: 'none', view: 'settings' }), `<div class="vh"><h1>Settings</h1></div>
+  <div class="pane"><h3>Workspaces</h3><p>Work on projects together. Create a workspace, invite people, and move a project into it.</p>
+  <div style="display:flex;gap:8px;max-width:420px"><div class="input focus" style="flex:1">Hop<span class="caret"></span></div><span class="btn primary">Create</span><span class="btn">Cancel</span></div></div>`, 'short'),
+])
+
+sc('set-owner', 'A workspace you own', 'Members, pending invites, the projects in it, and moving one in. Owners see the rename and delete controls.', [
+  'Invite takes a Google email address. If they already use done they get it in the bell at once; if not, it waits for their first sign-in.',
+  '"Copy link" is for sending it yourself, in WhatsApp or anywhere.',
+], [win(sidebar({ space: 'all', view: 'settings', bell: 0 }), `<div class="crumb">Settings ${ic('chevron-right', 'style="width:12px;height:12px"')} Workspaces</div>
+  <div class="vh" style="margin-bottom:16px"><h1>${hop('lg')}Hop</h1><div class="acts"><span class="btn">Rename</span></div></div>
+  <div class="pane"><h3>Members</h3>
+    <div style="display:flex;gap:8px;max-width:600px"><div class="input" style="flex:1"><span class="ph">Google email address</span></div><span class="btn primary">Invite</span></div>
+    <div class="list">
+      <div class="li">${av('J', 'lg')}<div class="who">Julius Olsson <span style="color:var(--faint)">(you)</span><small>julius@hop.dev</small></div><span class="role">Owner</span></div>
+      <div class="li">${av('G', 'lg')}<div class="who">Geart<small>geart@hop.dev</small></div><span class="role">Member</span><span class="btn sm">${ic('ellipsis')}</span></div>
+      <div class="li"><span class="av lg" style="--c:var(--secondary);color:var(--muted-foreground)">${ic('mail', 'style="width:13px;height:13px"')}</span><div class="who">ana@studio.se<small>Invited 2 days ago · waiting for them to sign in</small></div><span class="btn outline sm">${ic('link')}Copy link</span><span class="btn sm">Revoke</span></div>
+    </div></div>
+  <div class="pane"><h3>Projects</h3>
+    <div class="list"><div class="li"><span class="dot" style="--c:var(--project-3)"></span><div class="who">Launch</div><span class="role">7 tasks · 2 notes</span></div><div class="li"><span class="dot" style="--c:var(--project-2)"></span><div class="who">Hardware</div><span class="role">5 tasks</span></div></div>
+    <span class="btn outline" style="align-self:flex-start">${ic('folder-input')}Move a project here</span></div>
+  <div class="pane"><h3>Delete Hop</h3><p>Removes its projects, tasks and notes for every member.</p><span class="btn ghost-danger" style="align-self:flex-start;padding-left:0">Delete workspace…</span></div>`, 'tall')])
+
+sc('set-member', 'A workspace you are a member of', 'Members can invite and move their own projects in; they cannot remove people or delete it. They can leave.', [
+  'Should members be able to invite? (Default: yes. A 2–10 person team does not need a gatekeeper.)',
+], [win(sidebar({ space: 'all', view: 'settings', bell: 0 }), `<div class="crumb">Settings ${ic('chevron-right', 'style="width:12px;height:12px"')} Workspaces</div>
+  <div class="vh"><h1>${hop('lg')}Hop</h1></div>
+  <div class="pane"><h3>Members</h3><div style="display:flex;gap:8px"><div class="input" style="flex:1"><span class="ph">Google email address</span></div><span class="btn primary">Invite</span></div>
+  <div class="list"><div class="li">${av('J', 'lg')}<div class="who">Julius Olsson<small>julius@hop.dev</small></div><span class="role">Owner</span></div><div class="li">${av('G', 'lg')}<div class="who">Geart <span style="color:var(--faint)">(you)</span><small>geart@hop.dev</small></div><span class="role">Member</span></div></div></div>
+  <div class="pane"><h3>Leave Hop</h3><p>You lose access to its projects and notes on every device. Tasks you made stay in Hop.</p><span class="btn ghost-danger" style="align-self:flex-start;padding-left:0">Leave Hop</span></div>`)])
+
+sc('set-delete', 'Deleting a workspace', 'Owner only. Typing the name makes it hard to do by accident; it removes everything in it, for every member.', [], [
+  win(sidebar({ space: 'all', view: 'settings', bell: 0 }), `<div class="vh"><h1>${hop('lg')}Hop</h1></div><div class="dim"></div>
+  <div class="dialog"><h4>Delete Hop?</h4><p>Its 3 projects, 15 tasks and 4 notes are removed for you and Geart. This cannot be undone. To keep a project, move it out first.</p>
+  <p style="color:var(--foreground);margin-bottom:6px">Type <b>Hop</b> to confirm</p><div class="input focus">Ho<span class="caret"></span></div>
+  <div class="acts"><span class="btn outline">Keep it</span><span class="btn danger" style="opacity:.45">Delete Hop</span></div></div>`),
+])
+
+group('Moving projects and removing people')
+
+sc('move-in', 'Moving a project into a workspace', 'From Settings or by right-clicking the project. The confirmation names who will see it.', [
+  'Assignees can only be workspace members, so moving in adds none; moving out removes them.',
+], [win(sidebar({ space: 'all', view: 'done' }), `<div class="vh"><h1><span class="dot" style="--c:var(--project-0);width:11px;height:11px;border-radius:3px"></span>done</h1></div>${row({ t: 'Ship the filter for Board and Timeline', p: 1 })}<div class="dim"></div>
+  <div class="dialog"><h4>Move "done" to Hop?</h4><p>Geart will see and change its 9 tasks and 2 notes. Your time sheet stays yours.</p>
+  <div style="display:flex;gap:8px;align-items:center;padding:10px 12px;border-radius:8px;background:var(--muted)">${stack(['J', 'G'])}<span style="color:var(--muted-foreground)">Julius and Geart</span></div>
+  <div class="acts"><span class="btn outline">Cancel</span><span class="btn primary">Move to Hop</span></div></div>`)])
+
+sc('move-out', 'Moving it back out', 'Owner only, from the same places. Members lose it at once.', [], [
+  win(sidebar({ space: 'hop', view: 'Launch' }), `<div class="vh"><h1>Launch</h1></div><div class="dim"></div>
+  <div class="dialog"><h4>Move "Launch" to your own space?</h4><p>Geart loses access to its 7 tasks and 2 notes. Its assignees are removed. You can move it back any time.</p>
+  <div class="acts"><span class="btn outline">Cancel</span><span class="btn primary">Move to my space</span></div></div>`),
+])
+
+sc('removed', 'Removed from a workspace', 'The next sync takes it away. The app says it once, quietly, instead of things just vanishing.', [], [
+  win(sidebar({ space: 'none', view: 'today' }), `<div class="vh"><h1>Today</h1></div>${row({ t: 'Call the landlord', proj: L('Home') })}
+  <div class="toast">You are no longer in Hop. Its projects were removed from this device.</div>`, 'short'),
+])
+
+group('Notes together')
+
+sc('note-list', 'Who is in a note', 'In a workspace, the note list shows the pictures of whoever has a note open right now.', [], [
+  win(sidebar({ space: 'hop', view: 'notes' }), `<div class="notes"><div class="nlist">
+    <div class="ni on"><b>Week plan, 23–29 Nov${stack(['G', 'J'], 'sm')}</b><small>Hop · edited now</small></div>
+    <div class="ni"><b>Pilot checklist${stack(['A'], 'sm')}</b><small>Hop · 12 min ago</small></div>
+    <div class="ni"><b>Investor questions</b><small>Hop · Yesterday</small></div>
+    <div class="ni"><b>Supplier notes</b><small>Hop · 4 days ago</small></div>
+  </div><div class="editor"><div class="md"><div class="h">Week plan, 23–29 Nov</div><p>…</p></div></div></div>`),
+])
+
+sc('note-live', 'Writing a note together', 'Each person\'s cursor and selection in their colour, with their name. The header says who is here. It is the same Markdown note as today.', [
+  'Typing at the same spot never loses anyone\'s words.',
+  'Task mentions keep working; a task you cannot see reads "Private task", never its title.',
+], [win(sidebar({ space: 'hop', view: 'notes' }), `<div class="notes"><div class="nlist">
+    <div class="ni on"><b>Week plan, 23–29 Nov${stack(['G', 'J'], 'sm')}</b><small>Hop · edited now</small></div><div class="ni"><b>Pilot checklist</b><small>Hop · 12 min ago</small></div></div>
+  <div class="editor"><div class="ebar">${ic('folder', 'style="width:13px;height:13px"')} Hop<span class="stack" style="gap:8px">${av('G')}<span style="margin-left:8px">Geart is here</span></span></div>
+  <div class="md">
+    <div class="h"><span class="mh"># </span>Week plan, 23–29 Nov</div>
+    <div class="h2" style="margin-top:12px"><span class="mh">## </span>Tuesday</div>
+    <div>- Julius: <span class="chip"><span class="ck p1"></span>Open the Mercury bank account</span></div>
+    <div>- Geart: <span class="rsel" style="--c:var(--geart)">Circles all day, in the office</span><span class="rc" data-n="Geart" style="--c:var(--geart)"></span></div>
+    <div class="h2" style="margin-top:12px"><span class="mh">## </span>Wednesday</div>
+    <div>- Both: <span class="chip"><span class="ck p2"></span>Book EF logistics call</span></div>
+    <div>- Julius: ship the board filter<span class="caret" style="background:var(--julius)"></span></div>
+    <div>- See <span class="chip private">${ic('lock', 'style="width:12px;height:12px"')}Private task</span></div>
+  </div></div></div>`)])
+
+sc('note-offline', 'Losing the connection', 'Writing keeps working. A small line says the note will catch up; nothing pops up.', [], [
+  win(sidebar({ space: 'hop', view: 'notes' }), `<div class="notes"><div class="nlist"><div class="ni on"><b>Week plan, 23–29 Nov</b><small>Hop</small></div></div>
+  <div class="editor"><div class="banner">${ic('wifi-off', 'style="width:14px;height:14px"')}Offline. Your writing is kept and joins Geart's when you are back.</div>
+  <div class="md"><div class="h"><span class="mh"># </span>Week plan, 23–29 Nov</div><div>- Julius: ship the board filter, then the iPhone build<span class="caret"></span></div></div></div></div>`, 'short'),
+])
+
+group('On the iPhone')
+
+sc('ph-lists', 'Lists, with the picker at the top', 'The picker is a row at the top of Lists, as on the Mac it sits at the bottom of the sidebar. The bell sits beside the title.', [], [
+  `<div class="frames">${phone(`<div style="display:flex;align-items:flex-end;padding-right:18px"><div class="ph-title">Lists</div><span style="margin-left:auto;margin-bottom:14px;position:relative;color:var(--primary)">${ic('bell', 'style="width:22px;height:22px"')}<span class="badge" style="position:absolute;top:-6px;right:-9px">2</span></span></div>
+    <div class="ph-group"><div class="ph-row" style="height:54px"><span class="av ws lg" style="--c:#e5e5ea;color:#333;box-shadow:none">${ic('layers')}</span><div><b style="font-weight:600">All</b><div style="font-size:13px;color:var(--tertiary)">You and Hop</div></div><span class="r">${ic('chevrons-up-down')}</span></div></div>
+    <div class="ph-group"><div class="ph-row"><span class="ic" style="--c:#8e8e93">${ic('inbox')}</span>Inbox<span class="r">3</span></div><div class="ph-row"><span class="ic" style="--c:#5e5ce6">${ic('user-check')}</span>Assigned to me<span class="r">5</span></div><div class="ph-row"><span class="ic" style="--c:var(--primary)">${ic('columns-3')}</span>Board<span class="r"></span></div></div>
+    <div class="ph-lab">Hop</div>
+    <div class="ph-group"><div class="ph-row"><span class="dot" style="--c:var(--project-3);width:10px;height:10px;margin:0 9px"></span>Launch<span class="r">7</span></div><div class="ph-row"><span class="dot" style="--c:var(--project-2);width:10px;height:10px;margin:0 9px"></span>Hardware<span class="r">5</span></div></div>`)}
+  ${phone(`<div class="ph-dim"></div><div class="sheet" style="top:auto;height:330px;padding-bottom:20px"><div class="grab"></div>
+    <div style="font-weight:600;text-align:center;margin-bottom:14px">Show</div>
+    <div class="ph-group" style="background:var(--grouped)"><div class="ph-row"><span class="av ws lg" style="--c:#e5e5ea;color:#333;box-shadow:none">${ic('layers')}</span>All<span class="r" style="color:var(--primary)">${ic('check')}</span></div><div class="ph-row">${av('J', 'lg')}Julius Olsson</div><div class="ph-row">${hop('lg')}Hop<span class="r">2 members</span></div></div>
+    <div class="ph-group" style="background:var(--grouped)"><div class="ph-row" style="color:var(--primary)">${ic('plus')}Create workspace</div></div></div>`)}</div>`,
+])
+
+sc('ph-task', 'A task\'s details on the iPhone', 'The details sheet gains an Assignees row; tapping it lists the members with checks.', [], [
+  `<div class="frames">${phone(`<div class="ph-dim"></div><div class="sheet"><div class="grab"></div>
+    <div style="display:flex;justify-content:space-between;padding:0 18px 10px;color:var(--primary)"><span>Cancel</span><b>Done</b></div>
+    <div style="padding:6px 18px 16px;font-size:18px;font-weight:600">Order equipment for the pilot</div>
+    <div class="ph-group" style="background:var(--grouped)"><div class="ph-row"><span class="ic" style="--c:#ff3b30">${ic('calendar')}</span>Date<span class="r">Thursday</span></div><div class="ph-row"><span class="ic" style="--c:#ff9500">${ic('flag')}</span>Priority<span class="r">1</span></div><div class="ph-row"><span class="ic" style="--c:#5e5ce6">${ic('users')}</span>Assignees<span class="r">${stack(['J', 'G'], 'sm')} ›</span></div><div class="ph-row"><span class="ic" style="--c:var(--project-3)">${ic('folder')}</span>Project<span class="r">Launch</span></div></div></div>`)}
+  ${phone(`<div class="sheet" style="top:44px"><div style="display:flex;justify-content:space-between;padding:6px 18px 14px;color:var(--primary)"><span>‹ Details</span><b style="color:var(--foreground)">Assignees</b><span style="width:52px"></span></div>
+    <div class="ph-group" style="background:var(--grouped)"><div class="ph-row">${av('J', 'lg')}Julius Olsson<span class="r" style="color:var(--primary)">${ic('check')}</span></div><div class="ph-row">${av('G', 'lg')}Geart<span class="r" style="color:var(--primary)">${ic('check')}</span></div><div class="ph-row">${av('A', 'lg')}Ana Lind</div></div></div>`)}</div>`,
+])
+
+sc('ph-bell', 'Notifications on the iPhone', 'The same list, full screen, from the bell beside Lists.', [], [
+  phone(`<div style="display:flex;padding:4px 18px;color:var(--primary)">‹ Lists</div><div class="ph-title">Notifications</div>
+  <div class="ph-group"><div style="display:flex;gap:11px;padding:12px 14px">${av('A', 'lg')}<div><div style="font-size:14.5px"><b style="font-weight:600">Ana Lind</b> invited you to <b style="font-weight:600">Studio</b></div><div style="font-size:12.5px;color:var(--tertiary);margin:2px 0 8px">2 min ago</div><div style="display:flex;gap:6px"><span class="btn primary sm">Join</span><span class="btn outline sm">Decline</span></div></div></div></div>
+  <div class="ph-group"><div style="display:flex;gap:11px;padding:12px 14px">${av('G', 'lg')}<div><div style="font-size:14.5px"><b style="font-weight:600">Geart</b> assigned you <b style="font-weight:600">Order equipment for the pilot</b></div><div style="font-size:12.5px;color:var(--tertiary);margin-top:2px">1 hour ago · Launch</div></div></div></div>`),
+])
+
+sc('ph-note', 'A note together on the iPhone', 'Cursors and names, as on the Mac, in the full-screen note.', [], [
+  phone(`<div style="background:#fff;flex:1;display:flex;flex-direction:column"><div style="display:flex;align-items:center;padding:4px 16px 10px;color:var(--primary)">‹ Notes<span style="margin-left:auto">${av('G')}</span></div>
+  <div class="md" style="padding:4px 18px;font-size:15px"><div class="h" style="font-size:22px"><span class="mh"># </span>Week plan</div><div class="h2" style="margin-top:10px"><span class="mh">## </span>Tuesday</div>
+  <div>- Geart: <span class="rsel" style="--c:var(--geart)">Circles all day</span><span class="rc" data-n="Geart" style="--c:var(--geart)"></span></div>
+  <div>- Julius: <span class="chip"><span class="ck p1"></span>Mercury account</span></div><div>- <span class="caret" style="background:var(--julius)"></span></div></div></div>`, 'notes'),
+])
+
+// ---- Render ---------------------------------------------------------------
+const main = document.getElementById('main')
+const index = document.getElementById('index')
+let html = ''
+let nav = `<h1>${mark}Workspaces mock</h1><p>${S.filter((s) => s.id).length} scenarios, Mac and iPhone</p>`
+for (const s of S) {
+  if (s.group) {
+    html += `<h2 class="group-title">${s.group}</h2>`
+    nav += `<h2>${s.group}</h2>`
+    continue
+  }
+  nav += `<a href="#${s.id}" data-id="${s.id}">${s.title}</a>`
+  html += `<section class="sc" id="${s.id}"><div class="sc-head"><h3>${s.title}</h3><p>${s.what}</p>${s.checks.length ? `<ul class="check">${s.checks.map((c) => `<li>${c}</li>`).join('')}</ul>` : ''}</div><div class="frames">${s.frames.join('')}</div></section>`
+}
+main.insertAdjacentHTML('beforeend', html)
+index.innerHTML = nav
+try { lucide.createIcons() } catch (e) { /* offline: the icons are left out, the rest still reads */ }
+
+// The index follows the scenario in view.
+const links = [...index.querySelectorAll('a')]
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.dataset.id === e.target.id))
+}, { rootMargin: '-30% 0px -60% 0px' })
+document.querySelectorAll('section.sc').forEach((el) => io.observe(el))
+</script>
+</body>
+</html>
