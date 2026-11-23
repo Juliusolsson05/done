@@ -79,7 +79,8 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
           <button
             type="button"
             onClick={() => reveal(hit(task))}
-            className={cn('min-w-0 truncate text-left font-medium hover:underline', done && 'text-muted-foreground line-through')}
+            // Wraps rather than being cut: on a phone a long title is read whole.
+            className={cn('min-w-0 text-left font-medium [overflow-wrap:anywhere] hover:underline', done && 'text-muted-foreground line-through')}
           >
             {task.title}
           </button>
@@ -95,7 +96,8 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
                 aria-expanded={open}
                 aria-label={`${open ? 'Hide' : 'Show'} subtasks of ${task.title}`}
                 onClick={() => toggleExpanded(task.id)}
-                className="flex items-center gap-1 rounded tabular-nums hover:text-foreground"
+                // A larger area takes a thumb than the small count shows.
+                className="relative flex items-center gap-1 rounded tabular-nums after:absolute after:-inset-2 hover:text-foreground"
               >
                 <ChevronRightIcon className={cn('size-3 transition-transform', open && 'rotate-90')} />
                 <ListChecksIcon className="size-3" />
@@ -242,7 +244,11 @@ export function MentionPicker({
           aria-selected={i === chosen}
           onMouseEnter={() => onHover(i)}
           onClick={() => onPick(task)}
-          className={cn('flex cursor-default items-center gap-2 rounded-md px-2 py-1.5', i === chosen && 'bg-accent text-accent-foreground')}
+          // Taller on a phone, a row a thumb can hit.
+          className={cn(
+            'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 max-md:py-2.5',
+            i === chosen && 'bg-accent text-accent-foreground',
+          )}
         >
           <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate">{task.title}</span>

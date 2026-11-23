@@ -452,12 +452,15 @@ export function Notes() {
   if (isMobile && current) {
     return (
       <div>
-        <div className="mb-3 flex items-center">
+        {/* On a phone the actions wrap under the way back rather than pushing
+            the page wider than the screen (folder, project, Read and Delete
+            do not fit one line at 393 points). */}
+        <div className="mb-3 flex flex-wrap items-center gap-y-1">
           <Button variant="ghost" size="sm" className="-ml-2.5 max-w-40 text-primary" onClick={() => open(null)}>
             <ChevronLeftIcon />
             <span className="truncate">{folder ?? 'All notes'}</span>
           </Button>
-          <div className="ml-auto flex min-w-0 gap-1">
+          <div className="ml-auto flex min-w-0 flex-wrap justify-end gap-1">
             {folderPicker}
             {projectPicker}
             {readToggle}

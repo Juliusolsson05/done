@@ -54,3 +54,5 @@ Not verified here: the iPhone (needs a device build) — the picker under the ca
 
 Creating a task from the picker, mentioning notes or projects, a rich editor, backlinks from a task to the notes that mention it.
 - Found while building the interactive card: the rendering test file had stopped loading (the expand hook had no server snapshot) while the summary line still read "passed". The hook now gives one (the same reading), and the checks read the "Test Files" line as well as the test count.
+- Phone pass (owner: "just make it mobile friendly"), checked in a 393×852 frame on the preview: the note's top bar (back, folder, project, Read, Delete) was wider than the screen and pushed the page sideways (492 of 393 points); it now wraps. Mention titles wrap instead of being cut. The @ list's rows are taller on a phone, and the subtask count takes a larger tap area. The @ list was checked to sit inside the screen under the line being written.
+- Not verified: the picker with the iPhone's own keyboard on a device (focus staying in the note when a row is tapped).
