@@ -46,31 +46,56 @@ Research (web, 23 Nov 2026; sources at the end):
 
 ## Decisions
 
-Settled by the owner: above. Still open — answer by number or "all defaults"; anything unanswered ships marked UNCONFIRMED:
+Owner, 23 Nov: "make it so that the infra is not bloated but scales up as needed and that anyone using this app can set up a workspace". The defaults below are taken as answered; the owner can still change any of them before its phase is built.
 
-1. **Roles.** *Default: owner and member.* Owners invite, remove, rename, delete the workspace and move projects back out; members do everything else.
-2. **The picker.** *Default: bottom left of the sidebar, above Settings: All, your name and picture, each workspace; shown once you are in a workspace.* On the iPhone, at the top of the Lists screen.
-3. **What All shows.** *Default: everything you can see,* workspace tasks with a small workspace tag; Today and Upcoming in All show a workspace task only if it is assigned to you or to nobody. A workspace view shows everything in it.
-4. **Moving a project.** *Default: Settings → Workspaces and the project's right-click menu,* with a confirmation naming who gains access. Moving back out is owner-only.
-5. **The time sheet.** *Default: stays personal,* even for workspace tasks.
-6. **Removing a member.** *Default: access ends at once on the server; their devices drop the workspace on the next sync; they are taken off every assignee list there.* An offline or tampered device keeps what it had.
-7. **Limits, since anyone can create workspaces.** *Default: 10 workspaces per account, 50 members per workspace, 20 invites a day per workspace, 50 pending.*
-8. **What notifies you.** *Default: an invite to a workspace, and being assigned to a task by someone else.* Not: every change in the workspace.
-9. **Live notes server.** *Default: Hocuspocus (TypeScript) as its own Cloud Run service, one instance.* Alternative: the same in Rust with `yrs`, one language fewer but less ready-made.
-10. **Order.** *Default: phases 0 → 1 → 2 → 3,* so shared projects with assignees (1–2) come before live notes (3).
+1. **Roles:** owner and member. Owners invite, remove, rename, delete the workspace and move projects back out; members do everything else.
+2. **The picker:** bottom left of the sidebar, above Settings: All, your name and picture, each workspace; shown once you are in a workspace. On the iPhone, at the top of the Lists screen.
+3. **What All shows:** everything you can see, workspace tasks with a small workspace tag; Today and Upcoming in All show a workspace task only if it is assigned to you or to nobody. A workspace view shows everything in it.
+4. **Moving a project:** from Settings → Workspaces and the project's right-click menu, with a confirmation naming who gains access. Moving back out is owner-only.
+5. **The time sheet** stays personal, even for workspace tasks.
+6. **Removing a member:** access ends at once on the server; their devices drop the workspace on the next sync; they are taken off every assignee list there. An offline or tampered device keeps what it had.
+7. **Limits, since anyone can create workspaces:** 10 workspaces per account, 50 members per workspace, 20 invites a day per workspace, 50 pending. They protect the shared database, not a price plan.
+8. **What notifies you:** an invite, and being assigned to a task by someone else. Not every change in the workspace.
+9. **Live notes server:** Rust with `yrs` inside the **same server image**, started as `done collab`. Ruling: changed from Hocuspocus — one image, one language, nothing new to deploy or patch (lean-infra rule: same image, different command) — cost if wrong: more of the room logic (auth, saving, presence relay) written by us; Hocuspocus stays the fallback.
+10. **Order:** phases 0 → 1 → 2 → 3.
 
 ## Architecture (Google Cloud)
 
 ```
 thedone.app (Cloudflare forwards, as now)
-   └─ Cloud Run "done" (the existing Rust server, up to 2 instances)
+   └─ Cloud Run "done" (the existing Rust server, 0 → up to 10 instances)
         ├─ Google sign-in, sessions (as now)
         ├─ /api/*: sync, workspaces, members, invites, notifications, moves
         └─ Cloud SQL for PostgreSQL (db-f1-micro): every account's and workspace's data
-   └─ Cloud Run "done-collab" (Hocuspocus, exactly 1 instance, scale to zero)
-        └─ live note editing, cursors, presence; saves into the note through "done"
+   └─ Cloud Run "done-collab" (the same image, command `done collab`, 0 → 1 instance)
+        └─ live note editing, cursors, presence; writes notes to the same database
 ```
-Cloud Storage keeps only the migration backup, then goes. Secrets (database password, the ticket key shared by "done" and "done-collab") in Secret Manager. All of it in `done-infra` (Terraform), never in this repository.
+Cloud Storage keeps only the migration backup, then goes. Secrets (database password, the ticket key shared by both services) in Secret Manager, values set once by hand. All of it in `done-infra` (flat Terraform), never in this repository.
+
+### Lean, and how it grows
+
+The app needs five things: the server, the live-notes room, one database, secrets, the domain. Each is one managed service; nothing else is added.
+
+```
+Needs:      server, live-notes room, postgres, secrets, domain
+New:        Cloud SQL instance + database + user, one secret, one Cloud Run service (same image)
+Idle cost:  ~$10/month — all of it Cloud SQL; both Cloud Run services scale to zero
+Caps:       GCP has no hard spending cap. A $30/month budget alert, plus hard size limits:
+            Cloud Run max 10 instances ("done") and 1 ("done-collab"), the database at a fixed size
+Not added:  Redis, Pub/Sub, a queue, a staging copy, read replicas, high availability,
+            an email service, a second image or language for live notes
+```
+
+Growing is a setting, not a redesign, and only on a measured number:
+
+| Measured | Then | Cost after |
+|---|---|---|
+| Cloud Run instances busy | raise its max instances | pay per request, still $0 idle |
+| Database CPU above ~70% for a day, or connections near the limit (~25 on db-f1-micro; each server instance keeps a pool of 3) | move to db-g1-small, one command, a minute of downtime | ~$26/month |
+| A day of downtime would hurt real customers | turn on high availability | about double |
+| One live-notes instance is not enough | a Postgres `LISTEN/NOTIFY` relay between rooms, then more instances | — |
+
+Anyone can create a workspace from Settings; the limits in decision 7 keep one account from filling the database.
 
 ### The shared code
 
@@ -133,9 +158,9 @@ Empty: "Work on projects together. Create a workspace and invite people." with *
 ### Live notes
 
 - **First, alone:** the note editor becomes CodeMirror 6 (Markdown) for every note, keeping the @ picker, mention chips, links and undo; proven on Mac, web and the iPhone before any collaboration.
-- A workspace note gets a Yjs document (`Y.Text` holding the Markdown). Opening it asks "done" for a 2-minute signed ticket (account, space, note, name, picture, colour) and connects to "done-collab", which checks the ticket first.
+- A workspace note gets a Yjs document (`Y.Text` holding the Markdown). Opening it asks "done" for a 2-minute signed ticket (account, space, note, name, picture, colour) and connects to "done-collab" (`done collab`, the same image, speaking the `y-sync` protocol with `yrs`), which checks the ticket first.
 - Cursors, selections and "who is here" come from Yjs presence, drawn by `y-codemirror.next`; the note list shows the pictures of who is in a note now.
-- "done-collab" saves into the note through "done" every few seconds while edited: the merged `ydoc` and the Markdown it gives, so search, the list, the read view and agents keep using the text. Two versions of a note's `ydoc` meeting in row sync are merged with `yrs`, not last-write-wins.
+- "done-collab" saves into the note's row in the database every few seconds while edited: the merged `ydoc` and the Markdown it gives, so search, the list, the read view and agents keep using the text. Two versions of a note's `ydoc` meeting in row sync are merged with `yrs`, not last-write-wins.
 - An agent's whole-text `update_note` is applied as a diff, so a person's concurrent typing survives; it must send the version it read and is refused if the note changed since.
 - Personal notes stay as today.
 
@@ -147,7 +172,7 @@ Each phase is one PR in done (plus the matching change in `done-infra`), merged 
 0.1 Split `done-core` into shared rules and the `rusqlite` store; all tests still pass.
 0.2 `space_id` and per-space sync positions in `crates/core`; one personal space per account.
 0.3 The Postgres store in `crates/server` (sqlx, migrations); the conformance suite passes against it.
-0.4 `done-infra`: Cloud SQL (db-f1-micro), its secret, Cloud Run connected to it.
+0.4 `done-infra`: Cloud SQL (db-f1-micro, private to Cloud Run, 7-day backups), its secret, Cloud Run connected to it, max instances 10, the $30 budget alert. Infra receipt posted before apply.
 0.5 Migration: a one-off tool reads each account's file from Cloud Storage with the `rusqlite` store and pushes its rows into that account's personal space through the sync protocol; counts compared; files kept as a read-only backup.
 0.6 Cut over behind a setting; the old file path kept two weeks as the way back; then removed with the bucket.
 Hands to phase 1: `spaces_for`, per-space sync, a personal space per account.
@@ -168,7 +193,7 @@ Hands to phase 1: `spaces_for`, per-space sync, a personal space per account.
 
 **Phase 3 — Live notes.**
 3.1 CodeMirror 6 as the note editor everywhere, alone; proven on the iPhone.
-3.2 "done-collab" on Cloud Run (one instance): rooms, tickets, presence, cursors.
+3.2 `done collab` (same image, `yrs`) as a second Cloud Run service with one instance: rooms, tickets, presence, cursors.
 3.3 `ydoc` in the note row, `yrs` merge in sync, saving from the room, agent edits as diffs.
 
 ## Tests
@@ -185,7 +210,7 @@ Each phase: the checks in AGENTS.md; a local run against a local Postgres on cop
 
 ## Costs
 
-Cloud SQL db-f1-micro about $9–10 a month (always on), plus a little storage; Cloud Run as now (scales to zero); "done-collab" only while someone has a workspace note open, a few dollars a month at this size; no email service. **About $10–20 a month.**
+Cloud SQL db-f1-micro about $9–10 a month (always on, the only idle cost), plus a little storage; both Cloud Run services scale to zero and cost cents at this size; no email service. **About $10–15 a month**, and ~$30 once the database needs the next size. See "Lean, and how it grows".
 
 ## Risks
 
@@ -194,7 +219,8 @@ Cloud SQL db-f1-micro about $9–10 a month (always on), plus a little storage; 
 3. **The migration** of every account into Postgres — counts compared, files kept, the old path kept two weeks.
 4. **Lost edits** under row last-write-wins between people — receive-time ties; per-field merge later if it bites.
 5. **Removal is best effort** on offline or tampered devices.
-6. **Live notes on one Cloud Run instance** — the 60-minute reconnect and scale-to-zero must lose nothing (saves every few seconds; tested); if the team outgrows one instance, a shared message bus or a move of just this service.
+6. **Live notes on one Cloud Run instance** — the 60-minute reconnect and scale-to-zero must lose nothing (saves every few seconds; tested); if one instance is not enough, a Postgres `LISTEN/NOTIFY` relay, not a new service.
+8. **Writing the room server ourselves** in `yrs` instead of Hocuspocus — kept small (tickets, rooms, save); Hocuspocus is the fallback if it drags.
 7. **CodeMirror in the iPhone's web view** — proven alone (3.1) before collaboration.
 
 ## Out of scope
