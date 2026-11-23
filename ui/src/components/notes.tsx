@@ -809,7 +809,7 @@ const DOCUMENT = cn(
   '[&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-7 [&_li]:pl-1 [&_li+li]:mt-2 [&_li]:marker:text-muted-foreground',
   '[&_li>ul]:mt-2 [&_li>ol]:mt-2',
   '[&_li:has(>input)]:-ml-6 [&_li:has(>input)]:list-none [&_input]:mr-2.5 [&_input]:align-middle',
-  '[&_a]:underline [&_a]:decoration-muted-foreground/40 [&_a]:underline-offset-[3px] hover:[&_a]:decoration-foreground',
+  '[&_a]:underline [&_a]:decoration-primary/50 [&_a]:underline-offset-[3px] hover:[&_a]:decoration-primary',
   '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]',
   '[&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:leading-6 [&_pre_code]:bg-transparent [&_pre_code]:p-0',
   '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-8 [&_hr]:border-border',

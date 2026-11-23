@@ -149,8 +149,15 @@ export function AppSidebar() {
   // `badge` is a count, left out at zero, or for Focus the time left.
   const nav = (kind: BuiltIn, label: string, Icon: LucideIcon, badge: ReactNode = 0, late = false) => (
     <SidebarMenuItem>
-      <SidebarMenuButton data-view={kind} isActive={ui.view.kind === kind} onClick={() => openView({ kind })} className={ROW}>
-        <Icon className="text-muted-foreground" />
+      <SidebarMenuButton
+        data-view={kind}
+        isActive={ui.view.kind === kind}
+        onClick={() => openView({ kind })}
+        // Where you are: a faint wash of done's blue, not a grey block.
+        className={cn(ROW, 'data-active:bg-primary/10 data-active:text-foreground')}
+      >
+        {/* Small and quiet: the names do the work; icons only help the eye find its place. */}
+        <Icon className={cn('!size-[15px]', ui.view.kind === kind ? 'text-primary' : 'text-muted-foreground opacity-75')} />
         <span>{label}</span>
       </SidebarMenuButton>
       {badge ? <SidebarMenuBadge className={cn('font-normal', BADGE, late ? 'text-overdue' : 'text-faint')}>{badge}</SidebarMenuBadge> : null}
@@ -163,7 +170,15 @@ export function AppSidebar() {
     // button at the page's top left, or Cmd+B.
     <Sidebar collapsible="offcanvas" className="select-none">
       <SidebarHeader className="flex-row items-center justify-between px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">
-        done
+        {/* The wordmark: done's round check, ticked, as on the app icon, in the
+            colour of done, beside the name in the display face. */}
+        <span className="flex items-center gap-2 font-display text-[19px] font-semibold tracking-[-0.02em]">
+          <svg viewBox="0 0 20 20" aria-hidden="true" className="size-[18px] shrink-0">
+            <circle cx="10" cy="10" r="10" fill="var(--primary)" />
+            <path d="M5.6 10.3l3 3 5.8-6.6" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          done
+        </span>
         <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title="Hide sidebar (⌘B)" />
       </SidebarHeader>
       <SidebarContent>

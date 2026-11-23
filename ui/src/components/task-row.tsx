@@ -80,7 +80,7 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
         leaving && 'opacity-0 transition-opacity delay-150 duration-150',
       )}
     >
-      <TaskCheck task={task} checked={leaving} onChange={finish} className={goal ? 'mt-1 size-5' : 'mt-px'} />
+      <TaskCheck task={task} checked={leaving} onChange={finish} className={goal ? 'mt-1 size-5 border-primary' : 'mt-px'} />
       <div className="flex min-w-0 flex-1 flex-col items-start">
         <Button
           variant="ghost"
@@ -91,7 +91,9 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             data-findable
             className={cn(
               'wrap-anywhere transition-colors',
-              goal && 'text-lg font-semibold tracking-tight',
+              // Today's goal is the one task set in the display face: the
+              // single biggest thing on the page, because it is the one that matters.
+              goal && 'text-lg font-semibold tracking-tight md:font-display md:text-[22px] md:leading-snug md:tracking-[-0.015em]',
               leaving && 'text-faint line-through',
             )}
           >

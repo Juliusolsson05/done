@@ -2,7 +2,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NotebookPenIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ProjectDot } from '@/components/marks'
 import { PhoneHeader } from '@/components/phone'
@@ -28,7 +27,9 @@ export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: s
     // On a phone the heading wraps: the title and what it is about on one
     // line, the view's buttons on the next, where they have room.
     <header className="mb-6 flex min-h-8 items-baseline gap-3 max-md:mb-4 max-md:flex-wrap max-md:gap-y-1">
-      <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight max-md:text-3xl">{title}</h1>
+      <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight max-md:text-3xl md:font-display md:text-[30px] md:leading-tight md:font-semibold md:tracking-[-0.02em]">
+        {title}
+      </h1>
       {sub && <span className="text-sm whitespace-nowrap text-muted-foreground">{sub}</span>}
       <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full">{children}</div>
     </header>
@@ -59,9 +60,11 @@ function GoalBlock() {
     )
   }
   if (ui.editing === task.id && !isMobile) return <TaskEditor task={task} />
+  // No box around it: the label in the colour of done and the title in the
+  // display face set it apart, so it needs no card to say it is special.
   return (
-    <Card className="gap-1 px-2 py-3">
-      <div className={cn('px-2 text-xs font-semibold', task.done ? 'text-faint' : 'text-primary')}>
+    <section aria-label="Today’s goal" className="flex flex-col gap-1 pb-2 md:border-b md:border-border md:pb-5">
+      <div className={cn('px-2 text-sm font-medium', task.done ? 'text-faint' : 'text-primary')}>
         {task.done ? 'Today’s goal, done' : 'Today’s goal'}
       </div>
       {task.done ? (
@@ -69,12 +72,12 @@ function GoalBlock() {
       ) : (
         <>
           <TaskRow task={task} goal />
-          <Button variant="outline" size="sm" className="ml-9.5 self-start" onClick={() => focusOn(task.id)}>
+          <Button variant="ghost" size="sm" className="ml-8 self-start text-primary hover:text-primary" onClick={() => focusOn(task.id)}>
             Start focus
           </Button>
         </>
       )}
-    </Card>
+    </section>
   )
 }
 

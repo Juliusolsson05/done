@@ -439,7 +439,9 @@ export default function App() {
                   the notch above and of the bar below. */}
               <SidebarInset
                 className={cn(
-                  'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
+                  // Flush in the window, a hairline from the sidebar: structure
+                  // that is felt rather than drawn as a floating card.
+                  'min-w-0 md:overflow-y-auto md:border-l md:border-border',
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
                   'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+2.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+8rem)]',
