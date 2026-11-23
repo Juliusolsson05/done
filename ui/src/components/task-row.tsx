@@ -91,7 +91,9 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             data-findable
             className={cn(
               'wrap-anywhere transition-colors',
-              goal && 'text-lg font-semibold tracking-tight',
+              // Today's goal is the one task set in the display face: the
+              // single biggest thing on the page, because it is the one that matters.
+              goal && 'text-lg font-semibold tracking-tight md:font-display md:text-[22px] md:leading-snug md:tracking-[-0.015em]',
               leaving && 'text-faint line-through',
             )}
           >

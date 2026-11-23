@@ -50,7 +50,8 @@ function SidebarToggle() {
   if (open || isMobile) return null
   return (
     <div className="sticky top-0 z-20 h-0">
-      <SidebarTrigger className="-mt-6 -ml-6 text-muted-foreground" title="Show sidebar (⌘B)" />
+      {/* In the page's left margin, clear of the title it sits beside. */}
+      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground" title="Show sidebar (⌘B)" />
     </div>
   )
 }
@@ -439,15 +440,16 @@ export default function App() {
                   the notch above and of the bar below. */}
               <SidebarInset
                 className={cn(
-                  'min-w-0 md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:shadow-sm md:ring-1 md:ring-foreground/5',
+                  // Flush in the window, a hairline from the sidebar (the
+                  // sidebar's own edge): structure that is felt rather than
+                  // drawn as a floating card.
+                  'min-w-0 md:overflow-y-auto',
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
                   'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+2.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+8rem)]',
                   // Lists is a grouped screen: white groups on grey.
                   view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
-                  // With the sidebar put away the sheet keeps its margin on the left too.
-                  'md:peer-data-[state=collapsed]:ml-2',
                 )}
               >
                 <SidebarToggle />

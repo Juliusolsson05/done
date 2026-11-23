@@ -3,13 +3,20 @@
 
    Rules this theme holds itself to:
    - Neutral first. Colour appears only where it carries information:
-     priority, a project, overdue, and one blue for "this is the action" or
-     "this is today".
+     priority, a project, late, and one ink blue, done's own, for "this is
+     the action", "this is today", "this is where you are" and "this is
+     finished". The boldness is spent there and nowhere else, in small
+     touches rather than large surfaces. Red keeps its one meaning: late.
+   - Structure is felt, not seen: spacing and a hairline, not cards and
+     shadows.
    - Motion confirms what you just did, briefly, and never bounces.
    - Light only, by choice. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* The display face: Familjen Grotesk, from Familjen, a Stockholm studio.
+   Bundled, not fetched, so the app looks the same offline. */
+@import "@fontsource-variable/familjen-grotesk";
 
 /* Generated components carry `dark:` classes. Tying the variant to a class
    that is never set keeps them from following the system's dark mode. */
@@ -19,44 +26,50 @@
   color-scheme: light;
 
   /* The content sheet and everything that sits on it. */
-  --background: #ffffff;
-  --foreground: #1a1a1e;
-  --card: #ffffff;
-  --card-foreground: #1a1a1e;
+  /* Paper: near white, a breath warmer than pure white so a long list is
+     easy on the eye. Not cream. */
+  --background: #fcfcfa;
+  --foreground: #1e1f1d;
+  --card: #fcfcfa;
+  --card-foreground: #1e1f1d;
   --popover: #ffffff;
-  --popover-foreground: #1a1a1e;
-  --muted: #f5f5f6;
-  --muted-foreground: #63636b;
-  --faint: #9b9ba3;
-  --secondary: #ececee;
-  --secondary-foreground: #1a1a1e;
-  --accent: #f1f1f3;
-  --accent-foreground: #1a1a1e;
-  --border: rgb(0 0 0 / 0.08);
-  --input: rgb(0 0 0 / 0.14);
-  --radius: 0.5rem;
+  --popover-foreground: #1e1f1d;
+  --muted: #f3f3f0;
+  --muted-foreground: #62645f;
+  --faint: #9a9c96;
+  --secondary: #ebebe7;
+  --secondary-foreground: #1e1f1d;
+  --accent: #efefeb;
+  --accent-foreground: #1e1f1d;
+  --border: rgb(30 31 29 / 0.09);
+  --input: rgb(30 31 29 / 0.16);
+  --radius: 0.375rem;
 
-  /* The one accent: the primary action, today, focus and the finished check. */
-  --primary: #2f5fe0;
+  /* done's ink blue: the primary action, today, where you are, focus and
+     the finished check. Deeper than the usual product blue on purpose.
+     White on it reads at about 7:1. */
+  --primary: #1e4fbf;
   --primary-foreground: #ffffff;
-  --ring: #2f5fe0;
+  --ring: #1e4fbf;
 
-  --destructive: #d63c3c;
-  --priority-1: #d63c3c;
-  --priority-2: #d48a1c;
-  --priority-3: #4a7cf0;
-  --overdue: #d63c3c;
-  --done: #2e9e5b;
+  /* Red means one thing: late, urgent, or about to be removed. */
+  --destructive: #d2402f;
+  --priority-1: #d2402f;
+  --priority-2: #c98010;
+  --priority-3: #3a6fd8;
+  --overdue: #d2402f;
+  --done: #1e4fbf;
 
-  /* The window: the sidebar is part of it, not a panel on it. */
-  --sidebar: #ececef;
-  --sidebar-foreground: #1a1a1e;
-  --sidebar-primary: #2f5fe0;
+  /* The window: the sidebar is a shelf beside the paper, a quiet neutral,
+     not a panel on it. */
+  --sidebar: #ededea;
+  --sidebar-foreground: #2b2c29;
+  --sidebar-primary: #1e4fbf;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #dfdfe3;
-  --sidebar-accent-foreground: #1a1a1e;
-  --sidebar-border: rgb(0 0 0 / 0.08);
-  --sidebar-ring: #2f5fe0;
+  --sidebar-accent: #e2e2de;
+  --sidebar-accent-foreground: #1e1f1d;
+  --sidebar-border: rgb(30 31 29 / 0.09);
+  --sidebar-ring: #1e4fbf;
 
   /* The eight colours a project can have. A project stores which one; an
      element showing a project sets --project to it. Inbox is grey. */
@@ -82,6 +95,8 @@
 @theme inline {
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-heading: var(--font-sans);
+  /* View titles, today's goal and note headings on a wide screen. */
+  --font-display: "Familjen Grotesk Variable", var(--font-sans);
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
   --color-background: var(--background);
@@ -261,4 +276,14 @@
 ::highlight(find-current) {
   background-color: color-mix(in oklab, var(--primary) 45%, transparent);
   color: var(--foreground);
+}
+
+/* Small touches of done's blue that are felt rather than seen: a selection
+   and the caret while writing. */
+::selection {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+input,
+textarea {
+  caret-color: var(--primary);
 }
