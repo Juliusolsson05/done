@@ -36,7 +36,7 @@ const NOW: &str = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 const TABLES: [(&str, &str); 4] = [
     ("project", "name, color"),
     ("task", "title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id"),
-    ("note", "text, updated_at, project_id"),
+    ("note", "text, updated_at, project_id, folder"),
     ("entry", "task_id, title, day, started_at, ended_at, planned_ms, focused_ms"),
 ];
 
@@ -93,6 +93,35 @@ pub(crate) fn prepare(conn: &Connection) -> Result<(), Error> {
                  ALTER TABLE {table} ADD COLUMN changed INTEGER NOT NULL DEFAULT 0;"
             ))?;
         }
+        // The trigger that counts an edit names the columns it watches, and
+        // that list grows (a note's folder came after its trigger). A file
+        // from an older version keeps the old trigger, which would not count
+        // a change to a new column, so it would never be sent. So it is made
+        // again when its list is not the current one: inside one transaction,
+        // so no other process (the MCP server, the web app) can write in a
+        // moment with no trigger at all.
+        let edited: Option<String> = conn
+            .query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1", [format!("{table}_edited")], |r| r.get(0))
+            .optional()?;
+        if !edited.is_some_and(|sql| sql.contains(&format!("AFTER UPDATE OF {columns} ON {table}"))) {
+            let remade = conn.execute_batch(&format!(
+                "BEGIN IMMEDIATE;
+                 DROP TRIGGER IF EXISTS {table}_edited;
+                 CREATE TRIGGER {table}_edited AFTER UPDATE OF {columns} ON {table} BEGIN
+                   UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
+                   UPDATE {table} SET
+                     seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
+                     changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
+                   WHERE id = NEW.id;
+                 END;
+                 COMMIT;"
+            ));
+            if remade.is_err() {
+                // Nothing half done is left behind: the old trigger stays.
+                let _ = conn.execute_batch("ROLLBACK");
+            }
+            remade?;
+        }
         conn.execute_batch(&format!(
             "CREATE INDEX IF NOT EXISTS {table}_seq ON {table} (seq);
              -- Written here: a new counter value, unless a device is taking in
@@ -106,13 +135,6 @@ pub(crate) fn prepare(conn: &Connection) -> Result<(), Error> {
                  changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
                WHERE id = NEW.id;
                DELETE FROM tombstone WHERE kind = '{table}' AND id = NEW.id AND {applying} = 0;
-             END;
-             CREATE TRIGGER IF NOT EXISTS {table}_edited AFTER UPDATE OF {columns} ON {table} BEGIN
-               UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
-               UPDATE {table} SET
-                 seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
-                 changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
-               WHERE id = NEW.id;
              END;
              -- Deletions made while taking in rows from elsewhere write their
              -- own tombstone, with the time they came with.
@@ -227,10 +249,13 @@ fn rows_since(conn: &Connection, after: i64) -> Result<Rows, Error> {
             })
         })?
         .collect::<Result<_, _>>()?;
-    let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, changed FROM note WHERE seq > ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, text, updated_at, project_id, folder, changed FROM note WHERE seq > ?1 ORDER BY id")?;
     rows.notes = stmt
         .query_map([after], |r| {
-            Ok(Stamped { row: Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)? }, changed: r.get(4)? })
+            Ok(Stamped {
+                row: Note { id: r.get(0)?, text: r.get(1)?, updated_at: r.get(2)?, project_id: r.get(3)?, folder: Some(r.get(4)?) },
+                changed: r.get(5)?,
+            })
         })?
         .collect::<Result<_, _>>()?;
     let mut stmt = conn.prepare(
@@ -316,10 +341,13 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
             continue;
         }
         tx.execute(
-            "INSERT INTO note (id, text, updated_at, project_id, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+            "INSERT INTO note (id, text, updated_at, project_id, folder, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
              ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at,
-               project_id = excluded.project_id, changed = excluded.changed, seq = excluded.seq",
-            params![n.id, n.text, n.updated_at, n.project_id, changed],
+               project_id = excluded.project_id, changed = excluded.changed, seq = excluded.seq,
+               folder = CASE WHEN ?7 THEN excluded.folder ELSE note.folder END",
+            // A device from before folders does not say a note's folder; the
+            // folder it has here is kept (see Note::folder).
+            params![n.id, n.text, n.updated_at, n.project_id, crate::clean_folder(n.folder.clone().flatten().as_deref()), changed, n.folder.is_some()],
         )?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'note' AND id = ?1", [n.id])?;
         applied += 1;
@@ -593,7 +621,7 @@ mod tests {
     #[test]
     fn notes_and_the_time_sheet_travel_too() {
         let (mac, phone, cloud) = (store(), store(), store());
-        let note = mac.save_note(SaveNote { id: None, text: "Funds\n- A\n- B".into(), updated_at: 1, project_id: None }).unwrap();
+        let note = mac.save_note(SaveNote { id: None, text: "Funds\n- A\n- B".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
         assert!(note.id >= SMALL);
         mac.record(NewEntry {
             task_id: None,
@@ -613,6 +641,68 @@ mod tests {
         round(&phone, &cloud);
         round(&mac, &cloud);
         assert!(mac.notes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_note_s_folder_reaches_the_other_device_and_so_does_taking_it_out() {
+        let (mac, phone, cloud) = (store(), store(), store());
+        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())) };
+        let note = mac.save_note(filed).unwrap();
+        round(&mac, &cloud);
+        round(&phone, &cloud);
+        assert_eq!(phone.notes().unwrap()[0].folder, Some(Some("Fundraising".into())));
+        // Taken out of the folder on the phone, and nothing else changed.
+        phone.save_note(SaveNote { id: Some(note.id), text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(None) }).unwrap();
+        round(&phone, &cloud);
+        round(&mac, &cloud);
+        assert_eq!(mac.notes().unwrap()[0].folder, Some(None));
+    }
+
+    // A device still on a version from before folders sends its notes without
+    // the field. Its edit must not take the note out of its folder everywhere.
+    #[test]
+    fn an_edit_from_a_device_that_predates_folders_keeps_the_folder() {
+        let (mac, cloud) = (store(), store());
+        let filed = SaveNote { id: None, text: "Seed funds".into(), updated_at: 1, project_id: None, folder: Some(Some("Fundraising".into())) };
+        let note = mac.save_note(filed).unwrap();
+        round(&mac, &cloud);
+        // The old phone's edit, exactly as it is sent: no folder field at all.
+        let old: Stamped<Note> =
+            serde_json::from_str(&format!(r#"{{"id":{},"text":"Seed funds, edited","updatedAt":2,"projectId":null,"changed":9999999999999}}"#, note.id))
+                .unwrap();
+        assert_eq!(old.row.folder, None);
+        cloud.exchange(&Outbox { rows: Rows { notes: vec![old], ..Default::default() }, ..Default::default() }).unwrap();
+        round(&mac, &cloud);
+        let notes = mac.notes().unwrap();
+        assert_eq!(notes[0].text, "Seed funds, edited");
+        assert_eq!(notes[0].folder, Some(Some("Fundraising".into())));
+        assert_eq!(cloud.notes().unwrap()[0].folder, Some(Some("Fundraising".into())));
+    }
+
+    // A file from before folders has a note trigger that watches only the old
+    // columns. Opening it must replace that trigger, or a change to the folder
+    // alone would never count as a change and never be sent.
+    #[test]
+    fn a_folder_change_is_sent_from_a_file_whose_trigger_predates_folders() {
+        let mac = store();
+        let note = mac.save_note(SaveNote { id: None, text: "Ideas".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
+        let conn = mac.conn.lock().unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER note_edited;
+             CREATE TRIGGER note_edited AFTER UPDATE OF text, updated_at, project_id ON note BEGIN
+               UPDATE meta SET value = value + 1 WHERE key = 'seq';
+               UPDATE note SET seq = (SELECT value FROM meta WHERE key = 'seq') WHERE id = NEW.id;
+             END;",
+        )
+        .unwrap();
+        // What opening the file does.
+        prepare(&conn).unwrap();
+        drop(conn);
+        let sent = mac.outbox().unwrap().upto;
+        mac.inbox(&Reply { upto: 0, ..Default::default() }, sent).unwrap();
+        mac.conn.lock().unwrap().execute("UPDATE note SET folder = 'Work' WHERE id = ?1", [note.id]).unwrap();
+        let out = mac.outbox().unwrap();
+        assert_eq!(out.rows.notes.iter().map(|n| n.row.folder.clone().flatten()).collect::<Vec<_>>(), vec![Some("Work".to_string())]);
     }
 
     #[test]

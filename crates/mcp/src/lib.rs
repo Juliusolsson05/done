@@ -112,13 +112,16 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
         { "name": "list_notes", "description": "The notes on the Notes page, the most recently changed first, at most 20. A note is free text that is not a task; its first line is its title.",
           "inputSchema": { "type": "object", "properties": {
-              "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." } } } },
+              "search": { "type": "string", "description": "Only notes containing every one of these words, case ignored." },
+              "folder": { "type": "string", "description": "Only notes in this folder, case ignored." } } } },
         { "name": "add_note", "description": "Add a note. Put a short title on the first line.",
           "inputSchema": { "type": "object", "properties": { "text": { "type": "string" },
-              "project": { "type": "string", "description": "The name of an existing project the note belongs to." } }, "required": ["text"] } },
-        { "name": "update_note", "description": "Change a note. text replaces the whole text: to add to it, send its current text with the addition. project moves it to a project, or null takes it out of one. Fields left out stay as they are.",
+              "project": { "type": "string", "description": "The name of an existing project the note belongs to." },
+              "folder": { "type": "string", "description": "The folder to file it in. A folder that does not exist yet is made by filing a note in it." } }, "required": ["text"] } },
+        { "name": "update_note", "description": "Change a note. text replaces the whole text: to add to it, send its current text with the addition. project moves it to a project, or null takes it out of one; folder likewise. Fields left out stay as they are.",
           "inputSchema": { "type": "object", "properties": { "id": { "type": "integer" }, "text": { "type": "string" },
-              "project": { "type": ["string", "null"], "description": "The name of an existing project, or null for none." } }, "required": ["id"] } },
+              "project": { "type": ["string", "null"], "description": "The name of an existing project, or null for none." },
+              "folder": { "type": ["string", "null"], "description": "A folder name, or null for none." } }, "required": ["id"] } },
         { "name": "delete_note", "description": "Delete a note for good.", "inputSchema": id_only },
         { "name": "time_sheet", "description": "One day's focus blocks from the time sheet: what was focused on, when, planned against actual minutes, and the totals.",
           "inputSchema": { "type": "object", "properties": {
@@ -238,7 +241,22 @@ fn title_of(text: &str) -> String {
 
 fn describe_note(note: &Note, projects: &[Project]) -> Value {
     let project = note.project_id.and_then(|id| projects.iter().find(|p| p.id == id)).map(|p| p.name.clone());
-    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "updatedAt": note.updated_at })
+    json!({ "id": note.id, "title": title_of(&note.text), "text": note.text, "project": project, "folder": note.folder.clone().flatten(), "updatedAt": note.updated_at })
+}
+
+/// The folder an agent named for a note: Some(None) for an explicit null,
+/// None when it said nothing. A name that matches an existing folder but for
+/// case is that folder, so "fundraising" files into "Fundraising" instead of
+/// starting a second one.
+fn note_folder(args: &Value, notes: &[Note]) -> Option<Option<String>> {
+    match args.get("folder") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => {
+            let wanted = done_core::clean_folder(v.as_str());
+            Some(wanted.map(|w| notes.iter().filter_map(|n| n.folder.clone().flatten()).find(|f| f.to_lowercase() == w.to_lowercase()).unwrap_or(w)))
+        }
+    }
 }
 
 /// The projects, for naming a note's project and finding one by its name.
@@ -414,8 +432,11 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         "list_notes" => {
             let words: Vec<String> = args.get("search").and_then(Value::as_str).unwrap_or("")
                 .split_whitespace().map(str::to_lowercase).collect();
+            // Cleaned as stored names are, so "Fund  raising" finds "Fund raising".
+            let folder = done_core::clean_folder(args.get("folder").and_then(Value::as_str)).map(|f| f.to_lowercase());
             let found: Vec<Note> = store.notes().map_err(|e| e.to_string())?.into_iter()
                 .filter(|n| { let text = n.text.to_lowercase(); words.iter().all(|w| text.contains(w.as_str())) })
+                .filter(|n| folder.as_ref().is_none_or(|f| n.folder.clone().flatten().is_some_and(|nf| nf.to_lowercase() == *f)))
                 .collect();
             let state = current_state(store)?;
             let notes: Vec<Value> = found.iter().take(NOTES_LISTED).map(|n| describe_note(n, &state.projects)).collect();
@@ -446,7 +467,8 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let text = note_text(args)?;
             let state = current_state(store)?;
             let project_id = note_project(args, &state)?.flatten();
-            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id }).map_err(|e| e.to_string())?;
+            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
+            let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
             Ok(describe_note(&note, &state.projects))
         }
         "update_note" => {
@@ -454,7 +476,9 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let state = current_state(store)?;
             let text = if args.get("text").is_some() { note_text(args)? } else { note.text.clone() };
             let project_id = note_project(args, &state)?.unwrap_or(note.project_id);
-            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id }).map_err(|e| e.to_string())?;
+            // Not said: the note keeps its folder.
+            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
+            let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder }).map_err(|e| e.to_string())?;
             Ok(describe_note(&note, &state.projects))
         }
         "delete_note" => {
@@ -608,11 +632,36 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_can_file_notes_in_folders_list_one_and_take_a_note_out() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let replies = talk(&store, &[
+            tool(1, "add_note", json!({ "text": "Seed round funds", "folder": "Fund raising" })),
+            // Another case of the same name is the same folder, not a second one.
+            tool(2, "add_note", json!({ "text": "Angel list", "folder": "fund raising " })),
+            tool(3, "add_note", json!({ "text": "Groceries" })),
+        ]);
+        assert_eq!(said(&replies[0])["folder"], "Fund raising");
+        assert_eq!(said(&replies[1])["folder"], "Fund raising");
+        let first = said(&replies[0])["id"].as_i64().unwrap();
+        let replies = talk(&store, &[
+            tool(4, "list_notes", json!({ "folder": " FUND  RAISING " })),
+            tool(5, "update_note", json!({ "id": first, "folder": null })),
+            tool(6, "list_notes", json!({ "folder": "Fund raising" })),
+        ]);
+        let titles = |v: &Value| v["notes"].as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(titles(&said(&replies[0])), vec!["Angel list", "Seed round funds"]);
+        assert_eq!(said(&replies[1])["folder"], Value::Null);
+        // Taking it out of the folder kept its text.
+        assert_eq!(said(&replies[1])["text"], "Seed round funds");
+        assert_eq!(titles(&said(&replies[2])), vec!["Angel list"]);
+    }
+
+    #[test]
     fn an_agent_can_search_notes_and_is_told_what_was_left_out() {
         let store = Store::open(Path::new(":memory:")).unwrap();
-        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1, project_id: None }).unwrap();
+        store.save_note(SaveNote { id: None, text: "Seed round funds\nAlpha Ventures".into(), updated_at: 1, project_id: None, folder: None }).unwrap();
         for i in 0..25 {
-            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i, project_id: None }).unwrap();
+            store.save_note(SaveNote { id: None, text: format!("Groceries {i}"), updated_at: 10 + i, project_id: None, folder: None }).unwrap();
         }
         let replies = talk(&store, &[tool(1, "list_notes", json!({ "search": "ALPHA seed" })), tool(2, "list_notes", json!({}))]);
         let found = said(&replies[0]);
