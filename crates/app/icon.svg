@@ -1,7 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- done's round task check, ticked, on the Mac's rounded plate. The tick
+       is the app's own (lucide's check), in the app’s blue (its primary colour). -->
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9eaee"/></linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9eaee"/></linearGradient>
+    <linearGradient id="check" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d6cf0"/><stop offset="1" stop-color="#2a55d6"/></linearGradient>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#g)" stroke="#d2d3d9" stroke-width="6"/>
-  <path d="M330 540l130 130 240-290" fill="none" stroke="#0a6cff" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#plate)" stroke="#d2d3d9" stroke-width="6"/>
+  <circle cx="512" cy="512" r="250" fill="url(#check)"/>
+  <path d="M382 520L463 601L642 423" fill="none" stroke="#ffffff" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
