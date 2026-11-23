@@ -509,6 +509,11 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
         "update_task" => change(store, |state, today| {
             let mut task = open_task(state, args)?;
             apply(&mut task, args, state, today)?;
+            // Given a new project, it is in that project's space: assignees
+            // are looked for there.
+            if args.get("project").is_some() {
+                task.space_id = task.project_id.and_then(|p| state.projects.iter().find(|x| x.id == p)).and_then(|p| p.space_id).or(task.space_id.filter(|_| task.project_id.is_none()));
+            }
             let assign = match args.get("assignees").and_then(Value::as_array) {
                 Some(names) => reassign(&task, &assignees_named(&task, state, names)?),
                 None => Vec::new(),

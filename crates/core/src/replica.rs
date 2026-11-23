@@ -208,7 +208,7 @@ pub struct Cursor {
 }
 
 /// Rows written in one file after some point in its counter.
-#[derive(Serialize, Deserialize, Default, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Rows {
     #[serde(default)]
@@ -378,6 +378,25 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
     tx.execute("UPDATE meta SET value = 1 WHERE key = 'applying'", [])?;
     tx.execute_batch("PRAGMA defer_foreign_keys = ON")?;
     let mut applied = 0;
+    // Where the server put a row, taken even when the row is otherwise the
+    // one this device sent (a tie): a row made here has no space until the
+    // server says, and a space this device no longer sees can only be
+    // dropped if its rows say they are in it. Not counted as an edit.
+    let place = |table: &str, id: i64, space: Option<i64>| -> Result<(), Error> {
+        if let Some(space) = space {
+            tx.execute(&format!("UPDATE {table} SET space_id = ?2 WHERE id = ?1 AND space_id IS NOT ?2"), params![id, space])?;
+        }
+        Ok(())
+    };
+    for p in &rows.projects {
+        place("project", p.row.id, p.row.space_id)?;
+    }
+    for t in &rows.tasks {
+        place("task", t.row.id, t.row.space_id)?;
+    }
+    for n in &rows.notes {
+        place("note", n.row.id, n.row.space_id)?;
+    }
     for Stamped { row: p, changed } in &rows.projects {
         if p.name.trim().is_empty() || !newer(tx, "project", p.id, *changed)? {
             continue;
@@ -519,6 +538,12 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
             continue;
         }
         tx.execute(&format!("DELETE FROM {} WHERE id = ?1", gone.kind), [gone.id])?;
+        // Gone from a space, not deleted: no tombstone, which would keep the
+        // row out when it arrives in the space it moved to.
+        if gone.space.is_some() {
+            applied += 1;
+            continue;
+        }
         let seq = if quiet {
             0
         } else {
