@@ -20,9 +20,9 @@ Notes can be put in folders, as in Apple Notes. On a wide screen a folder column
 
 1. **Storage** — *Default: a `folder` text column on the note* (none = not in a folder). It travels with the note through sync with no new table, tombstones or re-keying. Alternative: a folder table, which sync would have to learn.
 2. **Folders = their own thing, not projects** — *Default*. A note keeps its project as well.
-3. **Wide screen** — *Default: a folder column left of the notes list*; on a phone, folders first, then a folder's notes, then the note.
+3. **Wide screen** — first built as a folder column left of the notes list; **changed 2026-11-23 at the owner's request** (four columns with the app's sidebar was too much) to folders listed under Notes in the app's sidebar while Notes is open. On a phone, folders first, then a folder's notes, then the note.
 4. **New folder** — *Default: named in place in the folder column, then selected*; an empty folder is kept on this device until a note goes in (see ruling).
-5. **Rename and delete** — *Default: buttons under the selected folder's name*. Delete moves its notes out of the folder, never deletes a note, and can be undone.
+5. **Rename and delete** — right-click a folder in the sidebar (Open, New note here, Rename, Delete folder); on a phone, buttons in the folder's list. Delete moves its notes out of the folder, never deletes a note, and can be undone.
 6. **MCP** — *Default: notes show their folder; add_note and update_note take one; list_notes can filter by one.*
 
 Answered 2026-11-23: the owner asked for folders; 1–6 are defaults shown in chat and **UNCONFIRMED** until the preview.
@@ -55,3 +55,8 @@ Not verified here: folders arriving on another device through thedone.app — th
 ## Out of scope
 
 Nested folders, dragging notes onto folders, folder icons or colours, sharing a folder.
+
+## Execution notes
+
+- Scope correction (owner, 2026-11-23): "it does not work that well when we have the 4 sidebars". Of three layouts offered (folders in the app sidebar, a switcher above the list, drill-down in the list), the owner chose the sidebar. The Notes page publishes its folders and their actions through `ui/src/lib/note-folder-panel.ts`; `AppSidebar` lists them under Notes and the right-click menu gains a `folder` target. The page owns the notes, so the sidebar never holds a copy.
+- Checked in the web preview on a copy of the owner's tasks: make a folder from the sidebar, file a note with the picker, type in it (folder kept), rename by right-click, delete (notes kept) and Undo.
