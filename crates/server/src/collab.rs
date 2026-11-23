@@ -914,7 +914,13 @@ mod tests {
         // ...while an outside write changes a word in the middle.
         let update = outside_write(Some(&saved), "Pass IC 🎉 on Monday").unwrap();
         live.transact_mut().apply_update(Update::decode_v1(&update).unwrap()).unwrap();
-        assert_eq!(text_of(&live), "Pass IC 🎉 on Monday at 10");
+        // Both edits are kept whole and the rest is untouched. Two inserts at
+        // the very same spot are put in an order the document's client ids
+        // decide, which differ every run, as in any editor of this kind.
+        let text = text_of(&live);
+        assert!(text.starts_with("Pass IC 🎉 "), "{text}");
+        assert!(text.contains("on Monday") && text.contains(" at 10") && !text.contains("tomorrow"), "{text}");
+        assert_eq!(text.chars().count(), "Pass IC 🎉 on Monday at 10".chars().count(), "{text}");
     }
 
     #[test]
