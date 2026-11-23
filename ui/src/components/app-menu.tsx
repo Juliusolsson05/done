@@ -68,13 +68,27 @@ function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<Retu
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="min-w-48">
         {space.members.map((m) => (
-          <ContextMenuCheckboxItem key={m.id} checked={on.includes(m.id)} onSelect={() => change((d) => toggleAssignee(d, task.id, m.id), task.id)}>
+          <ContextMenuCheckboxItem
+            key={m.id}
+            checked={on.includes(m.id)}
+            // Stays open, so several people can be ticked in one go.
+            onSelect={(event) => {
+              event.preventDefault()
+              change((d) => toggleAssignee(d, task.id, m.id), task.id)
+            }}
+          >
             <Avatar who={m} size="xs" />
             {m.id === me ? 'Me' : m.name || m.email}
           </ContextMenuCheckboxItem>
         ))}
         <ContextMenuSeparator />
-        <ContextMenuCheckboxItem checked={on.length === 0} onSelect={() => change((d) => setAssignees(d, task.id, []), task.id)}>
+        <ContextMenuCheckboxItem
+          checked={on.length === 0}
+          onSelect={(event) => {
+            event.preventDefault()
+            change((d) => setAssignees(d, task.id, []), task.id)
+          }}
+        >
           Nobody
         </ContextMenuCheckboxItem>
       </ContextMenuSubContent>
