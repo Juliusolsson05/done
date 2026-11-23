@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The iPhone's icon: the same round check, larger, on a full square.
+       iOS rounds the corners itself and shows any transparency as black,
+       so the square is filled edge to edge. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eceef2"/></linearGradient>
+    <linearGradient id="check" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d6cf0"/><stop offset="1" stop-color="#2a55d6"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#plate)"/>
+  <circle cx="512" cy="512" r="330" fill="url(#check)"/>
+  <path d="M340 523L447 630L684 395" fill="none" stroke="#ffffff" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
