@@ -3,7 +3,7 @@
 // open note on the right; on a phone one at a time.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'markdown-to-jsx/react'
-import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
+import { BookOpenIcon, ChevronLeftIcon, ExternalLinkIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { SYNCED } from '@/lib/store'
-import { byNewest, groupByDate, isBlank, keepLineBreaks, matches, titleOf, whenText, type Note } from '@/lib/notes'
+import { FolderActions, FolderNav } from '@/components/note-folders'
+import {
+  byNewest,
+  cleanFolder,
+  folderList,
+  groupByDate,
+  inFolder,
+  isBlank,
+  keepLineBreaks,
+  matches,
+  sameFolder,
+  titleOf,
+  whenText,
+  withFolder,
+  type Note,
+} from '@/lib/notes'
 import { label, linkAt, linksIn } from '@/lib/links'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
@@ -23,6 +38,18 @@ import { cn } from '@/lib/utils'
 
 // How long typing has to pause before the note is written.
 const QUIET_MS = 500
+
+// Folders made on this device that no note is in yet. A folder is a name on
+// its notes, so until one goes in it would vanish; it is kept here instead.
+const KEPT_KEY = 'done-note-folders'
+function storedKept(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(KEPT_KEY) ?? '[]')
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 export function Notes() {
   const { ui, data } = useApp()
@@ -37,6 +64,11 @@ export function Notes() {
   const [reading, setReading] = useState(false)
   // The note just made: its field opens with the cursor in it.
   const [fresh, setFresh] = useState<number | null>(null)
+  // The folder chosen; null is All notes.
+  const [folder, setFolder] = useState<string | null>(null)
+  const [kept, setKeptState] = useState<string[]>(storedKept)
+  // On a phone the folders come first; a tap on one goes on to its notes.
+  const [atFolders, setAtFolders] = useState(true)
   // The note waiting to be written, and its timer. One at a time: switching
   // notes or leaving the page writes it at once.
   const pending = useRef<{ note: Note; timer: ReturnType<typeof setTimeout> } | null>(null)
@@ -46,6 +78,15 @@ export function Notes() {
   latest.current = notes
   const openRef = useRef<number | null>(null)
   openRef.current = openId
+
+  const setKept = (next: string[]) => {
+    setKeptState(next)
+    try {
+      localStorage.setItem(KEPT_KEY, JSON.stringify(next))
+    } catch {
+      // Private windows may refuse storage; the folder still shows until a reload.
+    }
+  }
 
   const write = (note: Note) => {
     queue.current = queue.current.then(() =>
@@ -111,22 +152,27 @@ export function Notes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, notes, isMobile])
 
-  // A note asked for from elsewhere (the search) is opened once it is here.
+  // A note asked for from elsewhere (the search) is opened once it is here,
+  // under All notes so it is listed whatever folder it is in.
   const asked = ui.view.kind === 'notes' ? ui.view.id : undefined
   useEffect(() => {
     if (asked !== undefined && notes?.some((n) => n.id === asked)) {
       setQuery('')
+      setFolder(null)
+      setAtFolders(false)
       open(asked)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, notes !== null])
 
-  // On a wide screen a note is always open when there is one: the one asked
-  // for if any, otherwise the newest.
+  // On a wide screen a note is always open when the chosen folder has one:
+  // the one asked for if any, otherwise the folder's newest.
   useEffect(() => {
-    if (isMobile || openId !== null || !notes || notes.length === 0) return
-    setOpenId(asked !== undefined && notes.some((n) => n.id === asked) ? asked : [...notes].sort(byNewest)[0].id)
-  }, [isMobile, openId, notes, asked])
+    if (isMobile || openId !== null || !notes) return
+    const newest = [...notes].sort(byNewest).find((n) => inFolder(n, folder))
+    if (asked !== undefined && notes.some((n) => n.id === asked)) setOpenId(asked)
+    else if (newest) setOpenId(newest.id)
+  }, [isMobile, openId, notes, asked, folder])
 
   useEffect(() => {
     if (!reading) return
@@ -144,12 +190,24 @@ export function Notes() {
     setOpenId(id)
   }
 
+  // Choosing a folder: its notes are listed, and on a wide screen its newest
+  // is opened, so the note on the right is always one of the folder's.
+  const choose = (next: string | null) => {
+    setFolder(next)
+    setQuery('')
+    setAtFolders(false)
+    if (isMobile) return
+    const newest = [...(latest.current ?? [])].sort(byNewest).find((n) => inFolder(n, next))
+    open(newest ? newest.id : null)
+  }
+
+  // A new note goes in the folder that is open, so it is listed where it was made.
   const create = async (projectId: number | null = null) => {
     setReading(false)
     leave(openId)
     try {
       await queue.current
-      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId })
+      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
       setOpenId(note.id)
@@ -162,24 +220,88 @@ export function Notes() {
   const type = (text: string) => {
     if (openId === null) return
     const was = latest.current?.find((n) => n.id === openId)
-    const note = { id: openId, text, updatedAt: Date.now(), projectId: was?.projectId ?? null }
+    // Built from the note it replaces, so its project and folder are kept:
+    // a field left out here would be cleared by the next keystroke's save.
+    const note: Note = { projectId: null, folder: null, ...was, id: openId, text, updatedAt: Date.now() }
     setNotes((all) => all && all.map((n) => (n.id === openId ? note : n)))
     if (pending.current) clearTimeout(pending.current.timer)
     pending.current = { note, timer: setTimeout(flush, QUIET_MS) }
   }
 
-  // Puts the open note in a project, or takes it out of one. Saved at once.
-  const moveTo = (projectId: number | null) => {
+  // Changes the open note's project or folder. Saved at once.
+  const refileOpen = (fields: Partial<Pick<Note, 'projectId' | 'folder'>>) => {
     const was = latest.current?.find((n) => n.id === openId)
     if (!was) return
     if (pending.current) {
       clearTimeout(pending.current.timer)
       pending.current = null
     }
-    const note = { ...was, projectId }
+    const note = { ...was, ...fields }
     play('confirm')
     setNotes((all) => all && all.map((n) => (n.id === note.id ? note : n)))
     write(note)
+  }
+
+  // Moves every note in folder `from` to `to` (none for null), writing each.
+  // Returns the notes as they were, for Undo.
+  const refileFolder = (from: string, to: string | null): Note[] => {
+    flush()
+    const all = latest.current ?? []
+    const moved = withFolder(all, from, to)
+    const before = all.filter((n) => moved.some((m) => m.id === n.id))
+    setNotes((now) => now && now.map((n) => moved.find((m) => m.id === n.id) ?? n))
+    for (const note of moved) write(note)
+    return before
+  }
+
+  const folders = folderList(notes ?? [], kept)
+
+  const createFolder = (typed: string) => {
+    const name = cleanFolder(typed)
+    if (!name) return
+    const existing = folders.find((f) => sameFolder(f.name, name))
+    if (!existing) {
+      play('add')
+      setKept([...kept, name])
+    }
+    choose(existing ? existing.name : name)
+  }
+
+  const renameFolder = (from: string, typed: string) => {
+    const to = cleanFolder(typed)
+    if (!to || to === from) return
+    play('confirm')
+    refileFolder(from, to)
+    setKept(kept.map((k) => (sameFolder(k, from) ? to : k)))
+    if (folder !== null && sameFolder(folder, from)) setFolder(to)
+  }
+
+  // Deleting a folder never deletes a note: its notes are taken out of it.
+  const deleteFolder = (name: string) => {
+    const before = refileFolder(name, null)
+    const wasKept = kept
+    setKept(kept.filter((k) => !sameFolder(k, name)))
+    setFolder(null)
+    setAtFolders(true)
+    play('delete')
+    const bringBack = () => {
+      for (const note of before) write(note)
+      setNotes((all) => all && all.map((n) => before.find((b) => b.id === n.id) ?? n))
+      setKept(wasKept)
+    }
+    recordStep(bringBack)
+    toast(before.length ? 'Folder deleted. Its notes are in All notes.' : 'Folder deleted', {
+      id: 'said',
+      duration: 5000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          play('undo')
+          forgetLast()
+          bringBack()
+        },
+      },
+    })
   }
 
   const remove = (note: Note) => {
@@ -216,13 +338,16 @@ export function Notes() {
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)
   const now = Date.now()
+  // A search looks through every note, as Apple Notes does; otherwise the
+  // list is the chosen folder's.
+  const searching = query.trim() !== ''
   const groups = groupByDate(
-    sorted.filter((n) => matches(n, query)),
+    sorted.filter((n) => (searching ? matches(n, query) : inFolder(n, folder))),
     now,
   )
 
   const projectPicker = current && (
-    <Select value={String(current.projectId ?? 'none')} onValueChange={(value) => moveTo(value === 'none' ? null : Number(value))}>
+    <Select value={String(current.projectId ?? 'none')} onValueChange={(value) => refileOpen({ projectId: value === 'none' ? null : Number(value) })}>
       <SelectTrigger size="sm" aria-label="Project" className="h-8 border-0 text-muted-foreground shadow-none hover:bg-accent">
         <SelectValue />
       </SelectTrigger>
@@ -235,6 +360,29 @@ export function Notes() {
           <SelectItem key={p.id} value={String(p.id)}>
             <ProjectDot id={p.id} />
             {p.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+
+  // A select cannot have an empty value, so "no folder" has a name no folder
+  // can have (a folder name never starts with a space).
+  const NO_FOLDER = ' none'
+  const folderPicker = current && (
+    <Select
+      value={folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? NO_FOLDER}
+      onValueChange={(value) => refileOpen({ folder: value === NO_FOLDER ? null : value })}
+    >
+      <SelectTrigger size="sm" aria-label="Folder" className="h-8 max-w-48 border-0 text-muted-foreground shadow-none hover:bg-accent">
+        <FolderIcon />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NO_FOLDER}>No folder</SelectItem>
+        {folders.map((f) => (
+          <SelectItem key={f.name} value={f.name}>
+            {f.name}
           </SelectItem>
         ))}
       </SelectContent>
@@ -255,16 +403,30 @@ export function Notes() {
     </Button>
   )
 
+  const folderNav = (large: boolean) => (
+    <FolderNav
+      folders={folders}
+      total={notes?.length ?? 0}
+      selected={folder}
+      onSelect={choose}
+      onCreate={createFolder}
+      onRename={renameFolder}
+      onDelete={deleteFolder}
+      large={large}
+    />
+  )
+
   // On a phone: the open note alone, with a way back to the list.
   if (isMobile && current) {
     return (
       <div>
         <div className="mb-3 flex items-center">
-          <Button variant="ghost" size="sm" className="-ml-2.5 text-primary" onClick={() => open(null)}>
+          <Button variant="ghost" size="sm" className="-ml-2.5 max-w-40 text-primary" onClick={() => open(null)}>
             <ChevronLeftIcon />
-            Notes
+            <span className="truncate">{folder ?? 'All notes'}</span>
           </Button>
-          <div className="ml-auto flex gap-1">
+          <div className="ml-auto flex min-w-0 gap-1">
+            {folderPicker}
             {projectPicker}
             {readToggle}
             <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete note" onClick={() => remove(current)}>
@@ -277,9 +439,33 @@ export function Notes() {
     )
   }
 
+  // On a phone, the folders come first, as in Apple Notes.
+  if (isMobile && atFolders) {
+    return (
+      <div>
+        <ViewHeader title="Notes">
+          <HeaderButton onClick={() => void create(null)}>
+            <PlusIcon />
+            New note
+          </HeaderButton>
+        </ViewHeader>
+        {folderNav(true)}
+      </div>
+    )
+  }
+
+  const empty = groups.length === 0
   return (
     <div>
-      <ViewHeader title="Notes">
+      {isMobile && (
+        <Button variant="ghost" size="sm" className="mb-1 -ml-2.5 text-primary" onClick={() => setAtFolders(true)}>
+          <ChevronLeftIcon />
+          Folders
+        </Button>
+      )}
+      <ViewHeader title={isMobile ? (folder ?? 'All notes') : 'Notes'}>
+        {isMobile && folder !== null && <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />}
+        {!isMobile && folderPicker}
         {!isMobile && projectPicker}
         {!isMobile && readToggle}
         {!isMobile && current && (
@@ -298,29 +484,35 @@ export function Notes() {
           New note
         </HeaderButton>
       </ViewHeader>
-      {notes && notes.length === 0 && <p className="py-10 text-sm text-muted-foreground">No notes yet. New note starts one.</p>}
-      {sorted.length > 0 && (
-        <div className="flex items-start gap-8">
-          {/* The list stays where it is while a long note scrolls past it. */}
+      {notes && (
+        <div className="flex items-start gap-6">
+          {/* The folders and the list stay where they are while a long note scrolls past them. */}
+          {!isMobile && !reading && <div className="w-44 shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:overflow-y-auto">{folderNav(false)}</div>}
           <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
-            <div className="relative mb-4">
-              <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape' && query) {
-                    event.preventDefault()
-                    setQuery('')
-                  }
-                }}
-                placeholder="Search notes"
-                aria-label="Search notes"
-                className="border-transparent bg-muted pl-8 shadow-none focus-visible:border-transparent focus-visible:bg-muted/70 focus-visible:ring-0 dark:bg-muted [&::-webkit-search-cancel-button]:hidden"
-              />
-            </div>
-            {groups.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No notes match</p>}
+            {notes.length > 0 && (
+              <div className="relative mb-4">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape' && query) {
+                      event.preventDefault()
+                      setQuery('')
+                    }
+                  }}
+                  placeholder="Search all notes"
+                  aria-label="Search notes"
+                  className="border-transparent bg-muted pl-8 shadow-none focus-visible:border-transparent focus-visible:bg-muted/70 focus-visible:ring-0 dark:bg-muted [&::-webkit-search-cancel-button]:hidden"
+                />
+              </div>
+            )}
+            {empty && (
+              <p className="px-3 py-2 text-sm text-muted-foreground">
+                {searching ? 'No notes match' : notes.length === 0 ? 'No notes yet. New note starts one.' : 'No notes in this folder. New note starts one here.'}
+              </p>
+            )}
             {groups.map((group) => (
               <section key={group.label} className="mb-3">
                 <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
@@ -344,6 +536,13 @@ export function Notes() {
                         </span>
                         <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
                           {whenText(note.updatedAt, now)}
+                          {/* Under All notes or a search, where a note is in is worth saying. */}
+                          {note.folder && (folder === null || searching) && (
+                            <>
+                              <FolderIcon className="size-3" />
+                              <span className="truncate">{note.folder}</span>
+                            </>
+                          )}
                           {note.projectId != null && (
                             <>
                               <ProjectDot id={note.projectId} className="size-1.5" />

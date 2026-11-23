@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byNewest, groupByDate, isBlank, keepLineBreaks, matches, titleOf } from './notes'
+import { byNewest, cleanFolder, folderList, groupByDate, inFolder, isBlank, keepLineBreaks, matches, titleOf, withFolder, type Note } from './notes'
 
 describe('titleOf', () => {
   it('is the first line with something on it, trimmed', () => {
@@ -77,5 +77,40 @@ describe('keepLineBreaks', () => {
     expect(keepLineBreaks('| a | b |\n| - | - |\n| 1 | 2 |')).toBe('| a | b |\n| - | - |\n| 1 | 2 |')
     expect(keepLineBreaks('1. Sequoia\n2. Benchmark\n- a\n- b')).toBe('1. Sequoia\n2. Benchmark\n- a\n- b')
     expect(keepLineBreaks('# Title\n*20 Nov*\nPlan only')).toBe('# Title\n*20 Nov*\\\nPlan only')
+  })
+})
+
+describe('folders', () => {
+  const note = (id: number, folder: string | null = null): Note => ({ id, text: 'Note ' + id, updatedAt: id, folder })
+
+  it('keeps a name the way the tasks file does', () => {
+    expect(cleanFolder('  Fund   raising ')).toBe('Fund raising')
+    expect(cleanFolder('   ')).toBeNull()
+    expect([...(cleanFolder('x'.repeat(80)) ?? '')].length).toBe(60)
+  })
+
+  it('lists each folder once whatever its case, counts its notes, and keeps an empty one made here', () => {
+    const notes = [note(1, 'Ideas'), note(2, 'ideas'), note(3, 'Work'), note(4)]
+    expect(folderList(notes, ['Recipes', 'WORK'])).toEqual([
+      { name: 'Ideas', count: 2 },
+      { name: 'Recipes', count: 0 },
+      { name: 'Work', count: 1 },
+    ])
+  })
+
+  it('lists every note under All notes and only its own in a folder', () => {
+    expect(inFolder(note(1), null)).toBe(true)
+    expect(inFolder(note(1, 'Ideas'), 'IDEAS')).toBe(true)
+    expect(inFolder(note(1), 'Ideas')).toBe(false)
+  })
+
+  // Renaming and deleting a folder write only the notes in it.
+  it('moves only the notes in a folder, to a new name or out of any folder', () => {
+    const notes = [note(1, 'Ideas'), note(2, 'Work'), note(3, 'ideas'), note(4)]
+    expect(withFolder(notes, 'Ideas', 'Plans').map((n) => [n.id, n.folder])).toEqual([
+      [1, 'Plans'],
+      [3, 'Plans'],
+    ])
+    expect(withFolder(notes, 'Work', null).map((n) => [n.id, n.folder])).toEqual([[2, null]])
   })
 })

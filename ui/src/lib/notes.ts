@@ -9,6 +9,8 @@ export interface Note {
   updatedAt: number
   // The project it belongs to, if any.
   projectId?: number | null
+  // The folder it is filed in, by name, if any.
+  folder?: string | null
 }
 
 // What a window sends to save a note: without an id it is a new one.
@@ -17,6 +19,7 @@ export interface SaveNote {
   text: string
   updatedAt: number
   projectId?: number | null
+  folder?: string | null
 }
 
 // The first line with something on it names the note in the list, without
@@ -108,3 +111,44 @@ export function keepLineBreaks(text: string): string {
     })
     .join('\n')
 }
+
+// ---------- Folders ----------
+// A folder is a name on its notes, so it exists while a note is in it. The
+// tasks file keeps names the same way (crates/core clean_folder): trimmed,
+// spaces collapsed, at most 60 characters, and a blank name is no folder.
+
+export function cleanFolder(name: string): string | null {
+  const clean = name.split(/\s+/).filter(Boolean).join(' ')
+  return clean ? [...clean].slice(0, 60).join('') : null
+}
+
+// One folder whatever the case it was typed in: "ideas" files into "Ideas".
+export const sameFolder = (a: string, b: string): boolean => a.toLocaleLowerCase() === b.toLocaleLowerCase()
+
+export interface Folder {
+  name: string
+  count: number
+}
+
+// The folders to list: every folder a note is in, and those made on this
+// device that are still empty (`kept`), once each ignoring case, by name.
+export function folderList(notes: Note[], kept: string[]): Folder[] {
+  const folders: Folder[] = []
+  for (const name of [...notes.flatMap((n) => (n.folder ? [n.folder] : [])), ...kept]) {
+    const found = folders.find((f) => sameFolder(f.name, name))
+    if (!found) folders.push({ name, count: 0 })
+  }
+  for (const note of notes) {
+    const found = note.folder ? folders.find((f) => sameFolder(f.name, note.folder as string)) : undefined
+    if (found) found.count++
+  }
+  return folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+}
+
+// Whether a note is listed with this folder chosen; null is All notes.
+export const inFolder = (note: Note, folder: string | null): boolean => folder === null || (!!note.folder && sameFolder(note.folder, folder))
+
+// The notes in folder `from`, moved to `to` (null takes them out of any
+// folder). Only those notes, so renaming or deleting a folder writes nothing else.
+export const withFolder = (notes: Note[], from: string, to: string | null): Note[] =>
+  notes.filter((n) => n.folder && sameFolder(n.folder, from)).map((n) => ({ ...n, folder: to }))
