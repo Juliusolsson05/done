@@ -7,6 +7,7 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -17,7 +18,7 @@ import { askMove } from '@/lib/move-store'
 import { isPersonal, workspaces } from '@/lib/team'
 import { PriorityDot } from '@/components/marks'
 import { colorStyle, useApp } from '@/lib/app-context'
-import { addDays, nextWeekday, TODAY, type Day } from '@/lib/days'
+import { addDays, describeDay, nextWeekday, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { expand } from '@/lib/expanded'
 import { getFolderPanel, nameFolder, NEW_FOLDER } from '@/lib/note-folder-panel'
@@ -50,7 +51,6 @@ export function menuTargetOf(element: Element): MenuTarget {
 
 // A row of equal choices inside the menu (priority, colour).
 const CHOICE = 'flex-1 justify-center bg-muted'
-const CHOSEN = 'bg-primary text-primary-foreground focus:bg-primary focus:text-primary-foreground'
 
 // Who is on a workspace's task, from the menu: each member with a check, and Nobody.
 function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<ReturnType<typeof useApp>['update']>[0], notice?: number) => void }) {
@@ -60,16 +60,35 @@ function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<Retu
   const on = task.assignees ?? []
   return (
     <ContextMenuSub>
-      <ContextMenuSubTrigger>Assign</ContextMenuSubTrigger>
+      <ContextMenuSubTrigger>
+        <span className="flex-1">Assign</span>
+        <ContextMenuShortcut className="pl-4 tracking-normal">
+          {on.length === 0 ? 'Nobody' : on.length === 1 ? (on[0] === me ? 'Me' : (space.members.find((m) => m.id === on[0])?.name.split(' ')[0] ?? '1 person')) : `${on.length} people`}
+        </ContextMenuShortcut>
+      </ContextMenuSubTrigger>
       <ContextMenuSubContent className="min-w-48">
         {space.members.map((m) => (
-          <ContextMenuCheckboxItem key={m.id} checked={on.includes(m.id)} onSelect={() => change((d) => toggleAssignee(d, task.id, m.id), task.id)}>
+          <ContextMenuCheckboxItem
+            key={m.id}
+            checked={on.includes(m.id)}
+            // Stays open, so several people can be ticked in one go.
+            onSelect={(event) => {
+              event.preventDefault()
+              change((d) => toggleAssignee(d, task.id, m.id), task.id)
+            }}
+          >
             <Avatar who={m} size="xs" />
             {m.id === me ? 'Me' : m.name || m.email}
           </ContextMenuCheckboxItem>
         ))}
         <ContextMenuSeparator />
-        <ContextMenuCheckboxItem checked={on.length === 0} onSelect={() => change((d) => setAssignees(d, task.id, []), task.id)}>
+        <ContextMenuCheckboxItem
+          checked={on.length === 0}
+          onSelect={(event) => {
+            event.preventDefault()
+            change((d) => setAssignees(d, task.id, []), task.id)
+          }}
+        >
           Nobody
         </ContextMenuCheckboxItem>
       </ContextMenuSubContent>
@@ -78,7 +97,7 @@ function AssignMenu({ task, change }: { task: Task; change: (fn: Parameters<Retu
 }
 
 function TaskMenu({ task }: { task: Task }) {
-  const { data, me, edit, focusOn, complete, reopen, removeTask, update } = useApp()
+  const { data, me, team, edit, focusOn, complete, reopen, removeTask, update } = useApp()
   // Every change made from the menu is confirmed with the same quiet tick.
   const change: typeof update = (fn, notice) => {
     play('confirm')
@@ -126,49 +145,97 @@ function TaskMenu({ task }: { task: Task }) {
     </ContextMenuCheckboxItem>
   )
   const doing = task.status === 'doing'
+  // Each kind of change is one row that opens on hover, with what it is now
+  // on the right; the choices themselves wait in the submenu.
+  const now = (text: string) => <ContextMenuShortcut className="pl-4 tracking-normal">{text}</ContextMenuShortcut>
+  const spaces = workspaces(team)
+  const project = data.projects.find((p) => p.id === task.projectId)
   return (
     <>
       <ContextMenuItem onSelect={() => edit(task.id)}>Edit task</ContextMenuItem>
       {/* Opens the list under the task, where the field to add one is. */}
       <ContextMenuItem onSelect={() => expand(task.id)}>Add subtask</ContextMenuItem>
       <ContextMenuItem onSelect={() => focusOn(task.id)}>Focus on this</ContextMenuItem>
-      <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
       {task.goalDay === TODAY ? (
-        <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { goalDay: null }))}>Remove as today’s goal</ContextMenuItem>
+        <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { goalDay: null, goalBy: null }))}>Remove as today’s goal</ContextMenuItem>
       ) : (
         <ContextMenuItem onSelect={() => change((d) => setGoal(d, task.id, TODAY, me), task.id)}>Make today’s goal</ContextMenuItem>
       )}
-      <ContextMenuItem onSelect={() => change((d) => patchTask(d, task.id, { status: doing ? undefined : 'doing' }))}>
-        {doing ? 'Move back to To do' : 'Mark as in progress'}
-      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Status</span>
+          {now(doing ? 'In progress' : 'To do')}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="min-w-44">
+          <ContextMenuCheckboxItem checked={!doing} onSelect={() => change((d) => patchTask(d, task.id, { status: undefined }))}>
+            To do
+          </ContextMenuCheckboxItem>
+          <ContextMenuCheckboxItem checked={doing} onSelect={() => change((d) => patchTask(d, task.id, { status: 'doing' }))}>
+            In progress
+          </ContextMenuCheckboxItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => complete(task.id)}>Complete</ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Due</span>
+          {now(task.due ? describeDay(task.due, TODAY) : 'No date')}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="min-w-44">
+          {due('Today', TODAY)}
+          {due('Tomorrow', addDays(TODAY, 1))}
+          {due('Next Monday', nextWeekday(TODAY, 1))}
+          <ContextMenuSeparator />
+          <ContextMenuCheckboxItem checked={!task.due} onSelect={() => change((d) => patchTask(d, task.id, { start: null, due: null }))}>
+            No date
+          </ContextMenuCheckboxItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Priority</span>
+          {now(task.priority < 4 ? `P${task.priority}` : 'None')}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="min-w-44">
+          {[1, 2, 3, 4].map((p) => (
+            <ContextMenuCheckboxItem key={p} checked={task.priority === p} onSelect={() => change((d) => patchTask(d, task.id, { priority: p }))}>
+              <PriorityDot priority={p} />
+              {p < 4 ? `Priority ${p}` : 'No priority'}
+            </ContextMenuCheckboxItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Project</span>
+          {now(project?.name ?? 'Inbox')}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="max-h-[min(28rem,var(--radix-context-menu-content-available-height))] min-w-52 overflow-y-auto">
+          {moveTo('Inbox', null)}
+          {spaces.length === 0 ? (
+            data.projects.map((p) => moveTo(p.name, p.id))
+          ) : (
+            <>
+              {/* Grouped by where they live, as in the sidebar. */}
+              <ContextMenuLabel className="text-xs text-muted-foreground">Your projects</ContextMenuLabel>
+              {data.projects.filter((p) => isPersonal(p.spaceId, team)).map((p) => moveTo(p.name, p.id))}
+              {spaces.map((w) => {
+                const in_ = data.projects.filter((p) => p.spaceId === w.id)
+                return in_.length ? (
+                  <ContextMenuGroup key={w.id}>
+                    <ContextMenuSeparator />
+                    <ContextMenuLabel className="text-xs text-muted-foreground">{w.name}</ContextMenuLabel>
+                    {in_.map((p) => moveTo(p.name, p.id))}
+                  </ContextMenuGroup>
+                ) : null
+              })}
+            </>
+          )}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       <AssignMenu task={task} change={change} />
-      <ContextMenuSeparator />
-      <ContextMenuLabel>Due</ContextMenuLabel>
-      {due('Today', TODAY)}
-      {due('Tomorrow', addDays(TODAY, 1))}
-      {due('Next Monday', nextWeekday(TODAY, 1))}
-      <ContextMenuCheckboxItem checked={!task.due} onSelect={() => change((d) => patchTask(d, task.id, { start: null, due: null }))}>
-        No date
-      </ContextMenuCheckboxItem>
-      <ContextMenuSeparator />
-      <ContextMenuLabel>Priority</ContextMenuLabel>
-      <ContextMenuGroup className="flex gap-1 p-1">
-        {[1, 2, 3, 4].map((p) => (
-          <ContextMenuItem
-            key={p}
-            aria-label={p < 4 ? `Priority ${p}` : 'No priority'}
-            className={cn(CHOICE, task.priority === p && CHOSEN)}
-            onSelect={() => change((d) => patchTask(d, task.id, { priority: p }))}
-          >
-            <PriorityDot priority={p} />
-            {p < 4 ? p : 'None'}
-          </ContextMenuItem>
-        ))}
-      </ContextMenuGroup>
-      <ContextMenuSeparator />
-      <ContextMenuLabel>Project</ContextMenuLabel>
-      {moveTo('Inbox', null)}
-      {data.projects.map((p) => moveTo(p.name, p.id))}
       <ContextMenuSeparator />
       {remove}
     </>
@@ -186,15 +253,17 @@ function MoveMenu({ id }: { id: number }) {
   const mine = isPersonal(project.spaceId, team)
   const targets = spaces.filter((s) => s.id !== project.spaceId)
   return (
-    <>
-      <ContextMenuSeparator />
-      {targets.map((s) => (
-        <ContextMenuItem key={s.id} onSelect={() => askMove({ project: id, to: s.id })}>
-          Move to {s.name}
-        </ContextMenuItem>
-      ))}
-      {!mine && <ContextMenuItem onSelect={() => askMove({ project: id, to: team.personal })}>Move to my own space</ContextMenuItem>}
-    </>
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>Move to</ContextMenuSubTrigger>
+      <ContextMenuSubContent className="min-w-44">
+        {targets.map((s) => (
+          <ContextMenuItem key={s.id} onSelect={() => askMove({ project: id, to: s.id })}>
+            {s.name}
+          </ContextMenuItem>
+        ))}
+        {!mine && <ContextMenuItem onSelect={() => askMove({ project: id, to: team.personal })}>My own space</ContextMenuItem>}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
   )
 }
 
@@ -221,10 +290,14 @@ function ProjectMenu({ id }: { id: number }) {
       >
         Rename
       </ContextMenuItem>
-      <MoveMenu id={id} />
       <ContextMenuSeparator />
-      <ContextMenuLabel>Colour</ContextMenuLabel>
-      <ContextMenuGroup className="flex gap-1 p-1">
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <span className="flex-1">Colour</span>
+          {current !== null && <span style={colorStyle(current)} className="mr-1 size-2.5 rounded-xs bg-project" />}
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+      <ContextMenuGroup className="grid grid-cols-4 gap-1 p-1">
         {Array.from({ length: COLOR_COUNT }, (_, i) => (
           <ContextMenuItem
             key={i}
@@ -239,24 +312,31 @@ function ProjectMenu({ id }: { id: number }) {
           </ContextMenuItem>
         ))}
       </ContextMenuGroup>
-      <ContextMenuSeparator />
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       {/* A quick way into a filtered Board or Timeline: only this project. */}
-      <ContextMenuItem
-        onSelect={() => {
-          setViewFilter({ ...NO_FILTER, projects: [id] })
-          openView({ kind: 'board' })
-        }}
-      >
-        Show only this on the Board
-      </ContextMenuItem>
-      <ContextMenuItem
-        onSelect={() => {
-          setViewFilter({ ...NO_FILTER, projects: [id] })
-          openView({ kind: 'timeline' })
-        }}
-      >
-        Show only this on the Timeline
-      </ContextMenuItem>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Show only this</ContextMenuSubTrigger>
+        <ContextMenuSubContent className="min-w-40">
+          <ContextMenuItem
+            onSelect={() => {
+              setViewFilter({ ...NO_FILTER, projects: [id] })
+              openView({ kind: 'board' })
+            }}
+          >
+            On the Board
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setViewFilter({ ...NO_FILTER, projects: [id] })
+              openView({ kind: 'timeline' })
+            }}
+          >
+            On the Timeline
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <MoveMenu id={id} />
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => removeProject(id)}>
         Delete project

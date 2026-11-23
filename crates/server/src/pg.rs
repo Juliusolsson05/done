@@ -80,6 +80,7 @@ pub const MEMBERS: i64 = 50;
 pub const INVITES_A_DAY: i64 = 20;
 pub const PENDING: i64 = 50;
 const WEEK: i64 = 7 * 24 * 60 * 60 * 1000;
+const KNOWN_FOR: std::time::Duration = std::time::Duration::from_secs(60);
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS account (
@@ -155,7 +156,9 @@ pub struct Db {
     pool: Pool,
     /// Accounts already written this run, with what was written: signing in
     /// on every request must not mean a write on every request.
-    known: Mutex<HashMap<String, (i64, String)>>,
+    /// Checked again after KNOWN_FOR: another copy of the server may have
+    /// deleted the account (and its space) since.
+    known: Mutex<HashMap<String, (i64, String, std::time::Instant)>>,
 }
 
 const TASK: &str = "id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by, changed";
@@ -270,10 +273,14 @@ async fn leave_behind(tx: &Transaction<'_>, kind: &str, id: i64, from: i64, at: 
 /// Moves a task (and its subtasks, and who is on them) to another space:
 /// a tombstone in the old space, a new `seq` in the new one. People not in
 /// the new space are taken off it; nobody is on a task in someone's own space.
-async fn rehome_task(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64) -> Result<(), Fail> {
+/// The row is stamped one past its tombstone, so a device that took in the
+/// tombstone first still takes the row when it arrives in its new space.
+/// Subtasks go into `project`, the project their task is now in: a subtask
+/// is in its task's project, and must not point into the space it left.
+async fn rehome_task(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64, project: Option<i64>) -> Result<(), Fail> {
     leave_behind(tx, "task", id, from, at).await?;
     let seq = bump(tx, to).await?;
-    tx.execute("UPDATE task SET space_id = $2, seq = $3, changed = greatest(changed, $4) WHERE id = $1", &[&id, &to, &seq, &at]).await?;
+    tx.execute("UPDATE task SET space_id = $2, seq = $3, changed = greatest(changed, $4::BIGINT + 1) WHERE id = $1", &[&id, &to, &seq, &at]).await?;
     tx.execute("DELETE FROM tombstone WHERE kind = 'task' AND id = $1 AND space_id = $2", &[&id, &to]).await?;
     let on = tx.query("SELECT account_id FROM task_assignee WHERE task_id = $1", &[&id]).await?;
     for row in on {
@@ -294,7 +301,8 @@ async fn rehome_task(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64)
     }
     let children: Vec<i64> = tx.query("SELECT id FROM task WHERE parent_id = $1 AND space_id <> $2", &[&id, &to]).await?.iter().map(|r| r.get(0)).collect();
     for child in children {
-        Box::pin(rehome_task(tx, child, from, to, at)).await?;
+        tx.execute("UPDATE task SET project_id = $2 WHERE id = $1", &[&child, &project]).await?;
+        Box::pin(rehome_task(tx, child, from, to, at, project)).await?;
     }
     Ok(())
 }
@@ -302,7 +310,7 @@ async fn rehome_task(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64)
 async fn rehome_note(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64) -> Result<(), Fail> {
     leave_behind(tx, "note", id, from, at).await?;
     let seq = bump(tx, to).await?;
-    tx.execute("UPDATE note SET space_id = $2, seq = $3, changed = greatest(changed, $4) WHERE id = $1", &[&id, &to, &seq, &at]).await?;
+    tx.execute("UPDATE note SET space_id = $2, seq = $3, changed = greatest(changed, $4::BIGINT + 1) WHERE id = $1", &[&id, &to, &seq, &at]).await?;
     tx.execute("DELETE FROM tombstone WHERE kind = 'note' AND id = $1 AND space_id = $2", &[&id, &to]).await?;
     Ok(())
 }
@@ -367,7 +375,8 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         if check(t).is_err() {
             continue;
         }
-        let here = tx.query_opt("SELECT space_id, changed, goal_day, goal_by FROM task WHERE id = $1", &[&t.id]).await?;
+        let here = tx.query_opt("SELECT space_id, changed, goal_day, goal_by, project_id, parent_id FROM task WHERE id = $1", &[&t.id]).await?;
+        let kept: Option<(Option<i64>, Option<i64>)> = here.as_ref().map(|r| (r.get(4), r.get(5)));
         let here: Option<(i64, i64, Option<String>, Option<String>)> = here.map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)));
         if let Some((space, at, _, _)) = &here {
             if !is_in(*space) || changed <= *at {
@@ -415,7 +424,22 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 None => project_id = None,
             }
         }
-        let target = target.or(here.as_ref().map(|h| h.0)).unwrap_or(me.personal);
+        let mut target = target.or(here.as_ref().map(|h| h.0)).unwrap_or(me.personal);
+        // Out of a workspace is its owner's call (as for a whole project): a
+        // member putting a workspace task under their own project or task
+        // leaves it where it is.
+        if let (Some((from, ..)), Some((was_project, was_parent))) = (&here, kept) {
+            if *from != target && member.get(from).is_some_and(|s| s.kind == "workspace" && s.role != "owner") {
+                target = *from;
+                project_id = was_project;
+                parent_id = was_parent;
+            }
+        }
+        // What is stored differs from what was sent: stamped one later, so
+        // the sender takes the server's version instead of keeping its own.
+        let moving = here.as_ref().is_some_and(|h| h.0 != target);
+        let corrected = project_id != t.project_id || parent_id != t.parent_id;
+        let changed = if moving || corrected { changed + 1 } else { changed };
         // A goal is the person's who set it; editing someone else's goal
         // task leaves it theirs.
         let goal_by = match (&t.goal_day, &here) {
@@ -441,7 +465,7 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         }
         if let Some((from, _, _, _)) = &here {
             if *from != target {
-                rehome_task(tx, t.id, *from, target, changed).await?;
+                rehome_task(tx, t.id, *from, target, changed - 1, project_id).await?;
             }
         }
         let seq = bump(tx, target).await?;
@@ -493,7 +517,8 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
 
     for Stamped { row: n, changed } in &rows.notes {
         let changed = stamp(*changed);
-        let here = tx.query_opt("SELECT space_id, changed FROM note WHERE id = $1", &[&n.id]).await?;
+        let here = tx.query_opt("SELECT space_id, changed, project_id FROM note WHERE id = $1", &[&n.id]).await?;
+        let kept_project: Option<i64> = here.as_ref().and_then(|r| r.get(2));
         let here: Option<(i64, i64)> = here.map(|r| (r.get(0), r.get(1)));
         if let Some((space, at)) = here {
             if !is_in(space) || changed <= at {
@@ -517,10 +542,19 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
             }
         }
         let wished = n.space_id.filter(|s| is_in(*s));
-        let target = target.or(here.map(|h| h.0)).or(wished).unwrap_or(me.personal);
+        let mut target = target.or(here.map(|h| h.0)).or(wished).unwrap_or(me.personal);
+        // Out of a workspace is its owner's call, as for tasks.
+        if let Some((from, _)) = here {
+            if from != target && member.get(&from).is_some_and(|s| s.kind == "workspace" && s.role != "owner") {
+                target = from;
+                project_id = kept_project;
+            }
+        }
+        let moving = here.is_some_and(|h| h.0 != target);
+        let changed = if moving || project_id != n.project_id { changed + 1 } else { changed };
         if let Some((from, _)) = here {
             if from != target {
-                rehome_note(tx, n.id, from, target, changed).await?;
+                rehome_note(tx, n.id, from, target, changed - 1).await?;
             }
         }
         let seq = bump(tx, target).await?;
@@ -647,14 +681,15 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         if kind == "project" {
             // A task outlives its project, and stays where it is.
             for table in ["task", "note"] {
-                let left: Vec<i64> = tx
-                    .query(&format!("SELECT id FROM {table} WHERE project_id = $1"), &[&gone.id])
+                let left: Vec<(i64, i64)> = tx
+                    .query(&format!("SELECT id, space_id FROM {table} WHERE project_id = $1 AND space_id = ANY($2)"), &[&gone.id, &member.keys().copied().collect::<Vec<_>>()])
                     .await?
                     .iter()
-                    .map(|r| r.get(0))
+                    .map(|r| (r.get(0), r.get(1)))
                     .collect();
-                for id in left {
-                    let seq = bump(tx, space).await?;
+                for (id, own) in left {
+                    // Counted in the row's own space, which is where it is read.
+                    let seq = bump(tx, own).await?;
                     tx.execute(&format!("UPDATE {table} SET project_id = NULL, changed = greatest(changed + 1, $2), seq = $3 WHERE id = $1"), &[&id, &changed, &seq])
                         .await?;
                 }
@@ -746,8 +781,8 @@ impl Db {
     pub async fn me(&self, id: &str, email: &str, name: &str, picture: &str) -> Result<Me, Fail> {
         let email = email.trim().to_lowercase();
         let print = format!("{email}\n{name}\n{picture}");
-        if let Some((personal, seen)) = self.known.lock().unwrap().get(id) {
-            if *seen == print {
+        if let Some((personal, seen, when)) = self.known.lock().unwrap().get(id) {
+            if *seen == print && when.elapsed() < KNOWN_FOR {
                 return Ok(Me { id: id.into(), email, personal: *personal });
             }
         }
@@ -762,7 +797,7 @@ impl Db {
         .await?;
         let personal = self.personal_in(&tx, id).await?;
         tx.commit().await?;
-        self.known.lock().unwrap().insert(id.into(), (personal, print));
+        self.known.lock().unwrap().insert(id.into(), (personal, print, std::time::Instant::now()));
         Ok(Me { id: id.into(), email, personal })
     }
 
@@ -787,14 +822,19 @@ impl Db {
     /// spaces out. An app from before workspaces (no cursors) is answered
     /// about its own space only, in the shape it knows.
     pub async fn exchange(&self, me: &Me, outbox: &Outbox) -> Result<Reply, Fail> {
-        let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
-        let spaces = spaces_of(&tx, &me.id).await?;
         if !outbox.rows.is_empty() {
-            lock(&tx, &spaces).await?;
-            merge(&tx, me, &spaces, &outbox.rows, now_ms()).await?;
+            self.write(me, outbox.rows.clone()).await?;
         }
+        // Read in one snapshot across every space: a project moved between
+        // two of them in the meantime shows up in both or in neither, never
+        // as a tombstone in one without the row in the other.
+        let mut client = self.pool.get().await?;
+        let tx = client.build_transaction().isolation_level(tokio_postgres::IsolationLevel::RepeatableRead).read_only(true).start().await?;
+        let spaces = spaces_of(&tx, &me.id).await?;
         let legacy = outbox.cursors.is_none();
+        // An app from before workspaces, or one that has never synced since,
+        // says how far it read its own space in `pulled`.
+        let first = outbox.cursors.as_ref().is_none_or(|c| c.is_empty());
         let read: HashMap<i64, i64> = outbox.cursors.iter().flatten().map(|c| (c.space, c.at)).collect();
         let mut rows = Rows::default();
         let mut upto = Vec::new();
@@ -803,10 +843,11 @@ impl Db {
             if legacy && space.id != me.personal {
                 continue;
             }
-            let from = read.get(&space.id).copied().unwrap_or(if space.id == me.personal { outbox.pulled } else { 0 });
-            // The counter first, then the rows up to it: a write committed
-            // between the two is left for next time instead of skipped.
+            let from = read.get(&space.id).copied().unwrap_or(if space.id == me.personal && first { outbox.pulled } else { 0 });
             let at: i64 = tx.query_one("SELECT next_seq FROM space WHERE id = $1", &[&space.id]).await?.get(0);
+            // Read further than the space has counted: it is not the space
+            // the device read (an account deleted and made again). From the start.
+            let from = if from > at { 0 } else { from };
             rows_since(&tx, space.id, from, at, &mut rows).await?;
             if space.id == me.personal {
                 own = at;
@@ -863,6 +904,8 @@ impl Db {
         let tx = client.transaction().await?;
         let spaces = spaces_of(&tx, &me.id).await?;
         lock(&tx, &spaces).await?;
+        // Read again once locked: someone removed while this waited is out.
+        let spaces = spaces_of(&tx, &me.id).await?;
         let merged = merge(&tx, me, &spaces, &rows, now_ms()).await?;
         tx.commit().await?;
         Ok(merged)
@@ -1041,6 +1084,8 @@ impl Db {
         if Self::workspace_role(&tx, me, space).await? != "owner" {
             return invalid("Only the workspace's owner can delete it.");
         }
+        // The space first, as every writer takes it first: no waiting in a circle.
+        tx.execute("SELECT id FROM space WHERE id = $1 FOR UPDATE", &[&space]).await?;
         for table in ["task_assignee", "task", "note", "project", "tombstone", "notification"] {
             tx.execute(&format!("DELETE FROM {table} WHERE space_id = $1"), &[&space]).await?;
         }
@@ -1182,6 +1227,8 @@ impl Db {
         if expires <= now_ms() {
             return invalid("This invite has expired. Ask for a new one.");
         }
+        // Locked, so two people accepting at once cannot both be the 50th.
+        tx.execute("SELECT id FROM space WHERE id = $1 FOR UPDATE", &[&space]).await?;
         let members: i64 = tx.query_one("SELECT count(*) FROM member WHERE space_id = $1", &[&space]).await?.get(0);
         if members >= MEMBERS {
             return invalid("This workspace is full.");
@@ -1288,6 +1335,9 @@ impl Db {
             return invalid("Only the workspace's owner can move a project out of it.");
         }
         lock(&tx, &spaces).await?;
+        if !spaces_of(&tx, &me.id).await?.iter().any(|s| s.id == to) {
+            return Err(Fail::NotFound);
+        }
         let at = now_ms();
         leave_behind(&tx, "project", project, from, at).await?;
         let seq = bump(&tx, to).await?;
@@ -1300,7 +1350,7 @@ impl Db {
             .map(|r| r.get(0))
             .collect();
         for task in tasks {
-            rehome_task(&tx, task, from, to, at).await?;
+            rehome_task(&tx, task, from, to, at, Some(project)).await?;
         }
         let notes: Vec<i64> =
             tx.query("SELECT id FROM note WHERE project_id = $1 AND space_id = $2", &[&project, &from]).await?.iter().map(|r| r.get(0)).collect();
@@ -1589,10 +1639,11 @@ async fn team_in(client: &impl GenericClient, me: &Me, spaces: &[In]) -> Result<
     for r in client
         .query(
             "SELECT n.id, n.kind, n.space_id, s.name, n.task_id, t.title, a.id, a.name, a.picture, n.created, n.read_at IS NOT NULL, t.project_id
-             FROM notification n LEFT JOIN space s ON s.id = n.space_id LEFT JOIN task t ON t.id = n.task_id
+             FROM notification n LEFT JOIN space s ON s.id = n.space_id LEFT JOIN task t ON t.id = n.task_id AND t.space_id = ANY($2)
              LEFT JOIN account a ON a.id = n.by_account
              WHERE n.account_id = $1 ORDER BY n.created DESC LIMIT 50",
-            &[&me.id],
+            // A task that has left the reader's spaces is named by nothing.
+            &[&me.id, &ids],
         )
         .await?
     {
@@ -2035,5 +2086,141 @@ mod tests {
         db.delete_workspace(&geart, space).await.unwrap();
         round(&phone, &db, &geart).await;
         assert!(titles(&phone).is_empty());
+    }
+
+    // From the review of PR #50: each of these failed before its fix.
+
+    #[tokio::test]
+    async fn the_bell_never_names_a_task_that_has_left_one_s_spaces() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let space = hop(&db, &julius, &geart).await;
+        let mac = device();
+        let p = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Shared") });
+            c.assign.push(Assign { task_id: p + 1, account_id: geart.id.clone(), on: true });
+        });
+        round(&mac, &db, &julius).await;
+        db.move_project(&julius, p, julius.personal).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        db.sync(&julius, Change { tasks: vec![Task { project_id: Some(p), ..task(p + 1, "Julius private secret") }], ..Default::default() }).await.unwrap();
+        let bell = db.team(&geart).await.unwrap();
+        assert!(!bell["notifications"].to_string().contains("private secret"), "{}", bell["notifications"]);
+        assert!(!bell["notifications"].to_string().contains(&p.to_string()), "the project is named too");
+    }
+
+    #[tokio::test]
+    async fn a_subtask_moved_with_its_task_goes_into_the_task_s_new_project() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let space = hop(&db, &julius, &geart).await;
+        let mac = device();
+        let p = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: p, name: "Mine".into(), color: 3, space_id: None });
+            c.projects.push(Project { id: p + 1, name: "Hop".into(), color: 3, space_id: Some(space) });
+            c.tasks.push(Task { project_id: Some(p), ..task(p + 2, "Parent") });
+            c.tasks.push(Task { project_id: Some(p), parent_id: Some(p + 2), ..task(p + 3, "Child") });
+        });
+        round(&mac, &db, &julius).await;
+        // Only the task is sent with its new project, as the window does.
+        db.sync(&julius, Change { tasks: vec![Task { project_id: Some(p + 1), ..task(p + 2, "Parent") }], ..Default::default() }).await.unwrap();
+        let child = db.state(&geart, TODAY).await.unwrap().tasks.into_iter().find(|t| t.id == p + 3).unwrap();
+        assert_eq!((child.space_id, child.project_id), (Some(space), Some(p + 1)));
+    }
+
+    #[tokio::test]
+    async fn an_account_made_again_is_synced_from_the_start_on_a_device_that_knew_the_old_one() {
+        let db = testing::db().await;
+        let julius = db.me("1001", "julius@hop.dev", "J", "").await.unwrap();
+        let mac = device();
+        for i in 0..5 {
+            let id = next(&mac);
+            change(&mac, |c| c.tasks.push(task(id, &format!("t{i}"))));
+            round(&mac, &db, &julius).await;
+        }
+        db.delete_account(&julius).await.unwrap();
+        let julius = db.me("1001", "julius@hop.dev", "J", "").await.unwrap();
+        db.sync(&julius, Change { tasks: vec![task(fresh_id(), "Made on the web after")], ..Default::default() }).await.unwrap();
+        round(&mac, &db, &julius).await;
+        assert!(titles(&mac).contains(&"Made on the web after".to_string()), "{:?}", titles(&mac));
+    }
+
+    #[tokio::test]
+    async fn a_row_that_left_one_space_arrives_in_the_next_even_after_its_tombstone() {
+        let mac = device();
+        let id = 5_000_000_000_123i64;
+        let r1: Reply = serde_json::from_value(json!({ "upto": 0, "rows": { "tasks": [{ "id": id, "title": "Moved", "spaceId": 11, "changed": 100 }] },
+            "spaces": [{ "space": 11, "at": 1 }, { "space": 77, "at": 0 }] })).unwrap();
+        mac.inbox(&r1, 0).unwrap();
+        // The old space's tombstone in one round, the row in its new space the next.
+        let r2: Reply = serde_json::from_value(json!({ "upto": 0, "rows": { "gone": [{ "kind": "task", "id": id, "changed": 200, "space": 11 }] },
+            "spaces": [{ "space": 11, "at": 2 }, { "space": 77, "at": 0 }] })).unwrap();
+        mac.inbox(&r2, 0).unwrap();
+        let r3: Reply = serde_json::from_value(json!({ "upto": 0, "rows": { "tasks": [{ "id": id, "title": "Moved", "spaceId": 77, "changed": 200 }] },
+            "spaces": [{ "space": 11, "at": 2 }, { "space": 77, "at": 1 }] })).unwrap();
+        mac.inbox(&r3, 0).unwrap();
+        assert_eq!(titles(&mac), vec!["Moved"]);
+    }
+
+    #[tokio::test]
+    async fn a_member_cannot_pull_a_workspace_task_into_their_own_space() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let space = hop(&db, &julius, &geart).await;
+        let (mac, phone) = (device(), device());
+        let p = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Hop's") });
+        });
+        round(&mac, &db, &julius).await;
+        round(&phone, &db, &geart).await;
+        // Geart puts it under a project of his own.
+        let mine = next(&phone);
+        change(&phone, |c| {
+            c.projects.push(Project { id: mine, name: "Geart's".into(), color: 1, space_id: None });
+            c.tasks.push(Task { project_id: Some(mine), ..task(p + 1, "Hop's, renamed") });
+        });
+        round(&phone, &db, &geart).await;
+        // It stays in Hop, renamed, and Geart's device is told where it is.
+        round(&mac, &db, &julius).await;
+        let t = mac.state(TODAY).unwrap().tasks.into_iter().find(|t| t.id == p + 1).unwrap();
+        assert_eq!((t.title.as_str(), t.project_id, t.space_id), ("Hop's, renamed", Some(p), Some(space)));
+        round(&phone, &db, &geart).await;
+        let t = phone.state(TODAY).unwrap().tasks.into_iter().find(|t| t.id == p + 1).unwrap();
+        assert_eq!(t.project_id, Some(p), "the sender kept its own version");
+        // The owner may.
+        change(&mac, |c| c.tasks.push(Task { project_id: None, ..task(p + 1, "Hop's, renamed") }));
+        let own = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: own, name: "Julius's".into(), color: 1, space_id: None });
+            c.tasks.push(Task { project_id: Some(own), ..task(p + 1, "Hop's, renamed") });
+        });
+        round(&mac, &db, &julius).await;
+        round(&phone, &db, &geart).await;
+        assert!(titles(&phone).iter().all(|t| !t.starts_with("Hop's")));
+    }
+
+    #[tokio::test]
+    async fn rows_a_device_made_learn_their_space_so_leaving_drops_them() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let space = hop(&db, &julius, &geart).await;
+        let (mac, phone) = (device(), device());
+        let p = next(&mac);
+        change(&mac, |c| c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) }));
+        round(&mac, &db, &julius).await;
+        round(&phone, &db, &geart).await;
+        // Geart adds a task to Hop's project on his phone: it has no space there yet.
+        let t = next(&phone);
+        change(&phone, |c| c.tasks.push(Task { project_id: Some(p), ..task(t, "Geart's in Hop") }));
+        round(&phone, &db, &geart).await;
+        round(&phone, &db, &geart).await;
+        db.leave(&geart, space).await.unwrap();
+        round(&phone, &db, &geart).await;
+        assert!(titles(&phone).is_empty(), "{:?}", titles(&phone));
     }
 }
