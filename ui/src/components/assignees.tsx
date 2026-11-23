@@ -33,9 +33,10 @@ export function TaskFaces({ task, ring }: { task: Task; ring?: string }) {
 
 // The workspace's name on a task, in All, where tasks of every space are listed together.
 export function WorkspaceTag({ task }: { task: Task }) {
-  const { scope } = useApp()
+  const { scope, ui } = useApp()
   const { space } = useTaskPeople(task)
-  if (scope !== 'all' || !space) return null
+  // Only where lists are mixed: a project's own page is all one space.
+  if (scope !== 'all' || !space || ui.view.kind === 'project') return null
   return <span className="rounded-sm bg-secondary px-1.5 text-[11px] leading-[18px] font-medium text-muted-foreground">{space.name}</span>
 }
 

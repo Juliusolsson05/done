@@ -82,15 +82,14 @@ function AccountPane() {
     <Pane title="Account">
       {/* Your Google picture, as the people in your workspaces see it. */}
       <div className="flex items-center gap-3">
-        <Avatar who={{ id: account.email, name: account.name, email: account.email, picture: account.picture }} size="lg" />
+        <Avatar who={{ id: account.id ?? account.email, name: account.name, email: account.email, picture: account.picture }} size="lg" />
         <div className="flex min-w-0 flex-col">
           <span className="truncate font-medium">{account.name || account.email}</span>
           {account.name && <span className="truncate text-sm text-muted-foreground">{account.email}</span>}
         </div>
       </div>
       <p className="text-muted-foreground">
-        Signed in as {account.name ? `${account.name} (${account.email})` : account.email}.
-        {!account.picture && ' Your Google account has no picture, so your initials stand in for it. Add one in your Google account and sign in again to use it here.'}
+        {account.picture ? 'Signed in with Google.' : 'Signed in with Google. Your Google account has no picture, so your initials stand in for it; add one there and sign in again to use it here.'}
         {isDesktop && ' Your tasks stay on this device too and sync every few seconds when there is a connection. Signing out keeps them here.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
