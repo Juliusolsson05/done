@@ -35,6 +35,9 @@ pub struct Config {
     /// workspaces on a laptop. Only ever on with DONE_DEV_SIGNIN=1 and an
     /// address on this machine; see `dev`.
     pub dev: bool,
+    /// Where the live notes service is (`done-server collab`), for windows to
+    /// connect to: DONE_COLLAB_URL. Without it notes are not written live.
+    pub collab_url: Option<String>,
 }
 
 fn need(name: &str) -> String {
@@ -62,8 +65,10 @@ impl Config {
             eprintln!("DONE_DEV_SIGNIN is only for a server on this machine (DONE_PUBLIC_URL http://127.0.0.1:…).");
             std::process::exit(2);
         }
+        let collab_url = std::env::var("DONE_COLLAB_URL").ok().map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| !u.is_empty());
         Self {
             dev,
+            collab_url,
             public_url,
             client_id: need("DONE_GOOGLE_CLIENT_ID"),
             client_secret: need("DONE_GOOGLE_CLIENT_SECRET"),
@@ -150,14 +155,14 @@ fn session_in(jar: &SignedCookieJar) -> Option<Session> {
 // A text signed with the server's key, to hand to an app and be handed back.
 // The cookie crate's own signing, so there is one way of signing here and it
 // is the one the session cookie has.
-fn seal(key: &Key, text: String) -> String {
+pub(crate) fn seal(key: &Key, text: String) -> String {
     let mut jar = cookie::CookieJar::new();
     jar.signed_mut(key).add(Cookie::new("sealed", text));
     jar.get("sealed").expect("just added").value().to_string()
 }
 
 /// The text, if it was signed with this server's key and has not been changed.
-fn unseal(key: &Key, sealed: &str) -> Option<String> {
+pub(crate) fn unseal(key: &Key, sealed: &str) -> Option<String> {
     let mut jar = cookie::CookieJar::new();
     jar.add_original(Cookie::new("sealed", sealed.to_string()));
     jar.signed(key).get("sealed").map(|c| c.value().to_string())

@@ -394,7 +394,9 @@ export default function App() {
       // its buttons, not for pausing the timer behind it.
       const typing =
         event.target instanceof Element &&
-        event.target.closest('input, textarea, select, [role="combobox"], [role="listbox"], [role="menu"], [role="dialog"]')
+        // A note being written is an editable region, not a field: N, Q
+        // and the digits there are words, not shortcuts.
+        event.target.closest('input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="menu"], [role="dialog"]')
       if (typing || menuOpen.current || event.metaKey || event.ctrlKey || event.altKey) return
       if (event.key === 'q' || event.key === 'n') {
         event.preventDefault()
@@ -442,7 +444,7 @@ export default function App() {
     const element = event.target as Element
     // In a text field the browser's own menu (paste, spelling) is the useful
     // one, so the click is kept from reaching ours.
-    if (element.closest('input, textarea')) return event.stopPropagation()
+    if (element.closest('input, textarea, [contenteditable="true"]')) return event.stopPropagation()
     // A right-click on the menu itself does nothing.
     if (element.closest('[role="menu"]')) {
       event.preventDefault()
