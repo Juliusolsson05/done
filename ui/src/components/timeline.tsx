@@ -16,25 +16,36 @@ import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
-import { DAY_PX, packLanes, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
+import { DAY_PX, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
 import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
 import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { cn } from '@/lib/utils'
 
-// Measures a title, to know how wide its pill is.
-let ruler: CanvasRenderingContext2D | null = null
+// Measures a title, to know how wide its pill is: in a hidden element set
+// exactly as the pill's title is, so the font is the one drawn. Remembered.
+let ruler: HTMLSpanElement | null = null
+const measured = new Map<string, number>()
 function textWidth(text: string): number {
-  ruler ??= document.createElement('canvas').getContext('2d')
-  if (!ruler) return text.length * 7
-  ruler.font = `500 12px ${getComputedStyle(document.body).fontFamily}`
-  // A little over, so a title is never cut by rounding.
-  return ruler.measureText(text).width * 1.04 + 2
+  const known = measured.get(text)
+  if (known !== undefined) return known
+  if (!ruler) {
+    ruler = document.createElement('span')
+    ruler.className = 'text-xs font-medium whitespace-pre'
+    ruler.setAttribute('aria-hidden', 'true')
+    ruler.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0'
+    document.body.appendChild(ruler)
+  }
+  ruler.textContent = text
+  const width = Math.ceil(ruler.getBoundingClientRect().width) + 1
+  measured.set(text, width)
+  return width
 }
 // A pill: check, title (cut past this width), and room either side.
+// A pill: as wide as its title up to MAX_LABEL, where the title is cut (the
+// whole of it shows on hover); one line, so every line of the chart is the same height.
 const MAX_LABEL = 220
-// A pill: check, priority, title (cut past MAX_LABEL), faces, and padding.
-const pillWidth = (task: Task) =>
-  Math.min(textWidth(task.title), MAX_LABEL) + 36 + (task.assignees?.length ? 8 + Math.min(task.assignees.length, 3) * 14 : 0)
+const extra = (task: Task) => 46 + (task.assignees?.length ? 16 + Math.min(task.assignees.length, 3) * 16 : 0)
+const pillWidth = (task: Task) => Math.min(textWidth(task.title), MAX_LABEL) + extra(task)
 
 // The zoom is a habit of the person, so it is remembered on this device.
 const ZOOM_KEY = 'done-timeline-zoom'
@@ -44,6 +55,15 @@ function storedZoom(): Zoom {
     return z === 'month' || z === 'quarter' ? z : 'week'
   } catch {
     return 'week'
+  }
+}
+// Grouped into a row per project, or all tasks on one timeline (the default).
+const GROUP_KEY = 'done-timeline-by-project'
+function storedGrouping(): boolean {
+  try {
+    return localStorage.getItem(GROUP_KEY) === 'yes'
+  } catch {
+    return false
   }
 }
 const PANEL_KEY = 'done-timeline-unscheduled'
@@ -72,6 +92,17 @@ export function Timeline() {
   const label = useRef<HTMLDivElement>(null)
   const [zoom, setZoomState] = useState<Zoom>(storedZoom)
   const [panel, setPanelState] = useState(storedPanel)
+  const [byProject, setByProjectState] = useState(storedGrouping)
+  const setByProject = (next: boolean) => {
+    setByProjectState(next)
+    try {
+      localStorage.setItem(GROUP_KEY, next ? 'yes' : 'no')
+    } catch {
+      // Private windows may refuse storage; the choice still applies for now.
+    }
+  }
+  // The column of project names, only when grouped by project.
+  const side = byProject ? 'w-52 max-md:w-32' : 'w-0 overflow-hidden border-r-0 p-0'
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const [drag, setDrag] = useState<Drag | null>(null)
   const [dropDay, setDropDay] = useState<Day | null>(null)
@@ -233,8 +264,8 @@ export function Timeline() {
   })
   const header = (
     <div className="sticky top-0 z-40 flex border-b bg-background">
-      <div ref={label} className="sticky left-0 z-50 flex w-52 shrink-0 items-end border-r bg-background px-3 pb-1.5 text-xs font-medium text-faint max-md:w-32">
-        Projects
+      <div ref={label} className={cn('sticky left-0 z-50 flex shrink-0 items-end border-r bg-background px-3 pb-1.5 text-xs font-medium text-faint', side)}>
+        {byProject && 'Projects'}
       </div>
       <div className="relative h-12 shrink-0" style={{ width }}>
         {months.map((m) => (
@@ -289,14 +320,32 @@ export function Timeline() {
         onMove={bar.move}
         onUp={(e) => bar.up(e, task)}
         onCancel={bar.cancel}
+        showProject={!byProject}
       />
     )
   }
 
-  const rows = groups.map((group) => {
+  // One task to a row, earliest first.
+  const oneEach = (items: Placed[]) => [...items].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.task.id - b.task.id).map((p) => [p])
+  // The rows of tasks.
+  const laneRows = (lanes: Placed[][]) =>
+    lanes.map((lane, i) => (
+      <div key={i} className="relative flex h-8">
+        <div className={cn('sticky left-0 z-30 shrink-0 border-r bg-background', side)} />
+        <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
+          {lane.map(item)}
+        </div>
+      </div>
+    ))
+  const placedAll = (tasks: Task[]) => tasks.map((t) => placed(t, Math.ceil(pillWidth(t) / px))).filter((p): p is Placed => p !== null)
+
+  const rows = !byProject
+    ? // One timeline for everything, packed by date; each task says its project.
+      [<div key="all" className="pt-1 pb-2">{laneRows(oneEach(placedAll(groups.flatMap((g) => g.tasks))))}</div>]
+    : groups.map((group) => {
     const key = String(group.id ?? 'inbox')
-    const items = group.tasks.map((t) => placed(t, Math.ceil(pillWidth(t) / px))).filter((p): p is Placed => p !== null)
-    const lanes = packLanes(items)
+    const items = placedAll(group.tasks)
+    const lanes = oneEach(items)
     const isFolded = folded.has(key)
     return (
       <div key={key} className="border-b border-border/60">
@@ -317,15 +366,7 @@ export function Timeline() {
           </div>
         </div>
         {/* Its tasks, in as few lines as fit them. */}
-        {!isFolded &&
-          lanes.map((lane, i) => (
-            <div key={i} className="relative flex h-8">
-              <div className="sticky left-0 z-30 w-52 shrink-0 border-r bg-background max-md:w-32" />
-              <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
-                {lane.map(item)}
-              </div>
-            </div>
-          ))}
+        {!isFolded && laneRows(lanes)}
       </div>
     )
   })
@@ -347,6 +388,15 @@ export function Timeline() {
             </button>
           ))}
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-pressed={byProject}
+          onClick={() => setByProject(!byProject)}
+          className={cn('text-muted-foreground', byProject && 'bg-primary/10 text-foreground hover:bg-primary/15')}
+        >
+          Group by project
+        </Button>
         <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
         <FilterButton />
         <Button
@@ -371,7 +421,7 @@ export function Timeline() {
             <div className="relative w-max min-w-full">
               {header}
               <div className="relative">
-                <div className="absolute inset-y-0 left-52 max-md:left-32">
+                <div className={cn('absolute inset-y-0', byProject ? 'left-52 max-md:left-32' : 'left-0')}>
                   {columns}
                   {dropDay && <div className="absolute inset-y-0 bg-primary/10" style={{ left: x(dropDay), width: px }} />}
                 </div>
@@ -441,6 +491,7 @@ function TimelineItem({
   onMove,
   onUp,
   onCancel,
+  showProject,
 }: {
   task: Task
   left: number
@@ -451,6 +502,7 @@ function TimelineItem({
   onMove: (e: PointerEvent<HTMLDivElement>) => void
   onUp: (e: PointerEvent<HTMLDivElement>) => void
   onCancel: () => void
+  showProject: boolean
 }) {
   const { data, noticed } = useApp()
   const [leaving, finish] = useFinish(task.id)
@@ -475,6 +527,8 @@ function TimelineItem({
       <span data-check className="flex">
         <TaskCheck task={task} checked={leaving} onChange={finish} className="size-3.5" />
       </span>
+      {/* On one timeline for everything, which project it is in. */}
+      {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
       <span className="pointer-events-none min-w-0 flex-1 truncate">{task.title}</span>
       <span className="pointer-events-none shrink-0">
         <TaskFaces task={task} ring="ring-background" />
