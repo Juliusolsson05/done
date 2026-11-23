@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
+import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
 import { canSignIn, deleteAccount, isDesktop, restart, signIn, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
@@ -109,12 +110,17 @@ function AccountPane() {
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
+  // A workspace's page opens in place of the settings, with a way back.
+  const [space, setSpace] = useState<number | null>(null)
   const path = info.mcpCommand
+  if (space !== null) return <WorkspacePage id={space} onBack={() => setSpace(null)} />
   return (
     <div className="max-w-3xl">
       <ViewHeader title="Settings" />
       <div className="flex flex-col gap-8">
         <AccountPane />
+
+        <WorkspacesPane onOpen={setSpace} />
 
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
