@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
 import {
   CalendarDaysIcon,
   CircleCheckIcon,
@@ -6,6 +6,8 @@ import {
   ChartGanttIcon,
   ClipboardListIcon,
   Columns3Icon,
+  FolderIcon,
+  FolderPlusIcon,
   InboxIcon,
   PlusIcon,
   NotebookPenIcon,
@@ -27,10 +29,14 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Countdown } from '@/components/focus-view'
+import { NameField } from '@/components/note-folders'
 import { ProjectDot } from '@/components/marks'
 import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
@@ -38,6 +44,8 @@ import { restart } from '@/lib/backend'
 import { play } from '@/lib/sounds'
 import { TODAY } from '@/lib/days'
 import { addProject, counts, type View } from '@/lib/tasks'
+import { getFolderPanel, getNamingFolder, nameFolder, NEW_FOLDER, subscribeFolderPanel } from '@/lib/note-folder-panel'
+import { sameFolder } from '@/lib/notes'
 import { cn } from '@/lib/utils'
 
 type BuiltIn = Exclude<View['kind'], 'project'>
@@ -64,6 +72,67 @@ function NewProject() {
     <SidebarMenuItem>
       <SidebarInput ref={inputRef} placeholder="Project name" aria-label="Project name" {...field} />
     </SidebarMenuItem>
+  )
+}
+
+// The note folders, under Notes while the Notes page is open: the sidebar
+// says where you are, the list beside it what is there, and the right the
+// note itself. Right-click a folder to rename or delete it.
+function NoteFolders() {
+  const panel = useSyncExternalStore(subscribeFolderPanel, getFolderPanel)
+  const naming = useSyncExternalStore(subscribeFolderPanel, getNamingFolder)
+  if (!panel) return null
+  const row = (folder: string | null, name: string, count: number) => {
+    const active = folder === null ? panel.selected === null : panel.selected !== null && sameFolder(panel.selected, folder)
+    if (folder !== null && naming !== null && sameFolder(naming, folder))
+      return (
+        <SidebarMenuSubItem key={name}>
+          <NameField
+            initial={folder}
+            label="Folder name"
+            onDone={(to) => {
+              nameFolder(null)
+              if (to !== null) panel.rename(folder, to)
+            }}
+          />
+        </SidebarMenuSubItem>
+      )
+    return (
+      <SidebarMenuSubItem key={name}>
+        <SidebarMenuSubButton asChild isActive={active}>
+          <button type="button" data-note-folder={folder ?? ''} onClick={() => panel.select(folder)} className="w-full">
+            <FolderIcon className="text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-left">{name}</span>
+            <span className="ml-auto shrink-0 text-xs text-faint tabular-nums">{count}</span>
+          </button>
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+    )
+  }
+  return (
+    <SidebarMenuSub aria-label="Note folders">
+      {row(null, 'All notes', panel.total)}
+      {panel.folders.map((f) => row(f.name, f.name, f.count))}
+      <SidebarMenuSubItem>
+        {naming === NEW_FOLDER ? (
+          <NameField
+            initial=""
+            label="New folder name"
+            onDone={(name) => {
+              nameFolder(null)
+              if (name !== null) panel.create(name)
+            }}
+          />
+        ) : (
+          <SidebarMenuSubButton asChild>
+            <button type="button" onClick={() => nameFolder(NEW_FOLDER)} className="w-full text-muted-foreground">
+              <FolderPlusIcon className="text-muted-foreground" />
+              <span>New folder</span>
+            </button>
+          </SidebarMenuSubButton>
+        )}
+      </SidebarMenuSubItem>
+    </SidebarMenuSub>
   )
 }
 
@@ -119,6 +188,7 @@ export function AppSidebar() {
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
             {nav('notes', 'Notes', NotebookPenIcon)}
+            {ui.view.kind === 'notes' && <NoteFolders />}
           </SidebarMenu>
         </SidebarGroup>
         <SidebarGroup>

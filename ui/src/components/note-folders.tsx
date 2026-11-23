@@ -6,12 +6,11 @@ import { ChevronRightIcon, FolderIcon, FolderPlusIcon, NotebookIcon } from 'luci
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useFocus } from '@/hooks/use-focus'
-import { sameFolder, type Folder } from '@/lib/notes'
-import { cn } from '@/lib/utils'
+import type { Folder } from '@/lib/notes'
 
 // A folder name typed in place: kept on Enter or when the field is left,
 // dropped on Escape.
-function NameField({ initial, label, onDone }: { initial: string; label: string; onDone: (name: string | null) => void }) {
+export function NameField({ initial, label, onDone }: { initial: string; label: string; onDone: (name: string | null) => void }) {
   const ref = useFocus(true)
   const [value, setValue] = useState(initial)
   // Enter blurs the field, and the blur would keep the name a second time.
@@ -47,89 +46,52 @@ function NameField({ initial, label, onDone }: { initial: string; label: string;
 export interface FolderNavProps {
   folders: Folder[]
   total: number
-  // The folder chosen; null is All notes.
-  selected: string | null
   onSelect(folder: string | null): void
-  // Each takes the name as typed; the page cleans and checks it.
+  // Takes the name as typed; the page cleans and checks it.
   onCreate(name: string): void
-  onRename(from: string, to: string): void
-  onDelete(name: string): void
-  // A phone: big rows that lead on to the list.
-  large?: boolean
 }
 
-export function FolderNav({ folders, total, selected, onSelect, onCreate, onRename, onDelete, large = false }: FolderNavProps) {
-  // 'new' while a new folder is being named, or the folder being renamed.
-  const [editing, setEditing] = useState<string | null>(null)
+// On a phone: the folders as a screen of their own, big rows that lead on to
+// a folder's notes. A folder is renamed or deleted from its own list. (On a
+// wide screen the folders are in the sidebar instead.)
+export function FolderNav({ folders, total, onSelect, onCreate }: FolderNavProps) {
+  const [naming, setNaming] = useState(false)
 
   const row = (folder: string | null, name: string, count: number) => {
-    const chosen = !large && (folder === null ? selected === null : selected !== null && sameFolder(selected, folder))
     const Icon = folder === null ? NotebookIcon : FolderIcon
     return (
       <Button
+        key={name}
         variant="ghost"
         onClick={() => onSelect(folder)}
-        aria-current={chosen ? 'true' : undefined}
-        className={cn(
-          'h-auto w-full justify-start gap-2 px-3 font-normal',
-          large ? 'py-3 text-base' : 'py-1.5',
-          chosen && 'bg-primary/10 hover:bg-primary/10',
-        )}
+        className="h-auto w-full justify-start gap-2 px-3 py-3 text-base font-normal"
       >
-        <Icon className={cn('shrink-0', large ? 'size-5 text-primary' : 'text-muted-foreground')} />
+        <Icon className="size-5 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate text-left">{name}</span>
         <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-        {large && <ChevronRightIcon className="text-faint" />}
+        <ChevronRightIcon className="text-faint" />
       </Button>
     )
   }
 
   return (
     <nav aria-label="Folders" className="flex flex-col gap-0.5">
-      {!large && <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">Folders</h2>}
       {row(null, 'All notes', total)}
-      {folders.map((folder) => (
-        <div key={folder.name}>
-          {editing === folder.name ? (
-            <NameField
-              initial={folder.name}
-              label="Folder name"
-              onDone={(name) => {
-                setEditing(null)
-                if (name !== null) onRename(folder.name, name)
-              }}
-            />
-          ) : (
-            row(folder.name, folder.name, folder.count)
-          )}
-          {/* The chosen folder's own actions sit right under it. */}
-          {!large && selected !== null && sameFolder(selected, folder.name) && editing !== folder.name && (
-            // Short words: the column is narrow, and the folder above says what they act on.
-            <div className="flex flex-wrap gap-0.5 pb-1 pl-6">
-              <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setEditing(folder.name)}>
-                Rename
-              </Button>
-              <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(folder.name)}>
-                Delete
-              </Button>
-            </div>
-          )}
-        </div>
-      ))}
-      {editing === 'new' ? (
+      {folders.map((folder) => row(folder.name, folder.name, folder.count))}
+      {naming ? (
         <NameField
           initial=""
           label="New folder name"
           onDone={(name) => {
-            setEditing(null)
+            setNaming(false)
             if (name !== null) onCreate(name)
           }}
         />
       ) : (
         <Button
           variant="ghost"
-          onClick={() => setEditing('new')}
-          className={cn('h-auto w-full justify-start gap-2 px-3 font-normal text-muted-foreground', large ? 'py-3 text-base text-primary' : 'py-1.5')}
+          onClick={() => setNaming(true)}
+          className="h-auto w-full justify-start gap-2 px-3 py-3 text-base font-normal text-primary"
         >
           <FolderPlusIcon />
           New folder

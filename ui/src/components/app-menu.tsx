@@ -13,6 +13,7 @@ import { colorStyle, useApp } from '@/lib/app-context'
 import { addDays, nextWeekday, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { expand } from '@/lib/expanded'
+import { getFolderPanel, nameFolder, NEW_FOLDER } from '@/lib/note-folder-panel'
 import { COLOR_COUNT, colorIndex, isSubtask, patchProject, patchTask, setGoal, type Task, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -20,6 +21,8 @@ export type MenuTarget =
   | { kind: 'task'; id: number }
   | { kind: 'project'; id: number }
   | { kind: 'view'; view: Exclude<View['kind'], 'project'> }
+  // A note folder in the sidebar; null is All notes.
+  | { kind: 'folder'; name: string | null }
   | { kind: 'space' }
 
 // Works out what a right-click landed on from the data attributes the rows,
@@ -27,6 +30,8 @@ export type MenuTarget =
 export function menuTargetOf(element: Element): MenuTarget {
   const task = element.closest<HTMLElement>('[data-task]')
   if (task) return { kind: 'task', id: Number(task.dataset.task) }
+  const folder = element.closest<HTMLElement>('[data-note-folder]')
+  if (folder) return { kind: 'folder', name: folder.dataset.noteFolder || null }
   const project = element.closest<HTMLElement>('[data-project]')
   if (project) return { kind: 'project', id: Number(project.dataset.project) }
   const view = element.closest<HTMLElement>('[data-view]')
@@ -183,6 +188,28 @@ function ProjectMenu({ id }: { id: number }) {
   )
 }
 
+// A note folder's menu, acting through the Notes page (only open then).
+function FolderMenu({ name }: { name: string | null }) {
+  const panel = getFolderPanel()
+  if (!panel) return null
+  return (
+    <>
+      <ContextMenuItem onSelect={() => panel.select(name)}>Open</ContextMenuItem>
+      <ContextMenuItem onSelect={() => panel.newNote(name)}>New note here</ContextMenuItem>
+      {name !== null && (
+        <>
+          <ContextMenuItem onSelect={() => nameFolder(name)}>Rename</ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={() => panel.remove(name)}>
+            Delete folder
+          </ContextMenuItem>
+        </>
+      )}
+      {name === null && <ContextMenuItem onSelect={() => nameFolder(NEW_FOLDER)}>New folder</ContextMenuItem>}
+    </>
+  )
+}
+
 export function AppMenu({ target }: { target: MenuTarget }) {
   const { data, openView, add, newProject } = useApp()
   if (target.kind === 'task') {
@@ -190,6 +217,7 @@ export function AppMenu({ target }: { target: MenuTarget }) {
     if (task) return <TaskMenu task={task} />
   }
   if (target.kind === 'project') return <ProjectMenu id={target.id} />
+  if (target.kind === 'folder') return <FolderMenu name={target.name} />
   if (target.kind === 'view') {
     const open = () => openView({ kind: target.view })
     return (

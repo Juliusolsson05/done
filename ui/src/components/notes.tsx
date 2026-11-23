@@ -16,6 +16,7 @@ import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { SYNCED } from '@/lib/store'
 import { FolderActions, FolderNav } from '@/components/note-folders'
+import { publishFolderPanel } from '@/lib/note-folder-panel'
 import {
   byNewest,
   cleanFolder,
@@ -202,12 +203,12 @@ export function Notes() {
   }
 
   // A new note goes in the folder that is open, so it is listed where it was made.
-  const create = async (projectId: number | null = null) => {
+  const create = async (projectId: number | null = null, into: string | null = folder) => {
     setReading(false)
     leave(openId)
     try {
       await queue.current
-      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder })
+      const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
       setOpenId(note.id)
@@ -403,18 +404,26 @@ export function Notes() {
     </Button>
   )
 
-  const folderNav = (large: boolean) => (
-    <FolderNav
-      folders={folders}
-      total={notes?.length ?? 0}
-      selected={folder}
-      onSelect={choose}
-      onCreate={createFolder}
-      onRename={renameFolder}
-      onDelete={deleteFolder}
-      large={large}
-    />
-  )
+  // The sidebar lists the folders under Notes while this page is open, and
+  // acts on them through these. Published after every render, so it always
+  // has the current folders and the current page's functions.
+  useEffect(() => {
+    publishFolderPanel({
+      folders,
+      total: notes?.length ?? 0,
+      selected: folder,
+      select: choose,
+      create: createFolder,
+      rename: renameFolder,
+      remove: deleteFolder,
+      newNote: (into) => {
+        setFolder(into)
+        void create(null, into)
+      },
+    })
+  })
+  useEffect(() => () => publishFolderPanel(null), [])
+
 
   // On a phone: the open note alone, with a way back to the list.
   if (isMobile && current) {
@@ -449,7 +458,7 @@ export function Notes() {
             New note
           </HeaderButton>
         </ViewHeader>
-        {folderNav(true)}
+        <FolderNav folders={folders} total={notes?.length ?? 0} onSelect={choose} onCreate={createFolder} />
       </div>
     )
   }
@@ -463,7 +472,8 @@ export function Notes() {
           Folders
         </Button>
       )}
-      <ViewHeader title={isMobile ? (folder ?? 'All notes') : 'Notes'}>
+      {/* On a wide screen the folders are in the sidebar, so the title says which one is open. */}
+      <ViewHeader title={folder ?? (isMobile ? 'All notes' : 'Notes')}>
         {isMobile && folder !== null && <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />}
         {!isMobile && folderPicker}
         {!isMobile && projectPicker}
@@ -487,7 +497,6 @@ export function Notes() {
       {notes && (
         <div className="flex items-start gap-6">
           {/* The folders and the list stay where they are while a long note scrolls past them. */}
-          {!isMobile && !reading && <div className="w-44 shrink-0 overflow-x-hidden md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:overflow-y-auto">{folderNav(false)}</div>}
           <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
             {notes.length > 0 && (
               <div className="relative mb-4">
