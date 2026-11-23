@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atQuery, insertMention, mentionDetails, mentionId, mentionLink, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
+import { atQuery, insertMention, mentionDetails, mentionId, mentionLink, mentionRanges, mentionsIn, suggestions, withoutMentionSyntax } from '@/lib/mentions'
 import type { Task } from '@/lib/tasks'
 
 const task = (id: number, title: string, fields: Partial<Task> = {}): Task => ({
@@ -152,5 +152,15 @@ describe("a mentioned task's card", () => {
       { kind: 'project', id: null, name: 'Inbox' },
       { kind: 'when', text: 'Done today', late: false },
     ])
+  })
+
+  it('finds each mention whole, for the editor to treat as one piece', () => {
+    const text = 'Do [Call the bank](done:task/12) and [Pay \\[rent\\]](done:task/34) today'
+    const ranges = mentionRanges(text)
+    expect(ranges.map((r) => [r.id, r.label, text.slice(r.from, r.to)])).toEqual([
+      [12, 'Call the bank', '[Call the bank](done:task/12)'],
+      [34, 'Pay [rent]', '[Pay \\[rent\\]](done:task/34)'],
+    ])
+    expect(mentionRanges('[a web link](https://x.com)')).toEqual([])
   })
 })

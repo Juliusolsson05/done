@@ -52,6 +52,17 @@ export function mentionsIn(text: string): number[] {
   return ids
 }
 
+// Where each mention is in the text, for the editor to draw it as one piece
+// ("@Call the bank") that the cursor steps over and Backspace takes whole:
+// half a link would leave text that is neither a mention nor readable.
+export function mentionRanges(text: string): { from: number; to: number; id: number; label: string }[] {
+  const ranges: { from: number; to: number; id: number; label: string }[] = []
+  for (const match of text.matchAll(MENTION)) {
+    ranges.push({ from: match.index, to: match.index + match[0].length, id: Number(match[2]), label: unescapeLabel(match[1]) })
+  }
+  return ranges
+}
+
 // A mention read as its words alone, for a note's title in the list: "Call
 // the bank" rather than the link around it.
 export const withoutMentionSyntax = (text: string): string => text.replace(MENTION, (_, label: string) => unescapeLabel(label))

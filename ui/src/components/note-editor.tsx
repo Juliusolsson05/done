@@ -18,6 +18,7 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import * as Y from 'yjs'
 import type { Awareness } from 'y-protocols/awareness'
 import { MentionPicker } from '@/components/task-mention'
+import { mentionAtoms } from '@/components/mention-atoms'
 import { openLink } from '@/lib/backend'
 import { linkAt } from '@/lib/links'
 import { atQuery, insertMention, suggestions } from '@/lib/mentions'
@@ -169,6 +170,8 @@ export function NoteEditor({
         keymap.of([...defaultKeymap, indentWithTab]),
         markdown(),
         syntaxHighlighting(QUIET),
+        // A task mention is one piece, shown as @ and its title.
+        mentionAtoms,
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': 'Note', 'data-findable': 'true', spellcheck: 'true', autocapitalize: 'sentences' }),
         placeholderText('Write it down… Type @ to add a task.'),
