@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { ProjectDot } from '@/components/marks'
 import { useApp } from '@/lib/app-context'
 import { loadFinished } from '@/lib/backend'
-import { shortDay } from '@/lib/days'
+import { shortDay, TODAY } from '@/lib/days'
 import type { Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -75,7 +75,10 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
       >
         {task.title}
       </button>
-      {task.due && !done && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{shortDay(task.due)}</span>}
+      {/* Late is red, as everywhere else in the app. */}
+      {task.due && !done && (
+        <span className={cn('shrink-0 text-xs tabular-nums', task.due < TODAY ? 'text-overdue' : 'text-muted-foreground')}>{shortDay(task.due)}</span>
+      )}
       {task.projectId != null && <ProjectDot id={task.projectId} className="size-1.5 shrink-0" />}
     </span>
   )
