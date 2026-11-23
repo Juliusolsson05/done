@@ -283,6 +283,7 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/auth/google/callback", get(auth::back))
         .route("/auth/signout", post(auth::sign_out))
         .route("/auth/exchange", post(auth::exchange))
+        .route("/auth/dev", get(auth::dev))
         .route("/api/me", get(auth::me))
         .route("/api/account/delete", post(auth::delete_account))
         .route("/api/state", get(cloud_state))
@@ -413,8 +414,11 @@ async fn main() {
         // PORT is what a container host sets. Every address, not only this
         // machine: here, being reachable is the point, and the session is the guard.
         let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.expect("the port is free");
-        println!("done is running in cloud mode on port {port}");
+        // With the laptop sign-in on, this machine only: anyone who could
+        // reach it could sign in as anyone.
+        let address = if state.config.dev { "127.0.0.1" } else { "0.0.0.0" };
+        let listener = tokio::net::TcpListener::bind((address, port)).await.expect("the port is free");
+        println!("done is running in cloud mode on {address}:{port}");
         axum::serve(listener, cloud(state)).await.expect("serve");
         return;
     }
@@ -484,6 +488,7 @@ mod tests {
             key: axum_extra::extract::cookie::Key::from(&[key; 64]),
             authorize_url: format!("{google_at}/authorize"),
             token_url: format!("{google_at}/token"),
+            dev: false,
         };
         let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
@@ -562,6 +567,9 @@ mod tests {
         ] {
             assert_eq!(b.post(path, body).await.status(), 401, "{path}");
         }
+        // The laptop-only sign-in does not exist on a real server.
+        assert_eq!(b.get("/auth/dev?as=geart").await.status(), 404);
+        assert_eq!(b.get("/api/state?today=2026-11-18").await.status(), 401);
         // The one call that answers: it is how the interface learns to show the sign-in screen.
         let me: serde_json::Value = b.get("/api/me").await.json().await.unwrap();
         assert_eq!(me, serde_json::json!({ "mode": "cloud", "account": null }));

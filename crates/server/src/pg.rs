@@ -1364,14 +1364,14 @@ impl Db {
             return Ok(false);
         }
         let space = personal;
-        for (Stamped { row: p, changed }, seq) in file.rows.projects.iter().zip(&file.seqs.projects) {
+        for (Stamped { row: p, changed }, seq) in file.rows.projects.iter().zip(file.seqs.projects.iter().map(|s| (*s).max(1))) {
             tx.execute(
                 "INSERT INTO project (id, space_id, name, color, changed, seq) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING",
-                &[&p.id, &space, &p.name, &p.color, changed, seq],
+                &[&p.id, &space, &p.name, &p.color, changed, &seq],
             )
             .await?;
         }
-        for (Stamped { row: t, changed }, seq) in file.rows.tasks.iter().zip(&file.seqs.tasks) {
+        for (Stamped { row: t, changed }, seq) in file.rows.tasks.iter().zip(file.seqs.tasks.iter().map(|s| (*s).max(1))) {
             let done_day = if t.done { t.done_day.clone() } else { None };
             let goal_by = t.goal_day.as_ref().map(|_| id.to_string());
             tx.execute(
@@ -1393,34 +1393,36 @@ impl Db {
                     &t.parent_id,
                     &id,
                     changed,
-                    seq,
+                    &seq,
                 ],
             )
             .await?;
         }
-        for (Stamped { row: n, changed }, seq) in file.rows.notes.iter().zip(&file.seqs.notes) {
+        for (Stamped { row: n, changed }, seq) in file.rows.notes.iter().zip(file.seqs.notes.iter().map(|s| (*s).max(1))) {
             tx.execute(
                 "INSERT INTO note (id, space_id, text, updated_at, project_id, folder, changed, seq) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING",
-                &[&n.id, &space, &n.text, &n.updated_at, &n.project_id, &n.folder.clone().flatten(), changed, seq],
+                &[&n.id, &space, &n.text, &n.updated_at, &n.project_id, &n.folder.clone().flatten(), changed, &seq],
             )
             .await?;
         }
-        for (Stamped { row: e, changed }, seq) in file.rows.entries.iter().zip(&file.seqs.entries) {
+        for (Stamped { row: e, changed }, seq) in file.rows.entries.iter().zip(file.seqs.entries.iter().map(|s| (*s).max(1))) {
             tx.execute(
                 "INSERT INTO entry (id, space_id, task_id, title, day, started_at, ended_at, planned_ms, focused_ms, changed, seq)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT DO NOTHING",
-                &[&e.id, &space, &e.task_id, &e.title, &e.day, &e.started_at, &e.ended_at, &e.planned_ms, &e.focused_ms, changed, seq],
+                &[&e.id, &space, &e.task_id, &e.title, &e.day, &e.started_at, &e.ended_at, &e.planned_ms, &e.focused_ms, changed, &seq],
             )
             .await?;
         }
-        for (g, seq) in file.rows.gone.iter().zip(&file.seqs.gone) {
+        for (g, seq) in file.rows.gone.iter().zip(file.seqs.gone.iter().map(|s| (*s).max(1))) {
             tx.execute(
                 "INSERT INTO tombstone (kind, id, space_id, changed, seq) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-                &[&g.kind, &g.id, &space, &g.changed, seq],
+                &[&g.kind, &g.id, &space, &g.changed, &seq],
             )
             .await?;
         }
-        tx.execute("UPDATE space SET next_seq = greatest(next_seq, $2) WHERE id = $1", &[&space, &file.seq]).await?;
+        // A row a device took in from elsewhere has 0 in its own file; it
+        // is given 1, so a device that starts from scratch is sent it.
+        tx.execute("UPDATE space SET next_seq = greatest(next_seq, $2, 1) WHERE id = $1", &[&space, &file.seq]).await?;
         tx.commit().await?;
         Ok(true)
     }

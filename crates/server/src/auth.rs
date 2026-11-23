@@ -31,6 +31,10 @@ pub struct Config {
     /// Google's two addresses. Settings so that a test can stand in for Google.
     pub authorize_url: String,
     pub token_url: String,
+    /// Signing in without Google, as one of a few made-up people, for trying
+    /// workspaces on a laptop. Only ever on with DONE_DEV_SIGNIN=1 and an
+    /// address on this machine; see `dev`.
+    pub dev: bool,
 }
 
 fn need(name: &str) -> String {
@@ -51,8 +55,16 @@ impl Config {
             eprintln!("DONE_SESSION_KEY must be at least 64 characters of random text.");
             std::process::exit(2);
         }
+        let public_url = need("DONE_PUBLIC_URL").trim_end_matches('/').to_string();
+        let local = public_url.starts_with("http://127.0.0.1:") || public_url.starts_with("http://localhost:");
+        let dev = std::env::var("DONE_DEV_SIGNIN").as_deref() == Ok("1");
+        if dev && !local {
+            eprintln!("DONE_DEV_SIGNIN is only for a server on this machine (DONE_PUBLIC_URL http://127.0.0.1:…).");
+            std::process::exit(2);
+        }
         Self {
-            public_url: need("DONE_PUBLIC_URL").trim_end_matches('/').to_string(),
+            dev,
+            public_url,
             client_id: need("DONE_GOOGLE_CLIENT_ID"),
             client_secret: need("DONE_GOOGLE_CLIENT_SECRET"),
             key: Key::from(key.as_bytes()),
@@ -446,4 +458,27 @@ pub async fn delete_account(State(cloud): State<Cloud>, me: Me, jar: SignedCooki
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "The account could not be deleted. Nothing was removed." }))).into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct DevAs {
+    #[serde(default)]
+    r#as: String,
+}
+
+/// For a server on a laptop only (see `Config::dev`): signs the browser in
+/// as one of three made-up people, so two windows can be two people in one
+/// workspace. Answers "not found" everywhere else.
+pub async fn dev(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Query<DevAs>) -> Response {
+    if !cloud.config.dev {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (sub, email, name) = match q.r#as.as_str() {
+        "geart" => ("dev2", "geart@hop.dev", "Geart"),
+        "ana" => ("dev3", "ana@studio.se", "Ana Lind"),
+        _ => ("dev1", "julius@hop.dev", "Julius Olsson"),
+    };
+    let session = Session { sub: sub.into(), email: email.into(), name: name.into(), picture: String::new(), exp: now() + THIRTY_DAYS };
+    let value = serde_json::to_string(&session).expect("plain text fields");
+    (jar.add(cookie(SESSION, value, &cloud.config, THIRTY_DAYS)), Redirect::to("/")).into_response()
 }

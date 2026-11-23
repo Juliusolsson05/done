@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   CalendarDaysIcon,
   CircleCheckIcon,
@@ -14,8 +14,11 @@ import {
   SearchIcon,
   SlidersHorizontalIcon,
   TimerIcon,
+  UserCheckIcon,
   type LucideIcon,
 } from 'lucide-react'
+import { Bell } from '@/components/notifications'
+import { SpaceMark, SpacePicker } from '@/components/space-picker'
 import {
   Sidebar,
   SidebarContent,
@@ -43,7 +46,8 @@ import { useApp } from '@/lib/app-context'
 import { restart } from '@/lib/backend'
 import { play } from '@/lib/sounds'
 import { TODAY } from '@/lib/days'
-import { addProject, counts, type View } from '@/lib/tasks'
+import { addProject, counts, openTasks, type Project, type View } from '@/lib/tasks'
+import { isPersonal, workspaces } from '@/lib/team'
 import { getFolderPanel, getNamingFolder, nameFolder, NEW_FOLDER, subscribeFolderPanel } from '@/lib/note-folder-panel'
 import { sameFolder } from '@/lib/notes'
 import { cn } from '@/lib/utils'
@@ -57,7 +61,8 @@ const ROW = 'group-has-data-[sidebar=menu-badge]/menu-item:pr-8 max-md:h-11 max-
 // The count sits in the middle of the taller row.
 const BADGE = 'max-md:top-3 max-md:text-sm'
 
-function NewProject() {
+// `space`: the workspace the new project is made in; null for your own.
+function NewProject({ space }: { space: number | null }) {
   const { data, update, openView, closeAll } = useApp()
   const inputRef = useFocus()
   const field = useNameField((value) => {
@@ -65,7 +70,7 @@ function NewProject() {
     if (!name) return closeAll()
     const id = data.nextId
     play('add')
-    update((d) => addProject(d, name))
+    update((d) => addProject(d, name, space))
     openView({ kind: 'project', id })
   })
   return (
@@ -137,9 +142,17 @@ function NoteFolders() {
 }
 
 export function AppSidebar() {
-  const { data, info, ui, focus, openView: open, newProject, search } = useApp()
+  const { info, ui, focus, openView: open, newProject, search, shown, keep, team, me, scope } = useApp()
   const { setOpenMobile } = useSidebar()
-  const count = counts(data.tasks, TODAY)
+  const count = counts(shown.tasks, TODAY, keep)
+  const spaces = workspaces(team)
+  const mine = me ? openTasks(shown.tasks).filter((t) => (t.assignees ?? []).includes(me)).length : 0
+  // Where "+" makes a project: the group it is on.
+  const [newIn, setNewIn] = useState<number | null>(null)
+  const startProject = (space: number | null) => {
+    setNewIn(space)
+    newProject()
+  }
   // On a phone the sidebar lies over the page, so choosing a view puts it away.
   const openView = (view: View) => {
     setOpenMobile(false)
@@ -162,6 +175,37 @@ export function AppSidebar() {
       </SidebarMenuButton>
       {badge ? <SidebarMenuBadge className={cn('font-normal', BADGE, late ? 'text-overdue' : 'text-faint')}>{badge}</SidebarMenuBadge> : null}
     </SidebarMenuItem>
+  )
+
+  // A render function, not a component: a component made here would be new
+  // on every render, and a project name being typed in it would be lost.
+  const projectGroup = (key: string, label: string, projects: Project[], space: number | null, mark?: ReactNode) => (
+      <SidebarGroup key={key}>
+        <SidebarGroupLabel className="gap-1.5 text-faint">
+          {mark}
+          {label}
+        </SidebarGroupLabel>
+        <SidebarGroupAction aria-label={`New project in ${label}`} title="New project" onClick={() => startProject(space)}>
+          <PlusIcon />
+        </SidebarGroupAction>
+        <SidebarMenu>
+          {projects.map((project) => (
+            <SidebarMenuItem key={project.id}>
+              <SidebarMenuButton
+                data-project={project.id}
+                isActive={ui.view.kind === 'project' && ui.view.id === project.id}
+                onClick={() => openView({ kind: 'project', id: project.id })}
+                className={ROW}
+              >
+                <ProjectDot id={project.id} className="mx-1" />
+                <span>{project.name}</span>
+              </SidebarMenuButton>
+              {count.project(project.id) > 0 && <SidebarMenuBadge className={cn('font-normal text-faint', BADGE)}>{count.project(project.id)}</SidebarMenuBadge>}
+            </SidebarMenuItem>
+          ))}
+          {ui.newProject && newIn === space && <NewProject space={space} />}
+        </SidebarMenu>
+      </SidebarGroup>
   )
 
   return (
@@ -197,38 +241,29 @@ export function AppSidebar() {
               </SidebarMenuButton>
               <SidebarMenuBadge className={cn('font-normal text-faint max-md:hidden', BADGE)}>⌘K</SidebarMenuBadge>
             </SidebarMenuItem>
-            {nav('inbox', 'Inbox', InboxIcon, count.inbox)}
+            {/* The Inbox is your own. In a workspace it shows only what lost its project there. */}
+            {(typeof scope !== 'number' || count.inbox > 0) && nav('inbox', 'Inbox', InboxIcon, count.inbox)}
             {nav('today', 'Today', CalendarIcon, count.today, count.late)}
             {nav('upcoming', 'Upcoming', CalendarDaysIcon, count.upcoming)}
+            {spaces.length > 0 && scope !== 'personal' && nav('mine', 'Assigned to me', UserCheckIcon, mine)}
             {nav('timeline', 'Timeline', ChartGanttIcon)}
             {nav('board', 'Board', Columns3Icon)}
             {nav('notes', 'Notes', NotebookPenIcon)}
             {ui.view.kind === 'notes' && <NoteFolders />}
           </SidebarMenu>
         </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-faint">Projects</SidebarGroupLabel>
-          <SidebarGroupAction aria-label="New project" title="New project" onClick={newProject}>
-            <PlusIcon />
-          </SidebarGroupAction>
-          <SidebarMenu>
-            {data.projects.map((project) => (
-              <SidebarMenuItem key={project.id}>
-                <SidebarMenuButton
-                  data-project={project.id}
-                  isActive={ui.view.kind === 'project' && ui.view.id === project.id}
-                  onClick={() => openView({ kind: 'project', id: project.id })}
-                  className={ROW}
-                >
-                  <ProjectDot id={project.id} className="mx-1" />
-                  <span>{project.name}</span>
-                </SidebarMenuButton>
-                {count.project(project.id) > 0 && <SidebarMenuBadge className={cn('font-normal text-faint', BADGE)}>{count.project(project.id)}</SidebarMenuBadge>}
-              </SidebarMenuItem>
-            ))}
-            {ui.newProject && <NewProject />}
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* In All with workspaces, the projects are grouped by where they
+            live: your own first, then each workspace. Elsewhere, one list. */}
+        {scope === 'all' && spaces.length > 0 ? (
+          <>
+            {projectGroup('own', 'Your projects', shown.projects.filter((p) => isPersonal(p.spaceId, team)), null)}
+            {spaces.map((w) =>
+              projectGroup(String(w.id), w.name, shown.projects.filter((p) => p.spaceId === w.id), w.id, <SpaceMark space={w} className="size-3.5 rounded-[3px] text-[8px]" />),
+            )}
+          </>
+        ) : (
+          projectGroup('projects', 'Projects', shown.projects, typeof scope === 'number' ? scope : null)
+        )}
         {/* Less used, so below the projects: focusing, the record of it, and what is done. */}
         <SidebarGroup>
           <SidebarGroupLabel className="text-faint">Extras</SidebarGroupLabel>
@@ -248,8 +283,10 @@ export function AppSidebar() {
               </SidebarMenuButton>
             </SidebarMenuItem>
           )}
+          <Bell />
           {nav('settings', 'Settings', SlidersHorizontalIcon)}
         </SidebarMenu>
+        <SpacePicker />
       </SidebarFooter>
     </Sidebar>
   )
