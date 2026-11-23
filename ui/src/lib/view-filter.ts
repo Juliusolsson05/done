@@ -47,10 +47,13 @@ function inWindow(task: Task, when: When, today: Day): boolean {
       return due !== null && due < today && !task.done
     case 'today':
       return due === today
+    // A task counts if any of its days fall in the window: a Timeline bar
+    // drawn across this week shows under "this week" even if it is due later.
+    // Late tasks (due before today) are their own choice.
     case 'week':
-      return due !== null && due >= today && due <= addDays(today, 6)
+      return due !== null && due >= today && (task.start ?? due) <= addDays(today, 6)
     case 'fortnight':
-      return due !== null && due >= today && due <= addDays(today, 13)
+      return due !== null && due >= today && (task.start ?? due) <= addDays(today, 13)
   }
 }
 
@@ -101,9 +104,11 @@ export function cleanFilter(stored: unknown, projects: Pick<Project, 'id'>[]): V
   const known = new Set(projects.map((p) => p.id))
   const list = (v: unknown) => (Array.isArray(v) ? v : [])
   return {
-    projects: list(value.projects).filter((p): p is number | null => p === null || (typeof p === 'number' && known.has(p))),
-    priorities: list(value.priorities).filter((p): p is number => typeof p === 'number' && p >= 1 && p <= 4),
-    when: typeof value.when === 'string' && value.when in WHEN_NAMES ? (value.when as When) : 'any',
+    // Once each: a repeated id would show as two chips and count twice.
+    projects: [...new Set(list(value.projects).filter((p): p is number | null => p === null || (typeof p === 'number' && known.has(p))))],
+    priorities: [...new Set(list(value.priorities).filter((p): p is number => typeof p === 'number' && p >= 1 && p <= 4))],
+    // Its own keys only: "toString" is "in" any object, and would hide everything.
+    when: typeof value.when === 'string' && Object.hasOwn(WHEN_NAMES, value.when) ? (value.when as When) : 'any',
     words: typeof value.words === 'string' ? value.words : '',
   }
 }
@@ -111,3 +116,13 @@ export function cleanFilter(stored: unknown, projects: Pick<Project, 'id'>[]): V
 // The one project chosen, if exactly one (not the Inbox) is: where a task
 // added on a filtered page should go, so it does not vanish from it.
 export const onlyProject = (filter: ViewFilter): number | null => (filter.projects.length === 1 ? filter.projects[0] : null)
+
+// What a task added on a filtered page gets, so it shows on the page it was
+// added on: the one project, the one priority, and a due date inside the
+// time window (today for today, this week and the next two weeks). Words and
+// "late" cannot be given to a new task; a line that sets its own date or
+// priority wins over these.
+export function addDefaults(filter: ViewFilter, today: Day): { projectId: number | null; priority: number | null; due: Day | null } {
+  const due = filter.when === 'today' || filter.when === 'week' || filter.when === 'fortnight' ? today : null
+  return { projectId: onlyProject(filter), priority: filter.priorities.length === 1 ? filter.priorities[0] : null, due }
+}

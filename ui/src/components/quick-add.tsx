@@ -16,7 +16,7 @@ import { projectSpan, readLine, suggestProjects, takeSuggestion } from '@/lib/qu
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
-import { onlyProject } from '@/lib/view-filter'
+import { addDefaults } from '@/lib/view-filter'
 import { useViewFilter } from '@/components/view-filter'
 
 function QuickAdd() {
@@ -35,10 +35,13 @@ function QuickAdd() {
     data.projects,
     TODAY,
     {
-      due: ui.view.kind === 'today' || ui.asGoal ? TODAY : null,
-      // On a filtered Board or Timeline, the one project chosen, so the new
-      // task does not vanish from the page it was added on.
-      projectId: ui.view.kind === 'project' ? ui.view.id : ui.view.kind === 'board' || ui.view.kind === 'timeline' ? onlyProject(filter) : null,
+      due: null,
+      projectId: null,
+      // On a filtered Board or Timeline: what keeps the new task on the page
+      // it was added on (the one project, the one priority, a date in the window).
+      ...(ui.view.kind === 'board' || ui.view.kind === 'timeline' ? addDefaults(filter, TODAY) : {}),
+      ...(ui.view.kind === 'today' || ui.asGoal ? { due: TODAY } : {}),
+      ...(ui.view.kind === 'project' ? { projectId: ui.view.id } : {}),
     },
     dismissed,
   )

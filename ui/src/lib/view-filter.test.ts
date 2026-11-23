@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cleanFilter, filterChips, isFiltering, matchesFilter, NO_FILTER, onlyProject, type ViewFilter } from '@/lib/view-filter'
+import { addDefaults, cleanFilter, filterChips, isFiltering, matchesFilter, NO_FILTER, onlyProject, type ViewFilter } from '@/lib/view-filter'
 import type { Task } from '@/lib/tasks'
 
 const today = '2026-11-23'
@@ -56,6 +56,11 @@ describe('the Board and Timeline filter', () => {
     expect(ids(tasks, filter({ when: 'none' }))).toEqual([5])
   })
 
+  it('counts a task spanning into the window, as its Timeline bar does', () => {
+    const spanning = [task(7, { start: '2026-11-25', due: '2026-12-03' }), task(8, { start: '2026-12-01', due: '2026-12-03' })]
+    expect(ids(spanning, filter({ when: 'week' }))).toEqual([7])
+  })
+
   it('finds every word in the title or the notes, case ignored', () => {
     expect(ids(tasks, filter({ words: 'ANGEL' }))).toEqual([1, 4])
     expect(ids(tasks, filter({ words: 'angel anton' }))).toEqual([4])
@@ -80,6 +85,9 @@ describe('a stored filter', () => {
       when: 'any',
       words: '',
     })
+    // A name every object has must not pass for a time window.
+    expect(cleanFilter({ when: 'toString' }, projects).when).toBe('any')
+    expect(cleanFilter({ projects: [HOP, HOP], priorities: [1, 1] }, projects)).toMatchObject({ projects: [HOP], priorities: [1] })
     expect(cleanFilter('junk', projects)).toEqual(NO_FILTER)
     expect(cleanFilter(null, projects)).toEqual(NO_FILTER)
   })
@@ -91,5 +99,11 @@ describe('quick add on a filtered page', () => {
     expect(onlyProject(filter({ projects: [HOP, CATCH_UP] }))).toBeNull()
     expect(onlyProject(filter({ projects: [null] }))).toBeNull()
     expect(onlyProject(NO_FILTER)).toBeNull()
+  })
+
+  it('gives a new task what keeps it on the page: the priority and a date in the window', () => {
+    expect(addDefaults(filter({ projects: [HOP], priorities: [1], when: 'today' }), today)).toEqual({ projectId: HOP, priority: 1, due: today })
+    expect(addDefaults(filter({ priorities: [1, 2], when: 'week' }), today)).toEqual({ projectId: null, priority: null, due: today })
+    expect(addDefaults(filter({ when: 'none' }), today)).toEqual({ projectId: null, priority: null, due: null })
   })
 })

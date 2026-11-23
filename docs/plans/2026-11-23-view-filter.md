@@ -52,3 +52,8 @@ Not verified here: the iPhone itself.
 ## Out of scope
 
 Filtering by person (tasks have no assignee), saved named filters, filtering the list views (Today, Upcoming).
+
+## Execution notes
+
+- Review round (one reviewer, read-only, both branches): nothing serious. Fixed here: quick add on a filtered page now also takes the one priority and a date inside the time window, so a task added under "Due today" or "P1" stays on the page (before, only the project was carried); "this week" and "next two weeks" count a task whose span reaches into the window, as its Timeline bar does; a stored `when` is checked against the filter's own choices (`"toString"` passed `in` and hid everything); repeated ids in a stored filter are dropped.
+- Ruling (replaces the earlier one on windows): a task counts for "this week" or "next two weeks" if any of its days, start to due, fall in the window; late tasks stay their own choice — cost if wrong: a long task shows under "this week" a while before it is due.
