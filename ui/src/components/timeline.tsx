@@ -1,51 +1,33 @@
-// Timeline: projects across time, as the tools made for it draw them (Linear,
-// Notion, Asana). One row per project with a bar for the time it spans; its
-// tasks packed underneath in as few lines as fit, one-day tasks as pills and
-// longer ones as bars; zoom by week, month or quarter; and the tasks with no
-// date in a panel beside it, to drag onto a day.
-import { useLayoutEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from 'react'
-import { ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon } from 'lucide-react'
-import { TaskFaces } from '@/components/assignees'
+// Timeline: tasks across time, as the tools made for it draw them (Linear,
+// Notion, Asana). Two panes in one scroller: on the left a column with a row
+// per task (its check, its title, who is on it) under foldable project
+// headers; on the right the days, with each task's bar on the same row as its
+// title. Titles are never drawn on the chart, so a short bar cannot push its
+// title under the next one, and the chart reads at any width. Zoom by week,
+// month or quarter; the tasks with no date beside it (or, on a narrow screen,
+// under it), to drag onto a day or open.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
+import { CheckIcon, ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { useTaskPeople } from '@/components/assignees'
+import { Avatars } from '@/components/avatars'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
+import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
 import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
-import { DAY_PX, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
-import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
+import { DAY_PX, placed, spanOf, type Placed, type Zoom } from '@/lib/timeline-layout'
+import { HOLD_MS, IDLE, press, released, type PressState } from '@/lib/timeline-press'
+import { initialLeft, LEAD, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
 import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { cn } from '@/lib/utils'
-
-// Measures a title, to know how wide its pill is: in a hidden element set
-// exactly as the pill's title is, so the font is the one drawn. Remembered.
-let ruler: HTMLSpanElement | null = null
-const measured = new Map<string, number>()
-function textWidth(text: string): number {
-  const known = measured.get(text)
-  if (known !== undefined) return known
-  if (!ruler) {
-    ruler = document.createElement('span')
-    ruler.className = 'text-xs font-medium whitespace-pre'
-    ruler.setAttribute('aria-hidden', 'true')
-    ruler.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0'
-    document.body.appendChild(ruler)
-  }
-  ruler.textContent = text
-  const width = Math.ceil(ruler.getBoundingClientRect().width) + 1
-  measured.set(text, width)
-  return width
-}
-// A pill: check, title (cut past this width), and room either side.
-// A pill: as wide as its title up to MAX_LABEL, where the title is cut (the
-// whole of it shows on hover); one line, so every line of the chart is the same height.
-const MAX_LABEL = 220
-const extra = (task: Task) => 46 + (task.assignees?.length ? 16 + Math.min(task.assignees.length, 3) * 16 : 0)
-const pillWidth = (task: Task) => Math.min(textWidth(task.title), MAX_LABEL) + extra(task)
 
 // The zoom is a habit of the person, so it is remembered on this device.
 const ZOOM_KEY = 'done-timeline-zoom'
@@ -75,24 +57,71 @@ function storedPanel(): boolean {
   }
 }
 
+// A finger or a pen rather than a mouse: decides what the help says. What a
+// press on a bar does is decided per press, by the pointer that made it, so
+// an iPad with a trackpad drags at once like the Mac.
+const COARSE = '(pointer: coarse)'
+function subscribeCoarse(changed: () => void) {
+  const query = window.matchMedia?.(COARSE)
+  query?.addEventListener('change', changed)
+  return () => query?.removeEventListener('change', changed)
+}
+const isCoarse = () => window.matchMedia?.(COARSE).matches ?? false
+function useCoarse(): boolean {
+  return useSyncExternalStore(subscribeCoarse, isCoarse, () => false)
+}
+
+// The width an element has, kept current: the Timeline lays itself out by
+// the room it is given, which the window's width does not tell (a sidebar
+// may be open beside it). Measured before the first paint.
+function useWidth(ref: RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(() => window.innerWidth)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setWidth(el.clientWidth)
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+  return width
+}
+
 interface Drag {
   id: number
   mode: DragMode
   x: number
   days: number
   length: number
+  // Lifted by a hold of a finger: drawn raised even before it moves.
+  held: boolean
 }
 
-// A dragged task from the Unscheduled panel carries its id under this type.
+// A dragged task from the No date list carries its id under this type.
 const UNSCHEDULED = 'application/x-done-task'
 
+// The bars are this far in from their days' edges, and never thinner than
+// this, so a one-day task at quarter zoom (6 px a day) can still be seen.
+const INSET = 2
+const LEAST_BAR = 10
+// Below this a bar has no grips: they would leave nothing to move it by.
+const GRIPS_FROM = 22
+
 export function Timeline() {
-  const { dragging, edit, update, shown: inScope, me } = useApp()
+  const { data, dragging, edit, update, shown: inScope, me } = useApp()
+  const isMobile = useIsMobile()
+  const coarse = useCoarse()
+  const root = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
-  const label = useRef<HTMLDivElement>(null)
+  const rootWidth = useWidth(root)
+  const layout = paneLayout(rootWidth)
+  const leftWidth = layout.left
   const [zoom, setZoomState] = useState<Zoom>(storedZoom)
   const [panel, setPanelState] = useState(storedPanel)
   const [byProject, setByProjectState] = useState(storedGrouping)
+  // The No date section under the chart, on narrow screens. Shut at first:
+  // the chart is what this view is for, and its count says what is there.
+  const [undatedOpen, setUndatedOpen] = useState(false)
   const setByProject = (next: boolean) => {
     setByProjectState(next)
     try {
@@ -101,8 +130,6 @@ export function Timeline() {
       // Private windows may refuse storage; the choice still applies for now.
     }
   }
-  // The column of project names, only when grouped by project.
-  const side = byProject ? 'w-52 max-md:w-32' : 'w-0 overflow-hidden border-r-0 p-0'
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const [drag, setDrag] = useState<Drag | null>(null)
   const [dropDay, setDropDay] = useState<Day | null>(null)
@@ -119,34 +146,45 @@ export function Timeline() {
 
   // The days drawn: a week before the earliest task to four weeks after the
   // latest, all at once, so the scrollbar shows the whole range.
-  const span = useMemo(() => spanFor(dated, TODAY), [dated.map((t) => `${t.start}|${t.due}`).join(',')])
+  const datesKey = dated.map((t) => `${t.start}|${t.due}`).join(',')
+  const span = useMemo(() => spanFor(dated, TODAY), [datesKey])
+  const earliest = useMemo(() => dated.reduce<Day | null>((first, t) => {
+    const day = (t.start ?? t.due)!
+    return !first || day < first ? day : first
+  }, null), [datesKey])
   const days = useMemo(() => Array.from({ length: span.days }, (_, i) => addDays(span.start, i)), [span.start, span.days])
   const width = span.days * px
   const x = (day: Day) => daysBetween(span.start, day) * px
 
+  // The part of the chart on screen, in days: the scroller less the titles
+  // column, which stays over the left of it.
   const view = () => {
     const el = scroller.current
     if (!el) return { left: 0, width: 0 }
-    return { left: el.scrollLeft / px, width: (el.clientWidth - (label.current?.offsetWidth ?? 0)) / px }
+    return { left: el.scrollLeft / px, width: Math.max(1, el.clientWidth - leftWidth) / px }
   }
   const [range, setRange] = useState<[Day, Day]>(() => onScreen(span, daysBetween(span.start, addDays(TODAY, -LEAD)), 30))
-  // Keeps the same day at the left edge when the range or the zoom changes.
+  // The day at the left edge, kept when the range, the zoom or the width
+  // changes; before the first scroll, where the view opens.
   const anchor = useRef<Day | null>(null)
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    el.scrollLeft = Math.max(0, daysBetween(span.start, anchor.current ?? addDays(TODAY, -LEAD))) * px
-    const { left, width } = view()
-    setRange(onScreen(span, left, width))
-    // Laid out anew whenever the range or the zoom changes.
+    const { width: viewDays } = view()
+    const left = anchor.current ? daysBetween(span.start, anchor.current) : initialLeft(span, TODAY, earliest, viewDays)
+    el.scrollLeft = Math.max(0, left) * px
+    const now = view()
+    setRange(onScreen(span, now.left, now.width))
+    // Laid out anew whenever the range, the zoom or the panes change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [span.start, span.days, px])
+  }, [span.start, span.days, px, rootWidth])
   const onScroll = () => {
     const { left, width } = view()
     anchor.current = addDays(span.start, Math.round(left))
     setRange(onScreen(span, left, width))
   }
-  const showDay = (day: Day) => scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - LEAD) * px, behavior: 'smooth' })
+  const showDay = (day: Day) =>
+    scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - LEAD) * px, behavior: 'smooth' })
   const setZoom = (next: Zoom) => {
     anchor.current = addDays(span.start, Math.round(view().left))
     setZoomState(next)
@@ -165,38 +203,88 @@ export function Timeline() {
     }
   }
 
-  // Dragging a pill or a bar: whole days, its start or its end.
+  // Pressing a bar: whole days, its start or its end. A mouse takes it at
+  // once; a finger has to hold it first (lib/timeline-press), or the press
+  // is a scroll and is left to the browser.
+  const pressing = useRef<{ state: PressState; timer: number; task: Task; mode: DragMode; el: HTMLElement; pointer: number }>(null)
   const daysMoved = (from: Drag, clientX: number) => {
     const moved = Math.round((clientX - from.x) / px)
     if (from.mode === 'end') return Math.max(moved, 1 - from.length)
     if (from.mode === 'start') return Math.min(moved, from.length - 1)
     return moved
   }
+  const take = (task: Task, mode: DragMode, x: number, held: boolean) => {
+    // A task with no due date has no bar to move; a tap still opens it.
+    if (!task.due) return
+    setDrag({ id: task.id, mode, x, days: 0, length: daysBetween(task.start ?? task.due, task.due) + 1, held })
+    dragging.current = true
+  }
   const stop = () => {
+    if (pressing.current) clearTimeout(pressing.current.timer)
+    pressing.current = null
     setDrag(null)
     dragging.current = false
   }
+  // A held bar is being dragged, not the chart: the finger's moves must not
+  // scroll. Only a listener that is not passive may say so, and on iOS only
+  // one on touchmove; pointer events alone cannot.
+  useEffect(() => {
+    const hold = (event: TouchEvent) => {
+      if (pressing.current?.state.kind === 'dragging') event.preventDefault()
+    }
+    window.addEventListener('touchmove', hold, { passive: false })
+    return () => window.removeEventListener('touchmove', hold)
+  }, [])
+  useEffect(() => () => {
+    if (pressing.current) clearTimeout(pressing.current.timer)
+  }, [])
   const bar = {
     down(event: PointerEvent<HTMLDivElement>, task: Task) {
-      if (event.button !== 0 || !task.due) return
-      if ((event.target as HTMLElement).closest('[data-check]')) return
+      if (event.button !== 0) return
       const grip = (event.target as HTMLElement).dataset.grip
       const mode: DragMode = grip === 'start' || grip === 'end' ? grip : 'move'
-      setDrag({ id: task.id, mode, x: event.clientX, days: 0, length: daysBetween(task.start ?? task.due, task.due) + 1 })
-      dragging.current = true
-      event.currentTarget.setPointerCapture(event.pointerId)
-      event.preventDefault()
+      const state = press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: event.pointerType })
+      const el = event.currentTarget
+      const now = { state, timer: 0, task, mode, el, pointer: event.pointerId }
+      pressing.current = now
+      if (state.kind === 'dragging') {
+        take(task, mode, event.clientX, false)
+        el.setPointerCapture(event.pointerId)
+        // No text selected under a mouse drag.
+        event.preventDefault()
+        return
+      }
+      now.timer = window.setTimeout(() => {
+        if (pressing.current !== now) return
+        now.state = press(now.state, { type: 'hold' })
+        if (now.state.kind !== 'dragging') return
+        take(task, mode, now.state.x, true)
+        feel({ impact: 'light' })
+        try {
+          el.setPointerCapture(now.pointer)
+        } catch {
+          // The finger has already gone; its release ends the press.
+        }
+      }, HOLD_MS)
     },
     move(event: PointerEvent<HTMLDivElement>) {
-      if (drag) setDrag({ ...drag, days: daysMoved(drag, event.clientX) })
+      const now = pressing.current
+      if (!now) return
+      now.state = press(now.state, { type: 'move', x: event.clientX, y: event.clientY })
+      if (now.state.kind === 'scrolling') clearTimeout(now.timer)
+      if (drag && now.state.kind === 'dragging') setDrag({ ...drag, days: daysMoved(drag, event.clientX) })
     },
     up(event: PointerEvent<HTMLDivElement>, task: Task) {
-      if (!drag) return
-      const moved = daysMoved(drag, event.clientX)
+      const now = pressing.current
+      if (!now) return
+      const moved = drag ? daysMoved(drag, event.clientX) : 0
+      const mode = drag?.mode ?? 'move'
+      const outcome = released(now.state, moved)
       stop()
-      if (moved === 0) return edit(task.id)
+      if (outcome === 'open') return edit(task.id)
+      if (outcome !== 'move') return
       play('drop')
-      update((d) => patchTask(d, task.id, dragBar(task, drag.mode, moved)), task.id)
+      update((d) => patchTask(d, task.id, dragBar(task, mode, moved)), task.id)
     },
     cancel: stop,
   }
@@ -222,6 +310,7 @@ export function Timeline() {
     play('drop')
     update((d) => patchTask(d, id, { start: null, due: day }), id)
   }
+  const dropTarget = { onDragOver, onDrop, onDragLeave: () => setDropDay(null) }
 
   const toggleFold = (key: string) =>
     setFolded((now) => {
@@ -231,10 +320,16 @@ export function Timeline() {
       return next
     })
 
+  // A row is a little taller under a finger, nearer the 44 points iOS asks for.
+  const rowHeight = coarse ? 'h-10' : 'h-9'
+  // The column of titles: it stays at the left while the days scroll under
+  // it, and is opaque so they pass beneath it.
+  const leftCell = 'sticky left-0 z-30 flex shrink-0 items-center border-r bg-background'
+
   // The day columns: weekends shaded where there is room to see them, the
   // first of each month marked, today in done's blue.
   const columns = (
-    <div className="pointer-events-none absolute inset-y-0" style={{ left: 0, width }}>
+    <div className="pointer-events-none absolute inset-y-0" style={{ left: leftWidth, width }}>
       {days.map((day, i) => {
         const date = toDate(day)
         const weekend = date.getDay() === 0 || date.getDay() === 6
@@ -254,6 +349,7 @@ export function Timeline() {
         )
       })}
       <div className="absolute inset-y-0 w-px bg-primary" style={{ left: x(TODAY) + px / 2 }} />
+      {dropDay && <div className="absolute inset-y-0 bg-primary/10" style={{ left: x(dropDay), width: px }} />}
     </div>
   )
 
@@ -264,12 +360,12 @@ export function Timeline() {
   })
   const header = (
     <div className="sticky top-0 z-40 flex border-b bg-background">
-      <div ref={label} className={cn('sticky left-0 z-50 flex shrink-0 items-end border-r bg-background px-3 pb-1.5 text-xs font-medium text-faint', side)}>
-        {byProject && 'Projects'}
+      <div className={cn(leftCell, 'z-50 items-end px-3 pb-1.5 text-xs font-medium text-faint')} style={{ width: leftWidth }}>
+        {byProject ? 'Projects' : 'Tasks'}
       </div>
       <div className="relative h-[60px] shrink-0" style={{ width }}>
         {months.map((m) => (
-          <div key={m.day} className="absolute top-1 text-xs font-semibold text-muted-foreground" style={{ left: m.left + 6 }}>
+          <div key={m.day} className="absolute top-1 text-xs font-semibold whitespace-nowrap text-muted-foreground" style={{ left: m.left + 6 }}>
             {toDate(m.day).toLocaleDateString('en-GB', { month: 'long', ...(toDate(m.day).getMonth() === 0 || m.left === 0 ? { year: 'numeric' } : {}) })}
           </div>
         ))}
@@ -295,7 +391,7 @@ export function Timeline() {
                   day === TODAY ? 'bg-primary font-semibold text-primary-foreground' : 'text-muted-foreground',
                 )}
               >
-                {zoom === 'week' ? date.getDate() : `${date.getDate()}`}
+                {date.getDate()}
               </span>
             </div>
           )
@@ -304,190 +400,306 @@ export function Timeline() {
     </div>
   )
 
-  // A task on the chart: a pill for a day, a bar for longer.
-  const item = ({ task, from }: Placed) => {
+  // A task's bar, as long as its days.
+  const barFor = ({ task }: Placed) => {
     const moved = drag?.id === task.id ? drag : null
-    const first = task.start ?? task.due ?? from
+    const first = (task.start ?? task.due)!
     const length = task.due ? daysBetween(first, task.due) + 1 : 1
-    let left = x(first) + 2
-    let barWidth = length * px - 4
+    let left = x(first) + INSET
+    let barWidth = length * px - INSET * 2
     if (moved && moved.mode !== 'end') left += moved.days * px
     if (moved?.mode === 'end') barWidth += moved.days * px
     if (moved?.mode === 'start') barWidth -= moved.days * px
     return (
-      <TimelineItem
-        key={task.id}
+      <TimelineBar
         task={task}
         left={left}
-        width={barWidth}
+        width={Math.max(barWidth, LEAST_BAR)}
         range={length > 1}
-        lifted={!!moved && moved.days !== 0}
+        lifted={!!moved && (moved.held || moved.days !== 0)}
         onDown={(e) => bar.down(e, task)}
         onMove={bar.move}
         onUp={(e) => bar.up(e, task)}
         onCancel={bar.cancel}
-        showProject={!byProject}
       />
     )
   }
 
-  // One task to a row, earliest first.
-  const oneEach = (items: Placed[]) => [...items].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.task.id - b.task.id).map((p) => [p])
-  // The rows of tasks.
-  const laneRows = (lanes: Placed[][]) =>
-    lanes.map((lane, i) => (
-      <div key={i} className="relative flex h-8">
-        <div className={cn('sticky left-0 z-30 shrink-0 border-r bg-background', side)} />
-        <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
-          {lane.map(item)}
-        </div>
-      </div>
-    ))
-  const placedAll = (tasks: Task[]) => tasks.map((t) => placed(t, Math.ceil(pillWidth(t) / px))).filter((p): p is Placed => p !== null)
-
-  const rows = !byProject
-    ? // One timeline for everything, packed by date; each task says its project.
-      [<div key="all" className="pt-1 pb-2">{laneRows(oneEach(placedAll(groups.flatMap((g) => g.tasks))))}</div>]
-    : groups.map((group) => {
-    const key = String(group.id ?? 'inbox')
-    const items = placedAll(group.tasks)
-    const lanes = oneEach(items)
-    const isFolded = folded.has(key)
-    return (
-      <div key={key} className="border-b border-border/60">
-        {/* The project: its name, and how many of its tasks are on the chart. */}
-        <div className="relative flex h-9">
-          <button
-            type="button"
-            onClick={() => toggleFold(key)}
-            aria-expanded={!isFolded}
-            className="sticky left-0 z-30 flex w-52 shrink-0 items-center gap-1.5 border-r bg-background px-2 text-left text-sm font-medium max-md:w-32"
-          >
-            <ChevronRightIcon className={cn('size-3.5 shrink-0 text-faint transition-transform', !isFolded && 'rotate-90')} />
-            {group.id !== undefined && <ProjectDot id={group.id} className="shrink-0" />}
-            <span className="min-w-0 flex-1 truncate">{group.name}</span>
-            <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{items.length}</span>
-          </button>
-          <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
+  // One task to a row, earliest first: its title on the left, its bar on the right.
+  const taskRows = (items: Placed[]) =>
+    [...items]
+      .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.task.id - b.task.id)
+      .map((p) => (
+        <div key={p.task.id} className={cn('flex', rowHeight)}>
+          <div className={cn(leftCell, 'px-2')} style={{ width: leftWidth }}>
+            <TitleCell task={p.task} showProject={!byProject} />
+          </div>
+          <div className="relative shrink-0" style={{ width }} {...dropTarget}>
+            {barFor(p)}
           </div>
         </div>
-        {/* Its tasks, in as few lines as fit them. */}
-        {!isFolded && laneRows(lanes)}
-      </div>
-    )
-  })
+      ))
+  const placedAll = (tasks: Task[]) => tasks.map((t) => placed(t, 1)).filter((p): p is Placed => p !== null)
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <ViewHeader title="Timeline" sub={`${shortDay(range[0])} to ${shortDay(range[1])}`}>
-        <div role="radiogroup" aria-label="Zoom" className="flex gap-0.5">
-          {(['week', 'month', 'quarter'] as Zoom[]).map((z) => (
-            <button
-              key={z}
-              type="button"
-              role="radio"
-              aria-checked={zoom === z}
-              onClick={() => setZoom(z)}
-              className={cn('h-8 rounded-md px-2.5 text-sm capitalize text-muted-foreground hover:bg-accent', zoom === z && 'bg-primary/10 text-foreground')}
-            >
-              {z}
-            </button>
+  const rows: ReactNode = !byProject
+    ? // One timeline for everything, in date order; each title says its project.
+      taskRows(placedAll(groups.flatMap((g) => g.tasks)))
+    : groups.map((group) => {
+        const key = String(group.id ?? 'inbox')
+        const items = placedAll(group.tasks)
+        // A project with nothing dated is only in No date.
+        if (!items.length) return null
+        const isFolded = folded.has(key)
+        const whole = spanOf(items)
+        return (
+          <div key={key} className="border-b border-border/60">
+            {/* The project: its name, how many of its tasks are on the chart, and the days they span. */}
+            <div className={cn('flex', rowHeight)}>
+              <button
+                type="button"
+                onClick={() => toggleFold(key)}
+                aria-expanded={!isFolded}
+                className={cn(leftCell, 'gap-1.5 px-2 text-left text-sm font-medium')}
+                style={{ width: leftWidth }}
+              >
+                <ChevronRightIcon className={cn('size-3.5 shrink-0 text-faint transition-transform', !isFolded && 'rotate-90')} />
+                {group.id !== undefined && <ProjectDot id={group.id} className="shrink-0" />}
+                <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{items.length}</span>
+              </button>
+              <div className="relative shrink-0" style={{ width }} {...dropTarget}>
+                {whole && (
+                  <div
+                    aria-hidden
+                    className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-project-edge"
+                    style={{ ...projectStyle(data.projects, group.id ?? null), left: x(whole.from) + INSET, width: Math.max((daysBetween(whole.from, whole.to) + 1) * px - INSET * 2, LEAST_BAR) }}
+                  />
+                )}
+              </div>
+            </div>
+            {!isFolded && taskRows(items)}
+          </div>
+        )
+      })
+
+  // The tasks with no date, by project: dragged onto a day with a mouse, or
+  // opened (a tap on a phone) to give them one in the task's own sheet.
+  const undatedList = (row: string) =>
+    groups.map((group) => {
+      const here = group.tasks.filter((t) => !t.due && !t.start)
+      if (!here.length) return null
+      return (
+        <div key={String(group.id ?? 'inbox')} className="mt-2">
+          <div className="flex items-center gap-1.5 px-2 pb-0.5 text-[11px] text-faint">
+            {group.id !== undefined && <ProjectDot id={group.id} />}
+            <span className="truncate">{group.name}</span>
+          </div>
+          {here.map((t) => (
+            <UndatedRow key={t.id} task={t} className={row} onDragEnd={() => setDropDay(null)} coarse={coarse} />
           ))}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-pressed={byProject}
-          onClick={() => setByProject(!byProject)}
-          className={cn('text-muted-foreground', byProject && 'bg-primary/10 text-foreground hover:bg-primary/15')}
+      )
+    })
+
+  // Under the chart on a narrow screen: a section that opens and shuts, in
+  // the column of titles, so the chart keeps the whole width.
+  const undatedSection = !layout.side && undated.length > 0 && (
+    <div className="border-t border-border">
+      <div className="flex">
+        <button
+          type="button"
+          aria-expanded={undatedOpen}
+          onClick={() => setUndatedOpen(!undatedOpen)}
+          className={cn(leftCell, rowHeight, 'gap-1.5 px-2 text-left text-sm font-medium')}
+          style={{ width: leftWidth }}
         >
-          Group by project
-        </Button>
-        <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
-        <FilterButton />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground max-md:hidden"
-          onClick={() => setPanel(!panel)}
-          aria-pressed={panel}
-          title={panel ? 'Hide tasks with no date' : 'Show tasks with no date'}
-        >
-          {panel ? <PanelRightCloseIcon /> : <PanelRightOpenIcon />}
-          {undated.length > 0 && <span className="tabular-nums">{undated.length}</span>}
-        </Button>
+          <ChevronRightIcon className={cn('size-3.5 shrink-0 text-faint transition-transform', undatedOpen && 'rotate-90')} />
+          <span className="min-w-0 flex-1 truncate">No date</span>
+          <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{undated.length}</span>
+        </button>
+        <div className="shrink-0" style={{ width }} />
+      </div>
+      {undatedOpen && (
+        <div className="flex">
+          <div className={cn(leftCell, 'block px-1 pb-2')} style={{ width: leftWidth }}>
+            {undatedList(rowHeight)}
+          </div>
+          <div className="shrink-0" style={{ width }} />
+        </div>
+      )}
+    </div>
+  )
+
+  const zoomChoices = (['week', 'month', 'quarter'] as Zoom[]).map((z) => ({ value: z, label: z[0].toUpperCase() + z.slice(1) }))
+  const controls = layout.compact ? (
+    <>
+      {/* Little room: zoom and grouping in one menu. */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="text-muted-foreground">
+            <SlidersHorizontalIcon />
+            View
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-52 p-1.5">
+          <Choices label="Zoom" choices={zoomChoices} value={zoom} onChange={setZoom} big={coarse} />
+          <div className="my-1.5 h-px bg-border" />
+          <Choices
+            label="Group by"
+            choices={[
+              { value: 'date', label: 'Date' },
+              { value: 'project', label: 'Project' },
+            ]}
+            value={byProject ? 'project' : 'date'}
+            onChange={(v) => setByProject(v === 'project')}
+            big={coarse}
+          />
+        </PopoverContent>
+      </Popover>
+      <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
+      <FilterButton />
+    </>
+  ) : (
+    <>
+      <div role="radiogroup" aria-label="Zoom" className="flex gap-0.5">
+        {zoomChoices.map((z) => (
+          <button
+            key={z.value}
+            type="button"
+            role="radio"
+            aria-checked={zoom === z.value}
+            onClick={() => setZoom(z.value)}
+            className={cn('h-8 rounded-md px-2.5 text-sm text-muted-foreground hover:bg-accent', zoom === z.value && 'bg-primary/10 text-foreground')}
+          >
+            {z.label}
+          </button>
+        ))}
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-pressed={byProject}
+        onClick={() => setByProject(!byProject)}
+        className={cn('text-muted-foreground', byProject && 'bg-primary/10 text-foreground hover:bg-primary/15')}
+      >
+        Group by project
+      </Button>
+      <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
+      <FilterButton />
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground"
+        onClick={() => setPanel(!panel)}
+        aria-pressed={panel}
+        title={panel ? 'Hide tasks with no date' : 'Show tasks with no date'}
+      >
+        {panel ? <PanelRightCloseIcon /> : <PanelRightOpenIcon />}
+        {undated.length > 0 && <span className="tabular-nums">{undated.length}</span>}
+      </Button>
+    </>
+  )
+
+  const help = coarse
+    ? `Hold a task and drag it to move it, or hold and drag its ends to change how long it takes. Tap a task to open it${byProject ? ', or a project’s name to fold its tasks away' : ''}.`
+    : `Drag a task to move it, or its ends to change how long it takes. Click a task to open it${byProject ? ', or the project’s name to fold its tasks away' : ''}.`
+
+  return (
+    <div
+      ref={root}
+      // Nothing in the Timeline may widen the page: the chart scrolls
+      // sideways inside its own box, and the page never does.
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip"
+      style={
+        isMobile
+          ? {
+              // A phone's page grows with what is in it and the window
+              // scrolls, so nothing above bounds this view; it is given the
+              // screen from below the navigation bar (the page's top padding)
+              // to the tab bar, and the chart scrolls inside it with its date
+              // header held at the top. The page's bottom padding is there to
+              // clear the tab bar and New task for lists; past the tab bar it
+              // is given back, or the window would still scroll by it. Not
+              // flexed: the page around it would otherwise stretch it again.
+              flex: 'none',
+              height: 'calc(100svh - env(safe-area-inset-top) - 2.75rem - 3.0625rem - env(safe-area-inset-bottom))',
+              marginBottom: 'calc(3.0625rem - 8rem)',
+            }
+          : undefined
+      }
+    >
+      <ViewHeader title="Timeline" sub={`${shortDay(range[0])} to ${shortDay(range[1])}`}>
+        {controls}
       </ViewHeader>
       <FilterBar shown={shown} total={total} />
+      {/* On a phone the help goes above the chart: below it, New task would sit on it. */}
+      {isMobile && <p className="mb-2 shrink-0 text-xs text-faint">{help}</p>}
 
       {isFiltering(filter) && shown === 0 ? (
         <NothingMatches />
       ) : (
-        <div className="flex min-h-0 flex-1">
-          <div ref={scroller} onScroll={onScroll} className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-x-contain border-t border-border">
-            <div className="relative w-max min-w-full">
+        // At least a few rows high, so a short landscape screen still shows a
+        // chart (the page scrolls instead); otherwise it takes what is left.
+        <div className="flex min-h-56 min-w-0 flex-1 border-y border-border">
+          <div ref={scroller} onScroll={onScroll} className="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+            <div className={cn('relative', isMobile && 'pb-20')} style={{ width: leftWidth + width }}>
               {header}
               <div className="relative">
-                <div className={cn('absolute inset-y-0', byProject ? 'left-52 max-md:left-32' : 'left-0')}>
-                  {columns}
-                  {dropDay && <div className="absolute inset-y-0 bg-primary/10" style={{ left: x(dropDay), width: px }} />}
-                </div>
+                {columns}
                 {rows}
               </div>
+              {undatedSection}
             </div>
           </div>
-          {panel && (
-            <aside aria-label="Tasks with no date" className="flex w-60 shrink-0 flex-col border-t border-l border-border max-md:hidden">
+          {layout.side && panel && (
+            <aside aria-label="Tasks with no date" className="flex w-60 shrink-0 flex-col border-l border-border">
               <div className="flex items-baseline gap-2 px-4 pt-3 pb-1">
                 <span className="text-xs font-medium text-faint">No date</span>
                 <span className="text-xs text-faint tabular-nums">{undated.length || ''}</span>
               </div>
-              <p className="px-4 pb-2 text-xs text-faint">Drag one onto a day to give it a date.</p>
+              <p className="px-4 pb-2 text-xs text-faint">{coarse ? 'Tap one to give it a date.' : 'Drag one onto a day to give it a date.'}</p>
               <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
                 {undated.length === 0 && <p className="px-2 py-6 text-xs text-faint">Every task here has a date.</p>}
-                {groups.map((group) => {
-                  const here = group.tasks.filter((t) => !t.due && !t.start)
-                  if (!here.length) return null
-                  return (
-                    <div key={String(group.id ?? 'inbox')} className="mt-2">
-                      <div className="flex items-center gap-1.5 px-2 pb-0.5 text-[11px] text-faint">
-                        {group.id !== undefined && <ProjectDot id={group.id} />}
-                        {group.name}
-                      </div>
-                      {here.map((t) => (
-                        <div
-                          key={t.id}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData(UNSCHEDULED, String(t.id))
-                            e.dataTransfer.effectAllowed = 'move'
-                          }}
-                          onDragEnd={() => setDropDay(null)}
-                          title={`${t.title}. Drag onto a day to give it a date`}
-                          className="flex cursor-grab items-center gap-2 rounded-md px-2 py-1 text-[13px] hover:bg-muted active:cursor-grabbing"
-                        >
-                          <UndatedCheck task={t} />
-                          <button type="button" onClick={() => edit(t.id)} className="min-w-0 flex-1 truncate text-left">
-                            {t.title}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })}
+                {undatedList(coarse ? 'h-10' : 'py-1')}
               </div>
             </aside>
           )}
         </div>
       )}
-      <p className="mt-2 text-xs text-faint">Drag a task to move it, or its ends to change how long it takes. Click the project's name to fold its tasks away.</p>
-      <div className="-mx-2 mt-5">
-        <AddRow />
-      </div>
+      {/* Hidden on a screen too short to spare the line (a phone on its side). */}
+      {!isMobile && <p className="mt-2 shrink-0 text-xs text-faint [@media(max-height:500px)]:hidden">{help}</p>}
+      {/* A phone adds with its New task button. */}
+      {!isMobile && (
+        <div className="-mx-2 mt-2 shrink-0">
+          <AddRow />
+        </div>
+      )}
     </div>
   )
 }
 
-function TimelineItem({
+// A row of the titles column: the check, the title (a tap opens the task)
+// and who is on it, small.
+function TitleCell({ task, showProject }: { task: Task; showProject: boolean }) {
+  const { edit } = useApp()
+  const [leaving, finish] = useFinish(task.id)
+  const { on } = useTaskPeople(task)
+  return (
+    <div data-task={task.id} className={cn('flex min-w-0 flex-1 items-center gap-2', leaving && 'opacity-0 transition-opacity duration-150')}>
+      <TaskCheck task={task} checked={leaving} onChange={finish} className="shrink-0" />
+      {/* On one timeline for everything, which project it is in. */}
+      {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
+      <button type="button" onClick={() => edit(task.id)} title={task.title} className="min-w-0 flex-1 truncate text-left text-[13px]">
+        {task.title}
+      </button>
+      <Avatars people={on} size="xs" max={2} className="shrink-0" />
+    </div>
+  )
+}
+
+// A task's bar on the chart. No title in it (that is in the column of
+// titles, on the same row), so it may be as short as its days.
+function TimelineBar({
   task,
   left,
   width,
@@ -497,7 +709,6 @@ function TimelineItem({
   onMove,
   onUp,
   onCancel,
-  showProject,
 }: {
   task: Task
   left: number
@@ -508,61 +719,110 @@ function TimelineItem({
   onMove: (e: PointerEvent<HTMLDivElement>) => void
   onUp: (e: PointerEvent<HTMLDivElement>) => void
   onCancel: () => void
-  showProject: boolean
 }) {
   const { data, noticed } = useApp()
-  const [leaving, finish] = useFinish(task.id)
-  // The block is as long as the task's days, never narrower than its check.
-  const block = Math.max(width, 22)
-  // The title goes inside when it fits there, whole; otherwise just after
-  // the block, as plain text.
-  const facesWidth = task.assignees?.length ? 10 + Math.min(task.assignees.length, 3) * 14 : 0
-  const inside = textWidth(task.title) + (showProject ? 14 : 0) + facesWidth + 30 <= block
-  const label = (
-    <>
-      {/* On one timeline for everything, which project it is in. */}
-      {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
-      <span className={cn('min-w-0 truncate', inside ? 'flex-1' : 'max-w-[420px]')}>{task.title}</span>
-      <span className="shrink-0">
-        <TaskFaces task={task} ring={inside ? 'ring-project-tint' : 'ring-background'} />
-      </span>
-    </>
-  )
+  const pointer = useRef('mouse')
+  const grips = width >= GRIPS_FROM
   return (
     <div
       data-task={task.id}
       title={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
-      style={{ ...projectStyle(data.projects, task.projectId), left, width: block }}
+      style={{ ...projectStyle(data.projects, task.projectId), left, width }}
       className={cn(
-        'absolute top-1 z-10 flex h-6 cursor-grab touch-none items-center gap-1.5 rounded-md bg-project-tint pr-2.5 pl-1.5 text-xs font-medium whitespace-nowrap select-none',
-        lifted && 'z-20 cursor-grabbing shadow-md',
-        leaving && 'opacity-0 transition-opacity duration-150',
+        // A pan that starts on a bar still scrolls the chart (touch-action);
+        // a held bar stops it from script. No callout or selection on a hold.
+        'absolute top-1/2 z-10 h-5 -translate-y-1/2 cursor-grab rounded-md border border-project-edge bg-project-tint select-none [-webkit-touch-callout:none] [touch-action:pan-x_pan-y]',
+        lifted && 'z-20 cursor-grabbing shadow-md ring-2 ring-primary/40',
         noticed === task.id && 'animate-noticed',
       )}
-      onPointerDown={onDown}
+      onPointerDown={(e) => {
+        pointer.current = e.pointerType
+        onDown(e)
+      }}
       onPointerMove={onMove}
       onPointerUp={onUp}
       onPointerCancel={onCancel}
+      // A long press of a finger is the hold that lifts the bar; it must not
+      // also open the window's task menu. A right click still does.
+      onContextMenu={(e) => {
+        if (pointer.current === 'mouse') return
+        e.preventDefault()
+        e.stopPropagation()
+      }}
     >
-      {range && <span data-grip="start" className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-ew-resize rounded-l-md hover:bg-project-edge" />}
-      <span data-check className="flex">
-        <TaskCheck task={task} checked={leaving} onChange={finish} className="size-3.5" />
-      </span>
-      {inside ? (
-        <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5">{label}</span>
-      ) : (
-        // Beside the block, and part of it: dragging the title moves the
-        // task, and a click on it opens it, as on the block itself.
-        <span className="absolute top-1/2 left-full ml-2 flex -translate-y-1/2 items-center gap-1.5 text-foreground hover:underline">{label}</span>
+      {/* The grips: drawn thin at the bar's ends, but each takes a finger's
+          width of presses, mostly outside the bar, where its row is empty
+          (one task to a row), so a short bar can still be moved by its middle. */}
+      {grips && range && (
+        <span data-grip="start" className="group/grip absolute -inset-y-2 -left-5 z-10 w-[26px] cursor-ew-resize">
+          <span className="pointer-events-none absolute inset-y-2 right-0 w-1.5 rounded-l-md group-hover/grip:bg-project-edge" />
+        </span>
       )}
       {/* Stretched from its end into more days, whatever its length now. */}
-      <span data-grip="end" className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize rounded-r-md hover:bg-project-edge" />
+      {grips && (
+        <span data-grip="end" className="group/grip absolute -inset-y-2 -right-5 z-10 w-[26px] cursor-ew-resize">
+          <span className="pointer-events-none absolute inset-y-2 left-0 w-1.5 rounded-r-md group-hover/grip:bg-project-edge" />
+        </span>
+      )}
     </div>
   )
 }
 
-// The round check of a task with no date, as in every list: it finishes it.
-function UndatedCheck({ task }: { task: Task }) {
+// A task with no date: its round check, as in every list, and its title,
+// which opens it. A mouse can drag it onto a day.
+function UndatedRow({ task, className, onDragEnd, coarse }: { task: Task; className: string; onDragEnd: () => void; coarse: boolean }) {
+  const { edit } = useApp()
   const [leaving, finish] = useFinish(task.id)
-  return <TaskCheck task={task} checked={leaving} onChange={finish} className="size-3.5 shrink-0" />
+  return (
+    <div
+      data-task={task.id}
+      draggable={!coarse}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(UNSCHEDULED, String(task.id))
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragEnd={onDragEnd}
+      title={coarse ? task.title : `${task.title}. Drag onto a day to give it a date`}
+      className={cn('flex items-center gap-2 rounded-md px-2 text-[13px] hover:bg-muted', !coarse && 'cursor-grab active:cursor-grabbing', className)}
+    >
+      <TaskCheck task={task} checked={leaving} onChange={finish} className="shrink-0" />
+      <button type="button" onClick={() => edit(task.id)} className="min-w-0 flex-1 truncate text-left">
+        {task.title}
+      </button>
+    </div>
+  )
+}
+
+// One choice of several, as a list of rows with a check by the chosen one.
+function Choices<T extends string>({
+  label,
+  choices,
+  value,
+  onChange,
+  big,
+}: {
+  label: string
+  choices: { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+  big: boolean
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-col">
+      <div className="px-2 pt-1 pb-0.5 text-xs font-medium text-faint">{label}</div>
+      {choices.map((c) => (
+        <button
+          key={c.value}
+          type="button"
+          role="radio"
+          aria-checked={value === c.value}
+          onClick={() => onChange(c.value)}
+          className={cn('flex items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent', big ? 'h-11' : 'h-8')}
+        >
+          <span className="flex-1">{c.label}</span>
+          {value === c.value && <CheckIcon className="size-4 text-primary" />}
+        </button>
+      ))}
+    </div>
+  )
 }
