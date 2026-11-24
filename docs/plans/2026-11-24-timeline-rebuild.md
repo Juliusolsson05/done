@@ -25,6 +25,16 @@ The Timeline reads and works on iPhone portrait (402×874), iPhone landscape (87
 6. **Controls**: compact = a "View" popover (zoom and grouping as radio groups), Filter, Today, and No date count; wide = the existing buttons. Uses the existing `Popover` (no new shadcn component).
 7. **Help text** says "hold and drag" and "tap" on touch screens (`(pointer: coarse)`), and is hidden on screens under 500 px tall. On a phone Add task is the floating New task button, so the row is not drawn there.
 
+## Rulings made while building
+
+- **A project with nothing dated gets no header row** on the chart: its tasks are all in No date — why: an empty row with a 0 count is noise — cost if wrong: one line to bring it back.
+- **Project header rows show a thin bar for the days their tasks span** (`spanOf`, already in `timeline-layout.ts`) — why: a folded project still says where it is in time.
+- **On a phone the help line goes above the chart and the Add task row is not drawn** — why: New task floats over the bottom right of the chart and is the phone's way to add — cost if wrong: the row comes back under the chart.
+- **The phone height is CSS, not measured**: it repeats the page's padding (`env(safe-area-inset-top) + 2.75rem` above, `8rem` below) from `App.tsx`. Measuring the top on every layout was rejected because the push animation moves the page while it runs. If another branch changes that padding, this view must follow (marked in a comment).
+- **The No date section starts shut** and is not remembered — why: the chart is what the view is for; its count shows what is there.
+- **A one-day bar at quarter zoom is 10 px** and bars under 22 px have no grips — why: a 2 px bar cannot be seen or pressed, and grips would leave nothing to move it by.
+- **Undated rows are draggable only with a fine pointer** — HTML5 drag does nothing on iOS; there a tap opens the task.
+
 ## Change
 
 - `ui/src/lib/timeline-window.ts`: `initialLeft` (opening scroll in days), `paneLayout(width)`.
