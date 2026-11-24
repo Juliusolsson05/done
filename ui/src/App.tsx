@@ -465,7 +465,21 @@ export default function App() {
             off for everything inside it, which only the sidebar wants. */}
         <ContextMenuTrigger asChild className="select-auto">
           <div>
-            <SidebarProvider className="md:h-svh" defaultOpen={sidebarWasOpen()} onContextMenu={onContextMenu}>
+            <SidebarProvider
+              className={cn(
+                'md:h-svh',
+                // Clear of the notch and the rounded corners on every layout:
+                // the whole app sits inside the screen's safe area, on the
+                // sides always and, in a window, above and below too (a
+                // phone's bars keep clear of those themselves). The page's own
+                // margin then starts at the safe edge, as in iOS's own apps.
+                // All 0 on a Mac. The background reaches the edges.
+                'bg-background pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:pt-[env(safe-area-inset-top)] md:pb-[env(safe-area-inset-bottom)]',
+                view.kind === 'lists' && 'max-md:bg-grouped',
+              )}
+              defaultOpen={sidebarWasOpen()}
+              onContextMenu={onContextMenu}
+            >
               <AppSidebar />
               {/* In a window the content is a sheet lying on the sidebar. On a
                   phone it is the whole screen, edge to edge, kept clear of

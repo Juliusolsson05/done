@@ -230,6 +230,16 @@ function Sidebar({
         data-side={side}
         className={cn(
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
+          // done: the sidebar reaches the screen's edges, so it keeps its
+          // contents clear of the status bar, the home indicator and, on its
+          // own side, the notch. It is that much wider on that side, and the
+          // page beside it is pushed over by the same inset (App.tsx), so the
+          // two still meet. All of these are 0 on a Mac. (The same variants
+          // as the line above, so these replace its width and offset.)
+          "bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+          side === "left"
+            ? "w-[calc(var(--sidebar-width)+env(safe-area-inset-left))] pl-[env(safe-area-inset-left)] data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc((var(--sidebar-width)+env(safe-area-inset-left))*-1)]"
+            : "w-[calc(var(--sidebar-width)+env(safe-area-inset-right))] pr-[env(safe-area-inset-right)] data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc((var(--sidebar-width)+env(safe-area-inset-right))*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
