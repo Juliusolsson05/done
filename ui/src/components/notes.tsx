@@ -1,7 +1,7 @@
 // Notes: press New note, type, and it is kept. For the list written down in
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
-import { Fragment, useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, useMemo } from 'react'
 import { inScope, spaceForNew, workspaceOf } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
@@ -28,6 +28,7 @@ import {
   keepLineBreaks,
   matches,
   sameFolder,
+  snippetOf,
   titleOf,
   whenText,
   withFolder,
@@ -38,6 +39,8 @@ import { markInline, mentionId, mentionsIn } from '@/lib/mentions'
 import { TaskMention, TaskMentionInline } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
+import { ComposeButton, MoreButton, NoteSheet, NotesBar } from '@/components/notes-phone'
+import { notesLayout } from '@/lib/live-preview'
 import { LiveBar, LiveFaces, useLiveNote, useLiveStatus } from '@/components/live-note'
 import type { LiveNote } from '@/lib/collab'
 import { play } from '@/lib/sounds'
@@ -59,9 +62,31 @@ function storedKept(): string[] {
   }
 }
 
+// How wide an element is, kept up to date; null until it is measured.
+function useWidth(): [(el: HTMLElement | null) => void, number | null] {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  const [width, setWidth] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!el) return
+    setWidth(el.getBoundingClientRect().width)
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [el])
+  return [setEl, width]
+}
+
 export function Notes() {
   const { ui, data, scope, team } = useApp()
   const isMobile = useIsMobile()
+  // On a wide screen too narrow for the list and a note side by side (an
+  // iPad upright, a narrow window), one at a time, as on a phone: a note is
+  // never squeezed into a sliver.
+  const [measure, width] = useWidth()
+  const stacked = !isMobile && width !== null && notesLayout(width) === 'stacked'
+  // The note's actions on a phone, as an action sheet.
+  const [sheet, setSheet] = useState(false)
   const [stored, setNotes] = useState<Note[] | null>(null)
   // The notes of the space the picker is on. A note is where its project is,
   // else where it was written.
@@ -161,12 +186,12 @@ export function Notes() {
   // A search that leaves out the open note opens its first match instead,
   // so the note on the right is always one of those listed.
   useEffect(() => {
-    if (isMobile || !notes || !query.trim()) return
+    if (isMobile || stacked || !notes || !query.trim()) return
     const found = [...notes].sort(byNewest).filter((n) => matches(n, query))
     if (found.length > 0 && !found.some((n) => n.id === openId)) open(found[0].id)
     // Only when the search or the notes change; open reads the latest state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, notes, isMobile])
+  }, [query, notes, isMobile, stacked])
 
   // A note asked for from elsewhere (the search) is opened once it is here,
   // under All notes so it is listed whatever folder it is in.
@@ -184,11 +209,11 @@ export function Notes() {
   // On a wide screen a note is always open when the chosen folder has one:
   // the one asked for if any, otherwise the folder's newest.
   useEffect(() => {
-    if (isMobile || openId !== null || !notes) return
+    if (isMobile || width === null || stacked || openId !== null || !notes) return
     const newest = [...notes].sort(byNewest).find((n) => inFolder(n, folder))
     if (asked !== undefined && notes.some((n) => n.id === asked)) setOpenId(asked)
     else if (newest) setOpenId(newest.id)
-  }, [isMobile, openId, notes, asked, folder])
+  }, [isMobile, width, stacked, openId, notes, asked, folder])
 
   useEffect(() => {
     if (!reading) return
@@ -201,6 +226,7 @@ export function Notes() {
 
   const open = (id: number | null) => {
     setReading(false)
+    setSheet(false)
     if (id === openId) return
     leave(openId)
     setOpenId(id)
@@ -212,7 +238,7 @@ export function Notes() {
     setFolder(next)
     setQuery('')
     setAtFolders(false)
-    if (isMobile) return
+    if (isMobile || stacked) return
     const newest = [...(latest.current ?? [])].sort(byNewest).find((n) => inFolder(n, next))
     open(newest ? newest.id : null)
   }
@@ -472,29 +498,33 @@ export function Notes() {
   useEffect(() => () => publishFolderPanel(null), [])
 
 
-  // On a phone: the open note alone, with a way back to the list.
+  // On a phone: the open note alone, under a bar with one way back to its
+  // list and its actions behind ⋯, as in Apple Notes.
   if (isMobile && current) {
     return (
       <div>
-        {/* On a phone the actions wrap under the way back rather than pushing
-            the page wider than the screen (folder, project, Read and Delete
-            do not fit one line at 393 points). */}
-        <div className="mb-3 flex flex-wrap items-center gap-y-1">
-          <Button variant="ghost" size="sm" className="-ml-2.5 max-w-40 text-primary" onClick={() => open(null)}>
-            <ChevronLeftIcon />
-            <span className="truncate">{folder ?? 'All notes'}</span>
-          </Button>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-            <LiveFaces live={live} />
-            {folderPicker}
-            {projectPicker}
-            {readToggle}
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete note" onClick={() => remove(current)}>
-              <Trash2Icon />
-            </Button>
-          </div>
+        <NotesBar back={folder ?? 'All notes'} onBack={() => open(null)}>
+          <LiveFaces live={live} />
+          <MoreButton onClick={() => setSheet(true)} />
+        </NotesBar>
+        {/* 20 points from the screen's edges, as Apple Notes sets its text. */}
+        <div className="px-1">
+          {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
         </div>
-        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+        {sheet && (
+          <NoteSheet
+            onClose={() => setSheet(false)}
+            folder={folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? null}
+            folders={folders.map((f) => f.name)}
+            onFolder={(name) => refileOpen({ folder: name })}
+            project={{ id: current.projectId ?? null, name: current.projectId != null ? projectName(data.projects, current.projectId) : 'None' }}
+            projects={data.projects}
+            onProject={(id) => refileOpen({ projectId: id })}
+            reading={isBlank(current.text) ? null : reading}
+            onRead={() => setReading((r) => !r)}
+            onDelete={() => remove(current)}
+          />
+        )}
       </div>
     )
   }
@@ -503,63 +533,103 @@ export function Notes() {
   if (isMobile && atFolders) {
     return (
       <div>
-        <ViewHeader title="Notes">
-          <HeaderButton onClick={() => void create(null)}>
-            <PlusIcon />
-            New note
-          </HeaderButton>
-        </ViewHeader>
+        <ViewHeader title="Notes" />
         <FolderNav folders={folders} total={notes?.length ?? 0} onSelect={choose} onCreate={createFolder} />
+        <ComposeButton onClick={() => void create(null)} />
+      </div>
+    )
+  }
+
+  // A wide screen with room for one thing: the open note, with a way back.
+  if (stacked && current) {
+    return (
+      <div ref={measure}>
+        <header className="mb-4 flex min-h-8 flex-wrap items-center gap-1">
+          <Button variant="ghost" size="sm" className="-ml-2.5 max-w-56 text-primary" onClick={() => open(null)}>
+            <ChevronLeftIcon />
+            <span className="truncate">{folder ?? 'Notes'}</span>
+          </Button>
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+            <LiveFaces live={live} />
+            {folderPicker}
+            {projectPicker}
+            {readToggle}
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete note" onClick={() => remove(current)}>
+              <Trash2Icon />
+            </Button>
+          </div>
+        </header>
+        <div className="mx-auto max-w-3xl">
+          {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+        </div>
       </div>
     )
   }
 
   const empty = groups.length === 0
+  // The list drawn as Apple Notes draws it: on a phone, and on a wide screen
+  // showing the list alone.
+  const apple = isMobile || stacked
+  const split = !isMobile && !stacked
   return (
-    <div>
-      {isMobile && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mb-1 -ml-2.5 text-primary"
-          onClick={() => {
-            // Back on the folders, no folder is open, so New note there files
-            // into none rather than the folder just left.
-            setAtFolders(true)
-            setFolder(null)
-          }}
-        >
-          <ChevronLeftIcon />
-          Folders
-        </Button>
+    <div ref={isMobile ? undefined : measure}>
+      {isMobile ? (
+        <>
+          {/* One way back, to the folders. Back there no folder is open, so
+              a new note made there files into none rather than the folder
+              just left. */}
+          <NotesBar
+            back="Folders"
+            onBack={() => {
+              setAtFolders(true)
+              setFolder(null)
+            }}
+          />
+          <header className="mb-3 flex flex-col">
+            <h1 className="text-large-title font-bold tracking-tight">{folder ?? 'All notes'}</h1>
+            {folder !== null && (
+              <div className="-ml-2.5 pt-1">
+                <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />
+              </div>
+            )}
+          </header>
+          <ComposeButton onClick={() => void create(null)} />
+        </>
+      ) : (
+        // On a wide screen the folders are in the sidebar, so the title says which one is open.
+        <ViewHeader title={folder ?? 'Notes'}>
+          {split && current && <LiveFaces live={live} />}
+          {split && folderPicker}
+          {split && projectPicker}
+          {split && readToggle}
+          {split && current && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-destructive"
+              aria-label="Delete note"
+              onClick={() => remove(current)}
+            >
+              <Trash2Icon />
+            </Button>
+          )}
+          <HeaderButton onClick={() => void create(null)}>
+            <PlusIcon />
+            New note
+          </HeaderButton>
+        </ViewHeader>
       )}
-      {/* On a wide screen the folders are in the sidebar, so the title says which one is open. */}
-      <ViewHeader title={folder ?? (isMobile ? 'All notes' : 'Notes')}>
-        {isMobile && folder !== null && <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />}
-        {!isMobile && current && <LiveFaces live={live} />}
-        {!isMobile && folderPicker}
-        {!isMobile && projectPicker}
-        {!isMobile && readToggle}
-        {!isMobile && current && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-destructive"
-            aria-label="Delete note"
-            onClick={() => remove(current)}
-          >
-            <Trash2Icon />
-          </Button>
-        )}
-        <HeaderButton onClick={() => void create(null)}>
-          <PlusIcon />
-          New note
-        </HeaderButton>
-      </ViewHeader>
       {notes && (
         <div className="flex items-start gap-6">
           {/* The folders and the list stay where they are while a long note scrolls past them. */}
-          <div className={cn('w-full shrink-0 md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto', reading && 'hidden')}>
+          <div
+            className={cn(
+              'w-full shrink-0',
+              split && 'md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto',
+              stacked && 'mx-auto max-w-2xl',
+              reading && 'hidden',
+            )}
+          >
             {notes.length > 0 && (
               <div className="relative mb-4">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -584,53 +654,103 @@ export function Notes() {
                 {searching ? 'No notes match' : notes.length === 0 ? 'No notes yet. New note starts one.' : 'No notes in this folder. New note starts one here.'}
               </p>
             )}
-            {groups.map((group) => (
-              <section key={group.label} className="mb-3">
-                <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
-                <ul aria-label={group.label} className="flex flex-col gap-0.5">
-                  {group.notes.map((note) => (
-                    <li key={note.id}>
-                      <Button
-                        variant="ghost"
-                        onClick={() => open(note.id)}
-                        aria-current={note.id === openId ? 'true' : undefined}
-                        className={cn(
-                          'h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal max-md:py-3',
-                          note.id === openId && 'bg-primary/10 hover:bg-primary/10',
-                        )}
-                      >
-                        <span className="flex w-full min-w-0 items-center gap-2">
+            {groups.map((group) =>
+              apple ? (
+                // Apple Notes' list: the title, then the date and the first
+                // line of the text in grey, rows parted by hairlines.
+                <section key={group.label} className="mb-5">
+                  <h2 className="px-1 pb-1 text-subhead font-semibold text-foreground">{group.label}</h2>
+                  <ul aria-label={group.label} className="flex flex-col">
+                    {group.notes.map((note) => (
+                      <li key={note.id} className="border-b border-border last:border-b-0">
+                        <button
+                          type="button"
+                          onClick={() => open(note.id)}
+                          aria-current={note.id === openId ? 'true' : undefined}
+                          className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1 py-2.5 text-left active:bg-accent"
+                        >
                           <span
                             data-findable
-                            className={cn('min-w-0 flex-1 truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                            className={cn('w-full truncate text-body font-semibold', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
                           >
                             {titleOf(note.text)}
                           </span>
-                        </span>
-                        <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
-                          {whenText(note.updatedAt, now)}
+                          <span className="flex w-full min-w-0 items-baseline gap-2 text-subhead text-tertiary">
+                            <span className="shrink-0 tabular-nums">{whenText(note.updatedAt, now)}</span>
+                            <span data-findable className="min-w-0 truncate">
+                              {snippetOf(note.text) || 'No additional text'}
+                            </span>
+                          </span>
                           {/* Under All notes or a search, where a note is in is worth saying. */}
-                          {note.folder && (folder === null || searching) && (
-                            <>
-                              <FolderIcon className="size-3" />
-                              <span className="truncate">{note.folder}</span>
-                            </>
+                          {((note.folder && (folder === null || searching)) || note.projectId != null) && (
+                            <span className="flex w-full min-w-0 items-center gap-1.5 text-footnote text-tertiary">
+                              {note.folder && (folder === null || searching) && (
+                                <>
+                                  <FolderIcon className="size-3.5 shrink-0" />
+                                  <span className="truncate">{note.folder}</span>
+                                </>
+                              )}
+                              {note.projectId != null && (
+                                <>
+                                  <ProjectDot id={note.projectId} className="size-1.5" />
+                                  <span className="truncate">{projectName(data.projects, note.projectId)}</span>
+                                </>
+                              )}
+                            </span>
                           )}
-                          {note.projectId != null && (
-                            <>
-                              <ProjectDot id={note.projectId} className="size-1.5" />
-                              <span className="truncate">{projectName(data.projects, note.projectId)}</span>
-                            </>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : (
+                <section key={group.label} className="mb-3">
+                  <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
+                  <ul aria-label={group.label} className="flex flex-col gap-0.5">
+                    {group.notes.map((note) => (
+                      <li key={note.id}>
+                        <Button
+                          variant="ghost"
+                          onClick={() => open(note.id)}
+                          aria-current={note.id === openId ? 'true' : undefined}
+                          className={cn(
+                            'h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal',
+                            note.id === openId && 'bg-primary/10 hover:bg-primary/10',
                           )}
-                        </span>
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+                        >
+                          <span className="flex w-full min-w-0 items-center gap-2">
+                            <span
+                              data-findable
+                              className={cn('min-w-0 flex-1 truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                            >
+                              {titleOf(note.text)}
+                            </span>
+                          </span>
+                          <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
+                            {whenText(note.updatedAt, now)}
+                            {/* Under All notes or a search, where a note is in is worth saying. */}
+                            {note.folder && (folder === null || searching) && (
+                              <>
+                                <FolderIcon className="size-3" />
+                                <span className="truncate">{note.folder}</span>
+                              </>
+                            )}
+                            {note.projectId != null && (
+                              <>
+                                <ProjectDot id={note.projectId} className="size-1.5" />
+                                <span className="truncate">{projectName(data.projects, note.projectId)}</span>
+                              </>
+                            )}
+                          </span>
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ),
+            )}
           </div>
-          {!isMobile && current && (
+          {split && current && (
             // As long as the note is: the page scrolls, not a box inside it.
             // Held to a readable line length.
             <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>

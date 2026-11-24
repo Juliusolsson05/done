@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { byNewest, cleanFolder, folderList, groupByDate, inFolder, isBlank, keepLineBreaks, matches, titleOf, withFolder, type Note } from './notes'
+import { byNewest, cleanFolder, folderList, groupByDate, inFolder, isBlank, keepLineBreaks, matches, snippetOf, titleOf, withFolder, type Note } from './notes'
 
 describe('titleOf', () => {
   it('reads a mentioned task as its words, not the link around it', () => {
@@ -18,6 +18,19 @@ describe('titleOf', () => {
   it('is "New note" for a note with nothing in it', () => {
     expect(titleOf('')).toBe('New note')
     expect(titleOf(' \n \n')).toBe('New note')
+  })
+})
+
+describe('snippetOf', () => {
+  it('is the first line with words after the title, read without its Markdown', () => {
+    expect(snippetOf('# Plan\n\n- [ ] **Call** [the bank](done:task/12) about ~~it~~ *now*')).toBe('Call the bank about it now')
+    expect(snippetOf('Plan\n## Week 48\nmore')).toBe('Week 48')
+    expect(snippetOf('Plan\n1. See [site](https://example.com)')).toBe('See site')
+  })
+  it('is empty when the note is only a title', () => {
+    expect(snippetOf('# Plan')).toBe('')
+    expect(snippetOf('# Plan\n#\n')).toBe('')
+    expect(snippetOf('')).toBe('')
   })
 })
 
