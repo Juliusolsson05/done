@@ -7,6 +7,14 @@ fileGroups: [../../src]
 configs:
   debug: debug
   release: release
+settings:
+  base:
+    # Signing for the app and the widget extension alike. The team lived only
+    # in the generated project (Tauri wrote it at `tauri ios init`), so
+    # regenerating from this file dropped it and device builds failed with
+    # "requires a development team". Declared here, it survives.
+    DEVELOPMENT_TEAM: 99MUK5B6TA
+    CODE_SIGN_STYLE: Automatic
 settingGroups:
   app:
     base:
