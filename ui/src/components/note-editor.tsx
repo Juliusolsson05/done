@@ -3,8 +3,8 @@
 // a workspace is also bound to its live document (lib/collab.ts), so
 // everyone in it types into the same text and sees each other's cursors.
 //
-// What it keeps from the textarea: the @ task picker (inserting a plain
-// Markdown link, see lib/mentions), Cmd-click to open an address, undo with
+// What it keeps from the textarea: the @ picker of tasks and notes
+// (inserting a plain Markdown link, see lib/mentions), Cmd-click to open an address, undo with
 // Cmd+Z (including from the Mac app's own Undo menu), growing with the text
 // so the page scrolls rather than a box inside it, and the cursor in a new note.
 //
@@ -24,12 +24,14 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import * as Y from 'yjs'
 import type { Awareness } from 'y-protocols/awareness'
 import { MentionPicker } from '@/components/task-mention'
-import { mentionAtoms } from '@/components/mention-atoms'
+import { mentionAtoms, notesChanged, type LinkedNotes } from '@/components/mention-atoms'
+import { linkedTitle, useNoteLinks } from '@/components/note-link'
 import { livePreview, setNoteDate } from '@/components/live-preview'
 import { BAR_HEIGHT, useCoarsePointer, useVisualViewport, WritingBar } from '@/components/writing-bar'
 import { openLink } from '@/lib/backend'
 import { linkAt } from '@/lib/links'
-import { atQuery, insertMention, suggestions } from '@/lib/mentions'
+import { atQuery, insertMention, mentionLink, noteLink, noteSuggestions, suggestions, type Offer } from '@/lib/mentions'
+import { isBlank, titleOf } from '@/lib/notes'
 import type { Task } from '@/lib/tasks'
 
 export interface LiveBinding {
@@ -81,13 +83,13 @@ function notePlaceholder(): HTMLElement {
   wrap.textContent = 'New note'
   const hint = document.createElement('span')
   hint.className = 'cm-placeholder-hint'
-  hint.textContent = 'Type @ to add a task.'
+  hint.textContent = 'Type @ to add a task or link a note.'
   wrap.appendChild(hint)
   return wrap
 }
 
 interface Picker {
-  offered: Task[]
+  offered: Offer[]
   chosen: number
   at: { start: number; query: string } | null
 }
@@ -101,6 +103,7 @@ export function NoteEditor({
   readOnly = false,
   date = null,
   onActivity,
+  id = null,
 }: {
   // The note's text. Only read when the editor is made, and when it changes
   // from outside (another device's save arriving) while nothing is being typed.
@@ -117,15 +120,26 @@ export function NoteEditor({
   // Told when something is done in the note (typing, the cursor, the
   // pointer), so the others see you as active.
   onActivity?: () => void
+  // The note being written, never offered as a link to itself.
+  id?: number | null
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const [picker, setPicker] = useState<Picker>({ offered: [], chosen: 0, at: null })
   // Read by the editor's handlers, which are set up once.
-  const latest = useRef({ picker, onChange, tasks, dismissed: null as number | null })
+  const links = useNoteLinks()
+  const latest = useRef({ picker, onChange, tasks, links, id, dismissed: null as number | null })
   latest.current.picker = picker
   latest.current.onChange = onChange
   latest.current.tasks = tasks
+  latest.current.links = links
+  latest.current.id = id
+  // The linked notes as the chips read them, always the latest: the editor
+  // is made once, the notes change under it.
+  const linked = useRef<LinkedNotes>({
+    title: (note) => linkedTitle(latest.current.links.notes, note),
+    open: (note) => latest.current.links.open(note),
+  })
   const activity = useRef(onActivity)
   activity.current = onActivity
   const editable = useRef(new Compartment())
@@ -151,17 +165,31 @@ export function NoteEditor({
     // Esc closes the list for that one @; once the @ is gone, a new one opens it again.
     if (at === null) latest.current.dismissed = null
     const open = at !== null && at.start !== latest.current.dismissed
-    const offered = open ? suggestions(latest.current.tasks, at.query) : []
+    // A few notes, under the tasks, which keep the rest of the eight rows:
+    // the list stays short above a phone's keyboard.
+    const notes = open
+      ? noteSuggestions(
+          latest.current.links.offered.map((n) => ({ id: n.id, title: titleOf(n.text), updatedAt: n.updatedAt, blank: isBlank(n.text) })),
+          at.query,
+          latest.current.id,
+        )
+      : []
+    const offered: Offer[] = open
+      ? [
+          ...suggestions(latest.current.tasks, at.query, 8 - notes.length).map((task) => ({ kind: 'task' as const, task })),
+          ...notes.map((n) => ({ kind: 'note' as const, id: n.id, title: n.title })),
+        ]
+      : []
     setPicker((was) => ({ offered, at: open ? at : null, chosen: was.at?.query === at?.query ? was.chosen : 0 }))
   }
 
-  const pick = (task: Task) => {
+  const pick = (offer: Offer) => {
     const v = view.current
     const at = latest.current.picker.at
     if (!v || !at) return
     const doc = v.state.doc.toString()
     const caret = v.state.selection.main.head
-    const next = insertMention(doc, at.start, caret, task)
+    const next = insertMention(doc, at.start, caret, offer.kind === 'task' ? mentionLink(offer.task) : noteLink(offer))
     const inserted = next.text.slice(at.start, next.text.length - (doc.length - caret))
     // One change through the editor: Cmd+Z takes it back like any typing.
     v.dispatch({ changes: { from: at.start, to: caret, insert: inserted }, selection: { anchor: next.caret }, userEvent: 'input.complete' })
@@ -215,8 +243,9 @@ export function NoteEditor({
           const bar = document.querySelector('[data-note-bar]')?.getBoundingClientRect().bottom ?? 0
           return { top: Math.max(0, bar) + 8, bottom: margins.current.bottom }
         }),
-        // A task mention is one piece, shown as @ and its title.
-        mentionAtoms,
+        // A task mention is one piece, shown as @ and its title; a note
+        // link likewise, as the linked note's title.
+        mentionAtoms(() => linked.current),
         EditorView.lineWrapping,
         // Written as any text on an iPhone: corrected, capitalised, spelled
         // and suggested (CodeMirror turns all four off by default).
@@ -304,6 +333,11 @@ export function NoteEditor({
     view.current?.dispatch({ effects: editable.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) })
   }, [readOnly])
 
+  // A linked note renamed or deleted: its chip is drawn again.
+  useEffect(() => {
+    view.current?.dispatch({ effects: notesChanged.of(null) })
+  }, [links.notes])
+
   // The date under the title follows the note's last change.
   useEffect(() => {
     view.current?.dispatch({ effects: setNoteDate.of(date) })
@@ -324,7 +358,7 @@ export function NoteEditor({
       <div ref={host} className="w-full max-w-[68ch] text-[16px] leading-[1.45] max-md:text-[17px] pointer-coarse:text-[17px]" />
       {point && (
         <MentionPicker
-          tasks={picker.offered}
+          offers={picker.offered}
           chosen={Math.min(picker.chosen, picker.offered.length - 1)}
           at={point}
           onPick={pick}

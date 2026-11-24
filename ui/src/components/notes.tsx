@@ -35,7 +35,8 @@ import {
   type Note,
 } from '@/lib/notes'
 import { linksIn } from '@/lib/links'
-import { markInline, mentionId, mentionsIn } from '@/lib/mentions'
+import { markInline, mentionId, mentionsIn, noteLinkId, noteLinksIn } from '@/lib/mentions'
+import { LinkedFrom, NoteLinkChip, NoteLinksContext, type NoteLinks } from '@/components/note-link'
 import { TaskMention, TaskMentionInline } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
@@ -76,6 +77,8 @@ function useWidth(): [(el: HTMLElement | null) => void, number | null] {
   }, [el])
   return [setEl, width]
 }
+
+const NO_NOTES: Note[] = []
 
 export function Notes() {
   const { ui, data, scope, team } = useApp()
@@ -405,6 +408,33 @@ export function Notes() {
     })
   }
 
+  // Following a link from the open note to another: opened as a note chosen
+  // in the list is, with the search cleared and, when the folder shown does
+  // not hold it, under All notes, so the list always shows the note open.
+  const follow = (id: number) => {
+    const target = latest.current?.find((n) => n.id === id)
+    if (!target) {
+      // Linked, but not in the space chosen: say so rather than open nothing.
+      if (stored?.some((n) => n.id === id)) toast('That note is in another space. Switch to it there.', { id: 'said' })
+      return
+    }
+    setQuery('')
+    if (!inFolder(target, folder)) setFolder(null)
+    setAtFolders(false)
+    open(id)
+  }
+  // Read on every render by the chips, so a rename shows at once. Who links
+  // to whom is worked out once per change of the notes, not per chip.
+  // Only the space chosen links from: a note elsewhere is not to be listed here.
+  const linkers = useMemo(() => {
+    const by = new Map<number, Note[]>()
+    for (const n of [...(notes ?? [])].sort(byNewest)) for (const to of noteLinksIn(n.text)) if (to !== n.id) by.set(to, [...(by.get(to) ?? []), n])
+    return by
+  }, [notes])
+  // The same empty list until the notes load, so the editor, which redraws
+  // its chips when the list changes, does not do so on every render.
+  const noteLinks: NoteLinks = { notes: stored ?? NO_NOTES, offered: notes ?? NO_NOTES, open: follow, linkedFrom: (id) => linkers.get(id) ?? [] }
+
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)
   // The open note's live copy, held here so the header can show who is in it.
@@ -502,30 +532,32 @@ export function Notes() {
   // list and its actions behind ⋯, as in Apple Notes.
   if (isMobile && current) {
     return (
-      <div>
-        <NotesBar back={folder ?? 'All notes'} onBack={() => open(null)}>
-          <LiveFaces live={live} />
-          <MoreButton onClick={() => setSheet(true)} />
-        </NotesBar>
-        {/* 20 points from the screen's edges, as Apple Notes sets its text. */}
-        <div className="px-1">
-          {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+      <NoteLinksContext.Provider value={noteLinks}>
+        <div>
+          <NotesBar back={folder ?? 'All notes'} onBack={() => open(null)}>
+            <LiveFaces live={live} />
+            <MoreButton onClick={() => setSheet(true)} />
+          </NotesBar>
+          {/* 20 points from the screen's edges, as Apple Notes sets its text. */}
+          <div className="px-1">
+            {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+          </div>
+          {sheet && (
+            <NoteSheet
+              onClose={() => setSheet(false)}
+              folder={folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? null}
+              folders={folders.map((f) => f.name)}
+              onFolder={(name) => refileOpen({ folder: name })}
+              project={{ id: current.projectId ?? null, name: current.projectId != null ? projectName(data.projects, current.projectId) : 'None' }}
+              projects={data.projects}
+              onProject={(id) => refileOpen({ projectId: id })}
+              reading={isBlank(current.text) ? null : reading}
+              onRead={() => setReading((r) => !r)}
+              onDelete={() => remove(current)}
+            />
+          )}
         </div>
-        {sheet && (
-          <NoteSheet
-            onClose={() => setSheet(false)}
-            folder={folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? null}
-            folders={folders.map((f) => f.name)}
-            onFolder={(name) => refileOpen({ folder: name })}
-            project={{ id: current.projectId ?? null, name: current.projectId != null ? projectName(data.projects, current.projectId) : 'None' }}
-            projects={data.projects}
-            onProject={(id) => refileOpen({ projectId: id })}
-            reading={isBlank(current.text) ? null : reading}
-            onRead={() => setReading((r) => !r)}
-            onDelete={() => remove(current)}
-          />
-        )}
-      </div>
+      </NoteLinksContext.Provider>
     )
   }
 
@@ -543,26 +575,28 @@ export function Notes() {
   // A wide screen with room for one thing: the open note, with a way back.
   if (stacked && current) {
     return (
-      <div ref={measure}>
-        <header className="mb-4 flex min-h-8 flex-wrap items-center gap-1">
-          <Button variant="ghost" size="sm" className="-ml-2.5 max-w-56 text-primary" onClick={() => open(null)}>
-            <ChevronLeftIcon />
-            <span className="truncate">{folder ?? 'Notes'}</span>
-          </Button>
-          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-            <LiveFaces live={live} />
-            {folderPicker}
-            {projectPicker}
-            {readToggle}
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete note" onClick={() => remove(current)}>
-              <Trash2Icon />
+      <NoteLinksContext.Provider value={noteLinks}>
+        <div ref={measure}>
+          <header className="mb-4 flex min-h-8 flex-wrap items-center gap-1">
+            <Button variant="ghost" size="sm" className="-ml-2.5 max-w-56 text-primary" onClick={() => open(null)}>
+              <ChevronLeftIcon />
+              <span className="truncate">{folder ?? 'Notes'}</span>
             </Button>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+              <LiveFaces live={live} />
+              {folderPicker}
+              {projectPicker}
+              {readToggle}
+              <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete note" onClick={() => remove(current)}>
+                <Trash2Icon />
+              </Button>
+            </div>
+          </header>
+          <div className="mx-auto max-w-3xl">
+            {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
           </div>
-        </header>
-        <div className="mx-auto max-w-3xl">
-          {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
         </div>
-      </div>
+      </NoteLinksContext.Provider>
     )
   }
 
@@ -572,121 +606,167 @@ export function Notes() {
   const apple = isMobile || stacked
   const split = !isMobile && !stacked
   return (
-    <div ref={isMobile ? undefined : measure}>
-      {isMobile ? (
-        <>
-          {/* One way back, to the folders. Back there no folder is open, so
-              a new note made there files into none rather than the folder
-              just left. */}
-          <NotesBar
-            back="Folders"
-            onBack={() => {
-              setAtFolders(true)
-              setFolder(null)
-            }}
-          />
-          <header className="mb-3 flex flex-col">
-            <h1 className="text-large-title font-bold tracking-tight">{folder ?? 'All notes'}</h1>
-            {folder !== null && (
-              <div className="-ml-2.5 pt-1">
-                <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />
-              </div>
+    <NoteLinksContext.Provider value={noteLinks}>
+      <div ref={isMobile ? undefined : measure}>
+        {isMobile ? (
+          <>
+            {/* One way back, to the folders. Back there no folder is open, so
+                a new note made there files into none rather than the folder
+                just left. */}
+            <NotesBar
+              back="Folders"
+              onBack={() => {
+                setAtFolders(true)
+                setFolder(null)
+              }}
+            />
+            <header className="mb-3 flex flex-col">
+              <h1 className="text-large-title font-bold tracking-tight">{folder ?? 'All notes'}</h1>
+              {folder !== null && (
+                <div className="-ml-2.5 pt-1">
+                  <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />
+                </div>
+              )}
+            </header>
+            <ComposeButton onClick={() => void create(null)} />
+          </>
+        ) : (
+          // On a wide screen the folders are in the sidebar, so the title says which one is open.
+          <ViewHeader title={folder ?? 'Notes'}>
+            {split && current && <LiveFaces live={live} />}
+            {split && folderPicker}
+            {split && projectPicker}
+            {split && readToggle}
+            {split && current && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label="Delete note"
+                onClick={() => remove(current)}
+              >
+                <Trash2Icon />
+              </Button>
             )}
-          </header>
-          <ComposeButton onClick={() => void create(null)} />
-        </>
-      ) : (
-        // On a wide screen the folders are in the sidebar, so the title says which one is open.
-        <ViewHeader title={folder ?? 'Notes'}>
-          {split && current && <LiveFaces live={live} />}
-          {split && folderPicker}
-          {split && projectPicker}
-          {split && readToggle}
-          {split && current && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground hover:text-destructive"
-              aria-label="Delete note"
-              onClick={() => remove(current)}
+            <HeaderButton onClick={() => void create(null)}>
+              <PlusIcon />
+              New note
+            </HeaderButton>
+          </ViewHeader>
+        )}
+        {notes && (
+          <div className="flex items-start gap-6">
+            {/* The folders and the list stay where they are while a long note scrolls past them. */}
+            <div
+              className={cn(
+                'w-full shrink-0',
+                split && 'md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto',
+                stacked && 'mx-auto max-w-2xl',
+                reading && 'hidden',
+              )}
             >
-              <Trash2Icon />
-            </Button>
-          )}
-          <HeaderButton onClick={() => void create(null)}>
-            <PlusIcon />
-            New note
-          </HeaderButton>
-        </ViewHeader>
-      )}
-      {notes && (
-        <div className="flex items-start gap-6">
-          {/* The folders and the list stay where they are while a long note scrolls past them. */}
-          <div
-            className={cn(
-              'w-full shrink-0',
-              split && 'md:sticky md:top-4 md:max-h-[calc(100svh-2rem)] md:w-64 md:overflow-y-auto',
-              stacked && 'mx-auto max-w-2xl',
-              reading && 'hidden',
-            )}
-          >
-            {notes.length > 0 && (
-              <div className="relative mb-4">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape' && query) {
-                      event.preventDefault()
-                      setQuery('')
-                    }
-                  }}
-                  placeholder="Search all notes"
-                  aria-label="Search notes"
-                  className="border-transparent bg-muted pl-8 shadow-none focus-visible:border-transparent focus-visible:bg-muted/70 focus-visible:ring-0 dark:bg-muted [&::-webkit-search-cancel-button]:hidden"
-                />
-              </div>
-            )}
-            {empty && (
-              <p className="px-3 py-2 text-sm text-muted-foreground">
-                {searching ? 'No notes match' : notes.length === 0 ? 'No notes yet. New note starts one.' : 'No notes in this folder. New note starts one here.'}
-              </p>
-            )}
-            {groups.map((group) =>
-              apple ? (
-                // Apple Notes' list: the title, then the date and the first
-                // line of the text in grey, rows parted by hairlines.
-                <section key={group.label} className="mb-5">
-                  <h2 className="px-1 pb-1 text-subhead font-semibold text-foreground">{group.label}</h2>
-                  <ul aria-label={group.label} className="flex flex-col">
-                    {group.notes.map((note) => (
-                      <li key={note.id} className="border-b border-border last:border-b-0">
-                        <button
-                          type="button"
-                          onClick={() => open(note.id)}
-                          aria-current={note.id === openId ? 'true' : undefined}
-                          className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1 py-2.5 text-left active:bg-accent"
-                        >
-                          <span
-                            data-findable
-                            className={cn('w-full truncate text-body font-semibold', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+              {notes.length > 0 && (
+                <div className="relative mb-4">
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape' && query) {
+                        event.preventDefault()
+                        setQuery('')
+                      }
+                    }}
+                    placeholder="Search all notes"
+                    aria-label="Search notes"
+                    className="border-transparent bg-muted pl-8 shadow-none focus-visible:border-transparent focus-visible:bg-muted/70 focus-visible:ring-0 dark:bg-muted [&::-webkit-search-cancel-button]:hidden"
+                  />
+                </div>
+              )}
+              {empty && (
+                <p className="px-3 py-2 text-sm text-muted-foreground">
+                  {searching ? 'No notes match' : notes.length === 0 ? 'No notes yet. New note starts one.' : 'No notes in this folder. New note starts one here.'}
+                </p>
+              )}
+              {groups.map((group) =>
+                apple ? (
+                  // Apple Notes' list: the title, then the date and the first
+                  // line of the text in grey, rows parted by hairlines.
+                  <section key={group.label} className="mb-5">
+                    <h2 className="px-1 pb-1 text-subhead font-semibold text-foreground">{group.label}</h2>
+                    <ul aria-label={group.label} className="flex flex-col">
+                      {group.notes.map((note) => (
+                        <li key={note.id} className="border-b border-border last:border-b-0">
+                          <button
+                            type="button"
+                            onClick={() => open(note.id)}
+                            aria-current={note.id === openId ? 'true' : undefined}
+                            className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1 py-2.5 text-left active:bg-accent"
                           >
-                            {titleOf(note.text)}
-                          </span>
-                          <span className="flex w-full min-w-0 items-baseline gap-2 text-subhead text-tertiary">
-                            <span className="shrink-0 tabular-nums">{whenText(note.updatedAt, now)}</span>
-                            <span data-findable className="min-w-0 truncate">
-                              {snippetOf(note.text) || 'No additional text'}
+                            <span
+                              data-findable
+                              className={cn('w-full truncate text-body font-semibold', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                            >
+                              {titleOf(note.text)}
                             </span>
-                          </span>
-                          {/* Under All notes or a search, where a note is in is worth saying. */}
-                          {((note.folder && (folder === null || searching)) || note.projectId != null) && (
-                            <span className="flex w-full min-w-0 items-center gap-1.5 text-footnote text-tertiary">
+                            <span className="flex w-full min-w-0 items-baseline gap-2 text-subhead text-tertiary">
+                              <span className="shrink-0 tabular-nums">{whenText(note.updatedAt, now)}</span>
+                              <span data-findable className="min-w-0 truncate">
+                                {snippetOf(note.text) || 'No additional text'}
+                              </span>
+                            </span>
+                            {/* Under All notes or a search, where a note is in is worth saying. */}
+                            {((note.folder && (folder === null || searching)) || note.projectId != null) && (
+                              <span className="flex w-full min-w-0 items-center gap-1.5 text-footnote text-tertiary">
+                                {note.folder && (folder === null || searching) && (
+                                  <>
+                                    <FolderIcon className="size-3.5 shrink-0" />
+                                    <span className="truncate">{note.folder}</span>
+                                  </>
+                                )}
+                                {note.projectId != null && (
+                                  <>
+                                    <ProjectDot id={note.projectId} className="size-1.5" />
+                                    <span className="truncate">{projectName(data.projects, note.projectId)}</span>
+                                  </>
+                                )}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : (
+                  <section key={group.label} className="mb-3">
+                    <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
+                    <ul aria-label={group.label} className="flex flex-col gap-0.5">
+                      {group.notes.map((note) => (
+                        <li key={note.id}>
+                          <Button
+                            variant="ghost"
+                            onClick={() => open(note.id)}
+                            aria-current={note.id === openId ? 'true' : undefined}
+                            className={cn(
+                              'h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal',
+                              note.id === openId && 'bg-primary/10 hover:bg-primary/10',
+                            )}
+                          >
+                            <span className="flex w-full min-w-0 items-center gap-2">
+                              <span
+                                data-findable
+                                className={cn('min-w-0 flex-1 truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
+                              >
+                                {titleOf(note.text)}
+                              </span>
+                            </span>
+                            <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
+                              {whenText(note.updatedAt, now)}
+                              {/* Under All notes or a search, where a note is in is worth saying. */}
                               {note.folder && (folder === null || searching) && (
                                 <>
-                                  <FolderIcon className="size-3.5 shrink-0" />
+                                  <FolderIcon className="size-3" />
                                   <span className="truncate">{note.folder}</span>
                                 </>
                               )}
@@ -697,73 +777,29 @@ export function Notes() {
                                 </>
                               )}
                             </span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : (
-                <section key={group.label} className="mb-3">
-                  <h2 className="px-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
-                  <ul aria-label={group.label} className="flex flex-col gap-0.5">
-                    {group.notes.map((note) => (
-                      <li key={note.id}>
-                        <Button
-                          variant="ghost"
-                          onClick={() => open(note.id)}
-                          aria-current={note.id === openId ? 'true' : undefined}
-                          className={cn(
-                            'h-auto w-full flex-col items-start gap-0.5 px-3 py-2 text-left font-normal whitespace-normal',
-                            note.id === openId && 'bg-primary/10 hover:bg-primary/10',
-                          )}
-                        >
-                          <span className="flex w-full min-w-0 items-center gap-2">
-                            <span
-                              data-findable
-                              className={cn('min-w-0 flex-1 truncate text-sm font-medium', isBlank(note.text) ? 'text-muted-foreground' : 'text-foreground')}
-                            >
-                              {titleOf(note.text)}
-                            </span>
-                          </span>
-                          <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
-                            {whenText(note.updatedAt, now)}
-                            {/* Under All notes or a search, where a note is in is worth saying. */}
-                            {note.folder && (folder === null || searching) && (
-                              <>
-                                <FolderIcon className="size-3" />
-                                <span className="truncate">{note.folder}</span>
-                              </>
-                            )}
-                            {note.projectId != null && (
-                              <>
-                                <ProjectDot id={note.projectId} className="size-1.5" />
-                                <span className="truncate">{projectName(data.projects, note.projectId)}</span>
-                              </>
-                            )}
-                          </span>
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ),
-            )}
-          </div>
-          {split && current && (
-            // As long as the note is: the page scrolls, not a box inside it.
-            // Held to a readable line length.
-            <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
-              {reading ? (
-                <NoteDocument text={current.text} />
-              ) : (
-                <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ),
               )}
             </div>
-          )}
-        </div>
-      )}
-    </div>
+            {split && current && (
+              // As long as the note is: the page scrolls, not a box inside it.
+              // Held to a readable line length.
+              <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
+                {reading ? (
+                  <NoteDocument text={current.text} />
+                ) : (
+                  <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </NoteLinksContext.Provider>
   )
 }
 
@@ -782,8 +818,9 @@ function NoteText({ note, live, focused, onChange, onLive }: { note: Note; live:
     <div className="relative">
       {writtenLive && <LiveBar live={live} />}
       <NoteRefs note={note.id} tasks={mentionsIn(note.text)} links={links} />
+      <LinkedFrom note={note.id} />
       {!writtenLive ? (
-        <NoteEditor key="own" text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} date={note.updatedAt} />
+        <NoteEditor key="own" text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} date={note.updatedAt} id={note.id} />
       ) : live.synced ? (
         <NoteEditor
           key="live"
@@ -791,6 +828,7 @@ function NoteText({ note, live, focused, onChange, onLive }: { note: Note; live:
           onChange={onLive}
           focused={focused}
           tasks={data.tasks}
+          id={note.id}
           live={binding}
           date={note.updatedAt}
           onActivity={() => live.active()}
@@ -798,7 +836,7 @@ function NoteText({ note, live, focused, onChange, onLive }: { note: Note; live:
       ) : (
         // Until the room's copy has arrived there is nothing to type into:
         // the note as stored, to read.
-        <NoteEditor key="waiting" text={note.text} onChange={() => {}} focused={false} tasks={data.tasks} date={note.updatedAt} readOnly />
+        <NoteEditor key="waiting" text={note.text} onChange={() => {}} focused={false} tasks={data.tasks} date={note.updatedAt} id={note.id} readOnly />
       )}
     </div>
   )
@@ -821,10 +859,13 @@ function NoteDocument({ text }: { text: string }) {
 }
 
 // A link opens in the browser, never inside the app's window. A link to a
-// task (done:task/<id>) is a mention and is drawn as the task; this is the
-// only place a mention changes how a note is drawn: the Markdown parser has
-// already found it as a link, and everything around it is drawn as before.
+// task (done:task/<id>) is a mention and is drawn as the task, and one to a
+// note (done:note/<id>) as a chip that opens it; this is the only place
+// either changes how a note is drawn: the Markdown parser has already found
+// it as a link, and everything around it is drawn as before.
 function NoteLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const linked = noteLinkId(href)
+  if (linked !== null) return <NoteLinkChip id={linked} fallback={children} />
   const mentioned = mentionId(href)
   // Alone on its line, the task's card; among other words, small inside the sentence.
   if (mentioned !== null)

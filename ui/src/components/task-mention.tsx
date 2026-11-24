@@ -1,8 +1,8 @@
 // Tasks mentioned in a note (see lib/mentions): drawn as the task itself
 // when the note is read, as chips above the text while it is written, and
 // offered in a list under the caret after an @.
-import { useEffect, useState, type ReactNode } from 'react'
-import { CheckIcon, ChevronRightIcon, CircleIcon, ListChecksIcon, StarIcon } from 'lucide-react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { CheckIcon, ChevronRightIcon, CircleIcon, FileTextIcon, ListChecksIcon, StarIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectDot } from '@/components/marks'
 import { NotesText } from '@/components/notes-text'
@@ -13,7 +13,7 @@ import { play } from '@/lib/sounds'
 import { change } from '@/lib/store'
 import { recordStep } from '@/lib/undo'
 import { describeDay, shortDay, TODAY } from '@/lib/days'
-import { mentionDetails, type Detail } from '@/lib/mentions'
+import { mentionDetails, type Detail, type Offer } from '@/lib/mentions'
 import { toggleExpanded, useExpanded } from '@/lib/expanded'
 import { markOpen, subtasksOf, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
@@ -285,47 +285,66 @@ export function caretPoint(field: HTMLTextAreaElement, position: number): { top:
   return point
 }
 
-// The tasks offered after an @, just under the line being written.
+// The tasks and notes offered after an @, just under the line being
+// written: the tasks first, then the notes, each under its name once there
+// are notes to tell them apart from. One list for the keyboard: `chosen`
+// counts through both.
 export function MentionPicker({
-  tasks,
+  offers,
   chosen,
   at,
   onPick,
   onHover,
 }: {
-  tasks: Task[]
+  offers: Offer[]
   chosen: number
   at: { top: number; left: number }
-  onPick(task: Task): void
+  onPick(offer: Offer): void
   onHover(index: number): void
 }) {
+  const grouped = offers.some((o) => o.kind === 'note')
   return (
     <div
       role="listbox"
-      aria-label="Tasks"
+      aria-label="Tasks and notes"
       style={{ top: at.top, left: at.left }}
       className="absolute z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-md"
       // A click on the list must not take focus from the note being written.
       onMouseDown={(event) => event.preventDefault()}
     >
-      {tasks.map((task, i) => (
-        <div
-          key={task.id}
-          role="option"
-          aria-selected={i === chosen}
-          onMouseEnter={() => onHover(i)}
-          onClick={() => onPick(task)}
-          // Taller on a phone, a row a thumb can hit.
-          className={cn(
-            'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 max-md:py-2.5',
-            i === chosen && 'bg-accent text-accent-foreground',
+      {offers.map((offer, i) => (
+        <Fragment key={offer.kind === 'task' ? `t${offer.task.id}` : `n${offer.id}`}>
+          {grouped && offer.kind !== offers[i - 1]?.kind && (
+            <div role="presentation" className="px-2 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
+              {offer.kind === 'task' ? 'Tasks' : 'Notes'}
+            </div>
           )}
-        >
-          <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{task.title}</span>
-          {task.due && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{shortDay(task.due)}</span>}
-          {task.projectId != null && <ProjectDot id={task.projectId} className="size-1.5 shrink-0" />}
-        </div>
+          <div
+            role="option"
+            aria-selected={i === chosen}
+            onMouseEnter={() => onHover(i)}
+            onClick={() => onPick(offer)}
+            // Taller on a phone, a row a thumb can hit.
+            className={cn(
+              'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 max-md:py-2.5',
+              i === chosen && 'bg-accent text-accent-foreground',
+            )}
+          >
+            {offer.kind === 'task' ? (
+              <>
+                <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{offer.task.title}</span>
+                {offer.task.due && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{shortDay(offer.task.due)}</span>}
+                {offer.task.projectId != null && <ProjectDot id={offer.task.projectId} className="size-1.5 shrink-0" />}
+              </>
+            ) : (
+              <>
+                <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{offer.title}</span>
+              </>
+            )}
+          </div>
+        </Fragment>
       ))}
     </div>
   )
