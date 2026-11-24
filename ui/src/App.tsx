@@ -34,6 +34,7 @@ import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 import { setFilterOpen } from '@/lib/view-filter-store'
+import { back, opened } from '@/lib/view-history'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
 const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
@@ -77,6 +78,7 @@ export default function App() {
     ...CLOSED,
     // A reminder that was showing before a reload is still showing after it.
     view: { kind: getFocus()?.reminding ? 'focus' : 'today' },
+    history: [],
     tlStart: addDays(TODAY, -4),
     focusPick: null,
     focusMinutes: DEFAULT_MINUTES,
@@ -95,8 +97,8 @@ export default function App() {
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
   // The page a phone swipes back from.
   const page = useRef<HTMLDivElement>(null)
-  const backToLists = useCallback(() => setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'lists' } })), [])
-  useEdgeSwipeBack(isMobile && !isTab(ui.view) && !isOpen(ui), backToLists, page)
+  const goBack = useCallback(() => latest.current.back(), [])
+  useEdgeSwipeBack(isMobile && !isTab(ui.view) && !isOpen(ui), goBack, page)
 
   // One message at a time, like one thing said at a time: a new one takes
   // the place of the last, and takes its Undo with it.
@@ -160,7 +162,13 @@ export default function App() {
     closeAll,
     say,
     setZoom,
-    openView: (view: View) => setUi((u) => ({ ...u, ...CLOSED, view })),
+    openView: (view: View) => setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) })),
+    back: () =>
+      setUi((u) => {
+        // A list that is gone, or is not in this space, is skipped.
+        const to = back(u.history, (v) => v.kind !== 'project' || shown.projects.some((p) => p.id === v.id))
+        return { ...u, ...CLOSED, view: to.view, history: to.history }
+      }),
     // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
       setUi((u) => ({
@@ -179,8 +187,8 @@ export default function App() {
       setUi((u) => ({ ...u, ...CLOSED, searching: true }))
     },
     reveal(hit) {
-      if (hit.kind === 'project') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'project', id: hit.id } }))
-      if (hit.kind === 'note') return setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'notes', id: hit.id } }))
+      if (hit.kind === 'project') return app.openView({ kind: 'project', id: hit.id })
+      if (hit.kind === 'note') return app.openView({ kind: 'notes', id: hit.id })
       // A subtask is edited from the task it is under, in that task's list.
       const found = data.tasks.find((t) => t.id === hit.id)
       const task = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
@@ -190,7 +198,7 @@ export default function App() {
       // it can be ticked off, or clicked to edit, right there.
       // Already on the page you are looking at: stay there.
       const shown = document.querySelector(`[data-task="${task.id}"]`) !== null
-      setUi((u) => ({ ...u, ...CLOSED, view: shown ? u.view : view }))
+      setUi((u) => (shown ? { ...u, ...CLOSED } : { ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
       notice(task.id)
       const bringIntoView = () =>
         (document.querySelector(`[data-task="${hit.id}"]`) ?? document.querySelector(`[data-task="${task.id}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' })

@@ -33,15 +33,38 @@ import { colorIndex, counts, openTasks, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The three lists that are tabs of their own. Everything else is reached from
-// Lists, and shows a way back to it.
+// Lists, and shows a way back to where it was opened from.
 const TABS = ['today', 'inbox', 'upcoming', 'lists'] as const
 export const isTab = (view: View) => (TABS as readonly string[]).includes(view.kind)
+
+// What the back button says: where it goes, as on iOS. A long list name is
+// "Back" rather than a name cut short in the bar.
+const PLACE: Partial<Record<View['kind'], string>> = {
+  today: 'Today',
+  inbox: 'Inbox',
+  upcoming: 'Upcoming',
+  lists: 'Lists',
+  mine: 'Assigned',
+  notes: 'Notes',
+  board: 'Board',
+  timeline: 'Timeline',
+  focus: 'Focus',
+  timesheet: 'Time sheet',
+  completed: 'Completed',
+  settings: 'Settings',
+  notifications: 'Notifications',
+}
+function backLabel(to: View | undefined, projects: { id: number; name: string }[]): string {
+  if (!to) return 'Lists'
+  const name = to.kind === 'project' ? projects.find((p) => p.id === to.id)?.name : PLACE[to.kind]
+  return name && name.length <= 12 ? name : 'Back'
+}
 
 // The navigation bar and large title. The bar is always there, holding the
 // way back; its background and its small title appear once the large title
 // has scrolled up under it, as in Mail, Notes and Reminders.
 export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
-  const { ui, openView, closeAll } = useApp()
+  const { ui, shown, back, closeAll } = useApp()
   const bar = useRef<HTMLDivElement>(null)
   const big = useRef<HTMLHeadingElement>(null)
   // 0: at the top. 1: the page is under the bar. 2: the large title is gone.
@@ -86,11 +109,11 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
             {pushed && (
               <button
                 type="button"
-                onClick={() => openView({ kind: 'lists' })}
+                onClick={back}
                 className="relative z-10 -ml-1 flex items-center text-body text-primary active:opacity-40"
               >
                 <ChevronLeftIcon className="size-7" strokeWidth={2.4} />
-                Lists
+                {backLabel(ui.history[ui.history.length - 1], shown.projects)}
               </button>
             )}
             {menu && (
@@ -334,7 +357,7 @@ export function ListsScreen() {
   )
 }
 
-// Back to Lists with a swipe from the left edge of the screen, as anywhere in
+// Back with a swipe from the left edge of the screen, as anywhere in
 // iOS. The page follows the finger; letting go past a third of the width, or
 // with a flick, goes back.
 export function useEdgeSwipeBack(active: boolean, back: () => void, page: RefObject<HTMLElement | null>) {
