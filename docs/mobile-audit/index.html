@@ -64,7 +64,7 @@
 <p class="meta">24 Nov 2026 · version 0.1.189 · screenshots taken from the live web app (thedone.app, signed in, real data) at exact device sizes: iPhone 17 portrait 402×874 pt and landscape 874×402 pt, iPad (A16) portrait 820×1180 pt and landscape 1180×820 pt. The iPhone and iPad apps show this same interface inside the Tauri web view. Safe-area problems (notch, Dynamic Island, status bar, home indicator) cannot show in a browser frame, so those findings come from the code and are marked as such.</p>
 
 <nav class="toc">
-  <a href="#summary">Summary</a><a href="#matrix">Device matrix</a><a href="#cross">Cross-cutting causes</a>
+  <a href="#fixed"><b>Fixed: before and after</b></a><a href="#summary">Summary</a><a href="#matrix">Device matrix</a><a href="#cross">Cross-cutting causes</a>
   <a href="#today">Today</a><a href="#inbox">Inbox</a><a href="#upcoming">Upcoming</a><a href="#lists">Lists</a><a href="#project">Project</a>
   <a href="#mine">Assigned to me</a><a href="#completed">Completed</a><a href="#board">Board</a><a href="#timeline">Timeline</a>
   <a href="#notes">Notes</a><a href="#focus">Focus</a><a href="#timesheet">Time sheet</a><a href="#search">Search</a>
@@ -273,6 +273,38 @@
 <li><b>Signing:</b> App Group and the extension need provisioning under team 99MUK5B6TA (development builds) and, for TestFlight/App Store, distribution profiles. Live Activities need iOS 16.2+ and <code>NSSupportsLiveActivities</code> in Info.plist.</li></ul>
 <h4>Unknowns</h4><ul><li>Whether <code>tauri ios build</code> keeps a hand-added extension target when it regenerates the Xcode project; may need the target added by a script after <code>tauri ios init</code>.</li><li>Widget taps need deep links into the app (<code>done://task/…</code>), which also do not exist yet beyond sign-in.</li></ul></div></div>
 
+<h2 id="fixed">Fixed: before and after</h2>
+<p class="sub">Built on 24 Nov in four branches merged into one (<code>fix/mobile-polish</code>): layout and safe areas, Timeline, Notes, touch fixes. 599 interface tests pass. "After" screenshots come from the merged interface on a copy of the real tasks at the same device sizes, and from the iOS simulator for the iPad and landscape shots.</p>
+<div class="view wide"><div><h3>Timeline on iPhone</h3><p>Titles in their own column (half the width on a phone), bars beside them, today one day from the left, a ‹ chip for bars off screen, View / Today / Filter controls that fit, and press-and-hold before a bar moves so a pan scrolls.</p></div><div class="shots"><figure><img src="phone-timeline.png" alt="Timeline on iPhone before"><div class="cap">Before</div></figure><figure><img src="after-phone-timeline.png" alt="Timeline on iPhone after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Timeline on iPad, landscape</h3><p>Titles never run under bars, the first bar is no longer cut off, no sideways page scroll, No date capped beside the chart.</p></div><div class="shots"><figure><img src="ipad-landscape-timeline.png" alt="Timeline on iPad, landscape before"><div class="cap">Before</div></figure><figure><img src="after-ipad-landscape-timeline-v1.png" alt="Timeline on iPad, landscape after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Timeline on iPad, portrait</h3><p>The chart gets the width instead of a 150 pt strip.</p></div><div class="shots"><figure><img src="ipad-portrait-timeline.png" alt="Timeline on iPad, portrait before"><div class="cap">Before</div></figure><figure><img src="after-ipad-portrait-timeline-v1.png" alt="Timeline on iPad, portrait after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>A note</h3><p>Live preview: headings, bold, bullets and numbers shown formatted, Markdown marks only on the line you are on; the first line is a 28 pt title with the date under it; one sticky bar with back and ⋯ (folder, project, read, delete). Autocorrect and predictions on; a writing bar above the keyboard (checklist, bullet, heading, bold, @task, Done).</p></div><div class="shots"><figure><img src="phone-note-editor.png" alt="A note before"><div class="cap">Before</div></figure><figure><img src="after-phone-note.png" alt="A note after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Notes list</h3><p>Apple Notes rows (title, date and first line), one back button, a compose button at the bottom right.</p></div><div class="shots"><figure><img src="phone-notes-all.png" alt="Notes list before"><div class="cap">Before</div></figure><figure><img src="after-phone-notes-all-v1.png" alt="Notes list after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Task details</h3><p>Subtasks shown (tick, add), plus Status, Make today’s goal and Focus on this; the sheet scrolls.</p></div><div class="shots"><figure><img src="phone-task-details-no-subtasks.png" alt="Task details before"><div class="cap">Before</div></figure><figure><img src="after-phone-task-details.png" alt="Task details after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>New task</h3><p>“p1” is marked in blue like the date and the list.</p></div><div class="shots"><figure><img src="phone-quick-add-parsed.png" alt="New task before"><div class="cap">Before</div></figure><figure><img src="after-phone-quick-add.png" alt="New task after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Lists</h3><p>Assigned to me is back (with its count), every More row has its icon, Completed has a count.</p></div><div class="shots"><figure><img src="phone-lists-more.png" alt="Lists before"><div class="cap">Before</div></figure><figure><img src="after-phone-lists.png" alt="Lists after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>iPad, the app itself (simulator)</h3><p>The header is clear of the status bar; in portrait the sidebar is put away behind a button; no keyboard hints without a keyboard.</p></div><div class="shots"><figure><img src="sim-before-ipad-portrait.png" alt="iPad, the app itself (simulator) before"><div class="cap">Before</div></figure><figure><img src="sim-after-ipad-portrait.png" alt="iPad, the app itself (simulator) after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>iPhone landscape</h3><p>Stays the phone layout (tab bar, New Task) instead of the Mac layout. <b>Still open:</b> the Dynamic Island covers the start of the content, see below.</p></div><div class="shots"><figure><img src="landscape-today.png" alt="iPhone landscape before"><div class="cap">Before</div></figure><figure><img src="sim-after-iphone-landscape.png" alt="iPhone landscape after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Today</h3><p>The New Task button is a solid pill, so rows under it no longer show through.</p></div><div class="shots"><figure><img src="phone-today.png" alt="Today before"><div class="cap">Before</div></figure><figure><img src="after-phone-today.png" alt="Today after"><div class="cap">After</div></figure></div></div>
+
+<h3>Also changed, without a screenshot</h3>
+<ul>
+<li><b>Layout by device:</b> phone when narrow or a touch screen with a short side under 500 pt (iPhone landscape), tablet for other touch screens (iPad: 44 pt sidebar rows, no shortcut hints, no hover-only buttons, sidebar put away in portrait), desktop for the Mac (unchanged).</li>
+<li><b>Safe areas on every layout</b>: app shell, sidebar, nav bar, tab bar, New Task, find bar, toasts and dialogs keep clear of the notch, status bar and home indicator. All zero on a Mac.</li>
+<li><b>Long press</b> opens the menu for what was pressed (it opened the last right-clicked target).</li>
+<li><b>Back</b> returns to where you came from, not always Lists, and says where it goes.</li>
+<li><b>Settings in the iPhone/iPad app</b> no longer shows the Mac's MCP, text size and update panes.</li>
+<li><b>Time sheet</b>: the remove button shows on touch screens; 44 pt day arrows on phones.</li>
+<li><b>Upcoming</b>: day headings stay in sight on a phone.</li>
+<li><b>Rotating</b> no longer switches which element scrolls.</li>
+</ul>
+<h3>Still open</h3>
+<ul>
+<li><span class="sev broken">open</span><b>iPhone landscape, in the app:</b> the page is told the left and right safe areas are 0, so the Dynamic Island covers the start of the content (Safari on the same simulator reports 62 pt each side). Turning off the web view's automatic inset adjustment did not change it; needs a look at how Tauri's iOS view controller lays out the web view.</li>
+<li><span class="sev missing">not built</span>Widget and Dynamic Island focus timer (plan above).</li>
+<li><span class="sev missing">not built</span>Full-screen phone search, Settings in grouped rows, a segmented control for Board columns on a phone, New Task chips for date/priority/list, pinned notes and swipe to delete in Notes.</li>
+<li><span class="sev ugly">to check on device</span>The writing bar's position above the real keyboard, checkbox taps in notes and hold-to-drag on Timeline were built and tested in code, not yet on a phone.</li>
+</ul>
 <h2 id="plan">Fix plan, in order</h2>
 <ol class="plan">
 <li><b>Layouts by device, not width</b> (phone / tablet / desktop) and <b>all four safe-area insets on the app shell</b>. Fixes the cut-off header, landscape and most of iPad at once. Verify on the iPhone 17 and iPad (A16) simulators in both orientations.</li>
