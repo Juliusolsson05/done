@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, deleteAccount, isDesktop, restart, signIn, signOut } from '@/lib/backend'
+import { canSignIn, deleteAccount, isDesktop, MAC_DOWNLOAD, restart, signIn, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -145,6 +145,17 @@ export function Settings() {
               label="Other apps: add this to their MCP settings"
               text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
             />
+          </Pane>
+        )}
+
+        {/* In a browser: the Mac app, one download away (Julius, 23 Nov). The
+            app itself updates on its own, so it has no need of this. */}
+        {!isDesktop && (
+          <Pane title="Mac app">
+            <p className="text-muted-foreground">done for Mac, for Macs with Apple silicon. It updates itself after that.</p>
+            <Button asChild size="sm" className="self-start">
+              <a href={MAC_DOWNLOAD}>Download for Mac</a>
+            </Button>
           </Pane>
         )}
 
