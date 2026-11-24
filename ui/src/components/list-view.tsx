@@ -212,7 +212,7 @@ export function ListView() {
                   // On a phone a long day of tasks keeps its day in sight
                   // (Upcoming lost which day it was, 23 Nov audit): the heading
                   // stays under the nav bar until the next one pushes it on.
-                  'max-md:sticky max-md:top-[calc(env(safe-area-inset-top)+2.75rem)] max-md:z-10 max-md:bg-background max-md:py-1',
+                  'max-md:sticky max-md:top-[calc(var(--safe-top)+2.75rem)] max-md:z-10 max-md:bg-background max-md:py-1',
                 )}
               >
                 {section.heading}

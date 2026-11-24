@@ -41,6 +41,12 @@ const ios = typeof navigator !== 'undefined' && isIosAgent(navigator.userAgent, 
 export const isIosApp = isDesktop && ios
 export const isMacApp = isDesktop && !ios && typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
 
+// The window's safe area as the iPhone or iPad app reads it natively, in
+// points: [top, right, bottom, left]. Null anywhere else, or if the app could
+// not tell. See lib/safe-area.ts for why this exists alongside env().
+export const nativeSafeArea = async (): Promise<[number, number, number, number] | null> =>
+  isIosApp && tauri ? ((await tauri.core.invoke<[number, number, number, number] | null>('safe_area')) ?? null) : null
+
 // The Mac app as a disk image, signed with a Developer ID and notarized so it
 // opens with one double-click: made on a Mac by done-infra's notarize-mac.sh
 // and kept on the release `mac`, a pre-release that is never "latest" (the

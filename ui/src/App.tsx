@@ -493,7 +493,7 @@ export default function App() {
                 // phone's bars keep clear of those themselves). The page's own
                 // margin then starts at the safe edge, as in iOS's own apps.
                 // All 0 on a Mac. The background reaches the edges.
-                'bg-background pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:pt-[env(safe-area-inset-top)] md:pb-[env(safe-area-inset-bottom)]',
+                'bg-background pr-[var(--safe-right)] pl-[var(--safe-left)] md:pt-[var(--safe-top)] md:pb-[var(--safe-bottom)]',
                 view.kind === 'lists' && 'max-md:bg-grouped',
               )}
               defaultOpen={sidebarWasOpen()}
@@ -512,7 +512,7 @@ export default function App() {
                   'min-w-0 md:overflow-y-auto',
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
-                  'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+2.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+8rem)]',
+                  'max-md:px-4 max-md:pt-[calc(var(--safe-top)+2.75rem)] max-md:pb-[calc(var(--safe-bottom)+8rem)]',
                   // Lists is a grouped screen: white groups on grey.
                   view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',

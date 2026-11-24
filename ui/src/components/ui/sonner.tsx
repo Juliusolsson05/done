@@ -9,10 +9,10 @@ import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon
 // message never lands under the status bar, the notch or the home indicator.
 // The insets are 0 on a Mac, where nothing moves.
 const inset = (gap: string) => ({
-  top: `calc(env(safe-area-inset-top) + ${gap})`,
-  right: `calc(env(safe-area-inset-right) + ${gap})`,
-  bottom: `calc(env(safe-area-inset-bottom) + ${gap})`,
-  left: `calc(env(safe-area-inset-left) + ${gap})`,
+  top: `calc(var(--safe-top) + ${gap})`,
+  right: `calc(var(--safe-right) + ${gap})`,
+  bottom: `calc(var(--safe-bottom) + ${gap})`,
+  left: `calc(var(--safe-left) + ${gap})`,
 })
 
 const Toaster = ({ ...props }: ToasterProps) => {

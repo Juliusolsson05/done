@@ -22,7 +22,7 @@ export function NotesBar({ back, onBack, children }: { back: string; onBack: () 
     <div
       data-note-bar
       className={cn(
-        'fixed inset-x-0 top-0 z-30 pt-[env(safe-area-inset-top)] transition-colors duration-200',
+        'fixed inset-x-0 top-0 z-30 pt-[var(--safe-top)] transition-colors duration-200',
         under ? 'border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150' : 'border-b border-transparent bg-background',
       )}
     >
@@ -67,7 +67,7 @@ export function ComposeButton({ onClick }: { onClick: () => void }) {
       type="button"
       aria-label="New note"
       onClick={onClick}
-      className="fixed right-[max(16px,calc(env(safe-area-inset-right)+16px))] bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+12px)] z-30 flex size-12 items-center justify-center rounded-full bg-background/85 text-primary shadow-[0_1px_8px_rgb(0_0_0/0.12)] backdrop-blur-xl active:opacity-40"
+      className="fixed right-[max(16px,calc(var(--safe-right)+16px))] bottom-[calc(3.0625rem+var(--safe-bottom)+12px)] z-30 flex size-12 items-center justify-center rounded-full bg-background/85 text-primary shadow-[0_1px_8px_rgb(0_0_0/0.12)] backdrop-blur-xl active:opacity-40"
     >
       <SquarePenIcon className="size-6" strokeWidth={2} />
     </button>,
@@ -127,7 +127,7 @@ export function NoteSheet({
   }
   const check = (on: boolean) => <CheckIcon className={cn('ml-auto size-5 text-primary', !on && 'invisible')} strokeWidth={2.4} />
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pb-[calc(var(--safe-bottom)+0.5rem)]" onClick={onClose}>
       <div className="flex max-h-[70svh] animate-rise flex-col overflow-y-auto rounded-2xl bg-background/95 backdrop-blur-xl" onClick={(event) => event.stopPropagation()}>
         {step === 'main' && (
           <>

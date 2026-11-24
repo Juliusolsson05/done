@@ -658,7 +658,7 @@ export function Timeline() {
               // is given back, or the window would still scroll by it. Not
               // flexed: the page around it would otherwise stretch it again.
               flex: 'none',
-              height: 'calc(100svh - env(safe-area-inset-top) - 2.75rem - 3.0625rem - env(safe-area-inset-bottom))',
+              height: 'calc(100svh - var(--safe-top) - 2.75rem - 3.0625rem - var(--safe-bottom))',
               marginBottom: 'calc(3.0625rem - 8rem)',
             }
           : undefined

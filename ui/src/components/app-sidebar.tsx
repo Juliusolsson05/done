@@ -251,7 +251,7 @@ export function AppSidebar() {
     // from the bar at the bottom); in a window it can be put away with the
     // button at the page's top left, or Cmd+B.
     <Sidebar collapsible="offcanvas" className="select-none">
-      <SidebarHeader className="flex-row items-center justify-between px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(env(safe-area-inset-top)+1rem)]">
+      <SidebarHeader className="flex-row items-center justify-between px-4 pt-4 pb-1 text-base font-semibold tracking-tight max-md:pt-[calc(var(--safe-top)+1rem)]">
         {/* The wordmark: done's round check, ticked, as on the app icon, in the
             colour of done, beside the name in the display face. */}
         <span className="flex items-center gap-2 font-display text-[19px] font-semibold tracking-[-0.02em]">
@@ -313,7 +313,7 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="max-md:pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+      <SidebarFooter className="max-md:pb-[calc(var(--safe-bottom)+0.5rem)]">
         <SidebarMenu>
           {info.updateReady && (
             <SidebarMenuItem>

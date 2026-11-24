@@ -71,6 +71,68 @@ const RINGS: u32 = 20;
 #[derive(Default)]
 struct Focus(Mutex<Option<Session>>);
 
+/// The window's safe area in points, `[top, right, bottom, left]`, as UIKit
+/// knows it. iPhone and iPad only; `None` elsewhere.
+///
+/// WHY the app asks UIKit instead of trusting `env(safe-area-inset-*)`: in this
+/// web view WebKit reports the side insets as 0 when the phone is held
+/// sideways, so the Dynamic Island covered the start of every view (#70).
+/// Safari on the same simulator reports 62 pt each side, and switching the
+/// scroll view's automatic inset adjustment off did not change it (#65). The
+/// window the web view is in has the right values, so they are read from there
+/// and the page sets them as CSS variables (ui/src/lib/safe-area.ts).
+///
+/// UIKit must be touched on the main thread: `with_webview` runs the closure
+/// there, and the answer comes back over a channel. The command is async so it
+/// runs off the main thread and can wait without blocking the closure it
+/// waits for.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn safe_area(window: tauri::WebviewWindow) -> Option<[f64; 4]> {
+    use objc2::encode::{Encode, Encoding};
+    use objc2::runtime::AnyObject;
+
+    // UIEdgeInsets, field for field, so UIKit's struct can be returned by value.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct EdgeInsets {
+        top: f64,
+        left: f64,
+        bottom: f64,
+        right: f64,
+    }
+    unsafe impl Encode for EdgeInsets {
+        const ENCODING: Encoding =
+            Encoding::Struct("UIEdgeInsets", &[f64::ENCODING, f64::ENCODING, f64::ENCODING, f64::ENCODING]);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| unsafe {
+            let view = webview.inner() as *mut AnyObject;
+            // The web view's own window: its insets are the screen's, whatever
+            // the web view and its scroll view were told.
+            let window: *mut AnyObject = objc2::msg_send![view, window];
+            let insets = if window.is_null() {
+                None
+            } else {
+                let i: EdgeInsets = objc2::msg_send![window, safeAreaInsets];
+                Some([i.top, i.right, i.bottom, i.left])
+            };
+            let _ = tx.send(insets);
+        })
+        .ok()?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten()).await.ok().flatten()
+}
+
+// Elsewhere WebKit's own env() values are right; the page treats `None` as
+// "nothing to add".
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn safe_area() -> Option<[f64; 4]> {
+    None
+}
+
 #[tauri::command]
 fn focus_set(focus: tauri::State<Focus>, session: Option<Session>) {
     *focus.0.lock().unwrap() = session;
@@ -338,7 +400,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]

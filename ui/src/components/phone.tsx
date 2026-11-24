@@ -100,13 +100,13 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
         <div
           ref={bar}
           className={cn(
-            'fixed inset-x-0 top-0 z-30 pt-[env(safe-area-inset-top)] transition-colors duration-200',
+            'fixed inset-x-0 top-0 z-30 pt-[var(--safe-top)] transition-colors duration-200',
             under > 0 ? 'border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150' : 'border-b border-transparent',
           )}
         >
           {/* Its background runs edge to edge; what is on it stays clear of
               the notch when the phone is turned sideways. */}
-          <div className="relative flex h-11 items-center pr-[max(0.5rem,env(safe-area-inset-right))] pl-[max(0.5rem,env(safe-area-inset-left))]">
+          <div className="relative flex h-11 items-center pr-[max(0.5rem,var(--safe-right))] pl-[max(0.5rem,var(--safe-left))]">
             {pushed && (
               <button
                 type="button"
@@ -152,7 +152,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
           (actions || ui.confirmDelete) &&
           createPortal(
             <div
-              className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pl-[max(0.5rem,env(safe-area-inset-left))]"
+              className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pr-[max(0.5rem,var(--safe-right))] pb-[calc(var(--safe-bottom)+0.5rem)] pl-[max(0.5rem,var(--safe-left))]"
               onClick={() => {
                 // Asking to delete keeps the sheet up, now asking to confirm.
                 setActions(false)
@@ -213,7 +213,7 @@ export function TabBar() {
     // Edge to edge, with its tabs inside the safe area on every side.
     <nav
       aria-label="Views"
-      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+env(safe-area-inset-bottom))] items-start border-t border-border bg-background/80 pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] backdrop-blur-xl backdrop-saturate-150"
+      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
     >
       {tab('today', 'Today', CalendarIcon, late)}
       {tab('inbox', 'Inbox', InboxIcon)}
@@ -234,7 +234,7 @@ export function NewTaskButton() {
     <button
       type="button"
       onClick={add}
-      className="fixed bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+0.5rem)] left-[max(0.75rem,env(safe-area-inset-left))] z-30 flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
+      className="fixed bottom-[calc(3.0625rem+var(--safe-bottom)+0.5rem)] left-[max(0.75rem,var(--safe-left))] z-30 flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
     >
       <span className="flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <PlusIcon className="size-4.5" strokeWidth={3} />
