@@ -23,13 +23,14 @@ import {
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  UserCheckIcon,
   TimerIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { useApp, colorStyle } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
 import { tick } from '@/lib/haptics'
-import { colorIndex, counts, openTasks, type View } from '@/lib/tasks'
+import { colorIndex, counts, isSubtask, openTasks, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The three lists that are tabs of their own. Everything else is reached from
@@ -233,7 +234,7 @@ export function NewTaskButton() {
     <button
       type="button"
       onClick={add}
-      className="fixed bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+0.5rem)] left-[max(0.75rem,env(safe-area-inset-left))] z-30 flex items-center gap-2 rounded-full bg-background/80 py-2 pr-4 pl-2 text-body font-semibold text-primary backdrop-blur-xl active:opacity-40"
+      className="fixed bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+0.5rem)] left-[max(0.75rem,env(safe-area-inset-left))] z-30 flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
     >
       <span className="flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <PlusIcon className="size-4.5" strokeWidth={3} />
@@ -282,8 +283,11 @@ function Card({ icon: Icon, name, count, color, onClick }: { icon: LucideIcon; n
 
 // Everything that is not a tab: the lists, the projects and the other views.
 export function ListsScreen() {
-  const { shown, keep, openView, search, newProject } = useApp()
+  const { shown, keep, openView, search, newProject, me } = useApp()
   const count = counts(shown.tasks, TODAY, keep)
+  // Assigned to me had no way in on a phone but search (23 Nov audit).
+  const mine = me === null ? null : openTasks(shown.tasks).filter((t) => (t.assignees ?? []).includes(me)).length
+  const doneToday = shown.tasks.filter((t) => t.done && t.doneDay === TODAY && !isSubtask(t)).length
   const go = (view: View) => {
     tick()
     openView(view)
@@ -314,7 +318,7 @@ export function ListsScreen() {
         <Card icon={CalendarIcon} name="Today" count={count.today} color="bg-primary" onClick={() => go({ kind: 'today' })} />
         <Card icon={CalendarDaysIcon} name="Upcoming" count={count.upcoming} color="bg-overdue" onClick={() => go({ kind: 'upcoming' })} />
         <Card icon={InboxIcon} name="Inbox" count={count.inbox} color="bg-tertiary" onClick={() => go({ kind: 'inbox' })} />
-        <Card icon={CheckIcon} name="Completed" color="bg-foreground/70" onClick={() => go({ kind: 'completed' })} />
+        <Card icon={CheckIcon} name="Completed" count={doneToday} color="bg-foreground/70" onClick={() => go({ kind: 'completed' })} />
       </div>
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">My Lists</h2>
@@ -338,6 +342,9 @@ export function ListsScreen() {
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">More</h2>
         <Group>
+          {mine !== null && (
+            <GroupRow icon={<UserCheckIcon className="size-4" strokeWidth={2.4} />} name="Assigned to me" count={mine} color="bg-project-3" onClick={() => go({ kind: 'mine' })} />
+          )}
           {more.map(([kind, name, Icon, color]) => (
             <GroupRow
               key={kind}

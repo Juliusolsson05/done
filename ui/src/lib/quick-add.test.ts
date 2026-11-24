@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseQuickAdd, peopleSpans, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
+import { parseQuickAdd, peopleSpans, prioritySpan, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
 
 // 13 November 2026 is a Friday.
 const today = '2026-11-13'
@@ -231,5 +231,21 @@ describe('+name', () => {
     const s = suggestPeople('call +ge now', 8, hop)!
     expect(takePerson('call +ge now', s, hop[1])).toEqual({ text: 'call +geart now', caret: 12 })
     expect(peopleSpans('call +geart and +nobody', hop)).toEqual([{ start: 5, end: 11 }])
+  })
+})
+
+// 24 Nov: "p1" was taken as the priority but not marked in the field, where
+// the date and the project are.
+describe('prioritySpan', () => {
+  it('marks the first standalone p1 to p4', () => {
+    const text = 'Call the bank tomorrow p1 @hop'
+    expect(prioritySpan(text)).toEqual({ start: 23, end: 25 })
+    expect(prioritySpan('P3 fix it')).toEqual({ start: 0, end: 2 })
+  })
+  it('leaves words that only contain p1, and p5, alone', () => {
+    expect(prioritySpan('top1 sap1 p5 p12')).toBeNull()
+  })
+  it('skips one inside the date phrase', () => {
+    expect(prioritySpan('x p1 y p2', { start: 2, end: 4 })).toEqual({ start: 7, end: 9 })
   })
 })

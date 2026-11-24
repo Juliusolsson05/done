@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
@@ -461,6 +461,17 @@ export default function App() {
     setMenuTarget(menuTargetOf(element))
   }
 
+  // A finger never sends contextmenu in iOS's web view: the menu opens from
+  // its own long press, with whatever target the last right-click left (23 Nov:
+  // a long press on a task opened the workspace menu). So a touch sets the
+  // target as it starts; the mouse keeps setting it on right-click above.
+  const onTouchStart = (event: PointerEvent) => {
+    if (event.pointerType === 'mouse') return
+    const element = event.target as Element
+    if (element.closest('input, textarea, [contenteditable="true"], [role="menu"]')) return
+    setMenuTarget(menuTargetOf(element))
+  }
+
   const view = ui.view
   // Timeline and Board use the full width and open tasks over the page.
   const wide = view.kind === 'timeline' || view.kind === 'board'
@@ -487,6 +498,7 @@ export default function App() {
               )}
               defaultOpen={sidebarWasOpen()}
               onContextMenu={onContextMenu}
+              onPointerDownCapture={onTouchStart}
             >
               <AppSidebar />
               {/* In a window the content is a sheet lying on the sidebar. On a
