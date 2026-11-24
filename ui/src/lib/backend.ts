@@ -33,9 +33,12 @@ const tauri = window.__TAURI__
 
 export const isDesktop = tauri !== undefined
 
-// The newest Mac app as a disk image: every release publishes Done.dmg under
-// that name (.github/workflows/release.yml), so this always means the newest.
-export const MAC_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/latest/download/Done.dmg'
+// The Mac app as a disk image, signed with a Developer ID and notarized so it
+// opens with one double-click: made on a Mac by done-infra's notarize-mac.sh
+// and kept on the release `mac`, a pre-release that is never "latest" (the
+// installed apps ask "latest" for updates). It can be a few versions behind;
+// the app updates itself once it runs.
+export const MAC_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg'
 
 // An app that has signed in to a hosted account. Looked at once, when the
 // window loads: signing in or out reloads the window, so it cannot go stale.
