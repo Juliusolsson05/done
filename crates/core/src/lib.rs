@@ -41,7 +41,8 @@ pub struct Task {
     pub start: Option<String>,
     #[serde(default)]
     pub due: Option<String>,
-    /// 1 is the most urgent, 4 means none.
+    /// 0 (P0) is only for what must happen right away, 1 the most urgent
+    /// otherwise, 4 means none.
     #[serde(default = "no_priority")]
     pub priority: i64,
     /// "doing" while in progress; otherwise absent.
@@ -279,8 +280,9 @@ pub fn check(task: &Task) -> Result<(), Error> {
     if task.title.trim().is_empty() {
         return Err(Error::Invalid("A task needs a title.".into()));
     }
-    if !(1..=4).contains(&task.priority) {
-        return Err(Error::Invalid("Priority is 1, 2, 3 or 4.".into()));
+    // 0 is P0, for what must happen right away (#75); 4 is no priority.
+    if !(0..=4).contains(&task.priority) {
+        return Err(Error::Invalid("Priority is 0, 1, 2, 3 or 4.".into()));
     }
     check_day("The start date", &task.start)?;
     check_day("The due date", &task.due)?;
@@ -826,6 +828,17 @@ mod tests {
 
     // Why state() sends more than open tasks: a list ticked off over several
     // days must keep showing what was ticked, until the task itself is done.
+    // #75: P0 is a priority (0); anything below 0 or above 4 is refused.
+    #[test]
+    fn p0_is_a_priority_and_five_is_not() {
+        let mut task = Task { priority: 0, ..task(1, "Ship the fix") };
+        assert!(check(&task).is_ok());
+        task.priority = 5;
+        assert!(check(&task).is_err());
+        task.priority = -1;
+        assert!(check(&task).is_err());
+    }
+
     #[test]
     fn a_subtask_ticked_days_ago_stays_under_its_open_task() {
         let s = store();

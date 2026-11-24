@@ -82,6 +82,8 @@
 
   /* Red means one thing: late, urgent, or about to be removed. */
   --destructive: #d2402f;
+  /* P0, only for what must happen right away (#75): a deeper red than P1. */
+  --priority-0: #a3122a;
   --priority-1: #d2402f;
   --priority-2: #c98010;
   --priority-3: #3a6fd8;
@@ -157,6 +159,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-priority-0: var(--priority-0);
   --color-priority-1: var(--priority-1);
   --color-priority-2: var(--priority-2);
   --color-priority-3: var(--priority-3);

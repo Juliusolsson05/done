@@ -80,7 +80,7 @@ fn tools() -> Value {
         "notes": { "type": "string" },
         "start": day,
         "due": day,
-        "priority": { "type": "integer", "minimum": 1, "maximum": 4, "description": "1 is the most urgent, 4 means none." },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 4, "description": "0 (P0) is only for what must happen right away; 1 is the most urgent otherwise, 4 means none." },
         "project": { "type": ["string", "null"], "description": "The name of an existing project, or null for the Inbox." },
     });
     let mut fields = fields;

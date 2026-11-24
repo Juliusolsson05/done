@@ -249,3 +249,11 @@ describe('prioritySpan', () => {
     expect(prioritySpan('x p1 y p2', { start: 2, end: 4 })).toEqual({ start: 7, end: 9 })
   })
 })
+
+// #75: p0 is a priority like p1 to p4, read and marked the same way.
+describe('P0', () => {
+  it('reads p0 as priority 0 and marks it', () => {
+    expect(parseQuickAdd('Ship the fix p0', [], '2026-11-13').priority).toBe(0)
+    expect(prioritySpan('Ship the fix p0')).toEqual({ start: 13, end: 15 })
+  })
+})

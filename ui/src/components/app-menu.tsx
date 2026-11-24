@@ -199,7 +199,7 @@ function TaskMenu({ task }: { task: Task }) {
           {now(task.priority < 4 ? `P${task.priority}` : 'None')}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="min-w-44">
-          {[1, 2, 3, 4].map((p) => (
+          {[0, 1, 2, 3, 4].map((p) => (
             <ContextMenuCheckboxItem key={p} checked={task.priority === p} onSelect={() => change((d) => patchTask(d, task.id, { priority: p }))}>
               <PriorityDot priority={p} />
               {p < 4 ? `Priority ${p}` : 'No priority'}
