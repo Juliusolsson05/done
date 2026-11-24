@@ -1,7 +1,7 @@
 # Notes: link a note from another note
 
 Branch `feat/note-links` · Worktree `../done-wt/note-links` · Base `origin/main` @ 725bf91 · Issue #72
-Status: plan; implementation follows on this branch.
+Status: built; `tsc -b`, vitest and `cargo test -p done-mcp` green; not yet seen in the running app.
 
 ## Problem
 
