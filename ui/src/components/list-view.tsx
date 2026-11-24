@@ -209,6 +209,10 @@ export function ListView() {
                 className={cn(
                   'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-1 max-md:text-title max-md:font-bold',
                   section.late ? 'text-overdue' : 'text-muted-foreground max-md:text-foreground',
+                  // On a phone a long day of tasks keeps its day in sight
+                  // (Upcoming lost which day it was, 23 Nov audit): the heading
+                  // stays under the nav bar until the next one pushes it on.
+                  'max-md:sticky max-md:top-[calc(env(safe-area-inset-top)+2.75rem)] max-md:z-10 max-md:bg-background max-md:py-1',
                 )}
               >
                 {section.heading}
