@@ -59,16 +59,19 @@ export function MoreButton({ onClick }: { onClick: () => void }) {
 }
 
 // New note, bottom right above the tab bar, as Apple Notes' compose button.
+// Drawn on the body: the page is pushed in with a transform, and a fixed
+// element inside a transformed one is placed against it, not the screen.
 export function ComposeButton({ onClick }: { onClick: () => void }) {
-  return (
+  return createPortal(
     <button
       type="button"
       aria-label="New note"
       onClick={onClick}
-      className="fixed right-4 bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+12px)] z-30 flex size-12 items-center justify-center rounded-full bg-background/85 text-primary shadow-[0_1px_8px_rgb(0_0_0/0.12)] backdrop-blur-xl active:opacity-40"
+      className="fixed right-[max(16px,calc(env(safe-area-inset-right)+16px))] bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+12px)] z-30 flex size-12 items-center justify-center rounded-full bg-background/85 text-primary shadow-[0_1px_8px_rgb(0_0_0/0.12)] backdrop-blur-xl active:opacity-40"
     >
       <SquarePenIcon className="size-6" strokeWidth={2} />
-    </button>
+    </button>,
+    document.body,
   )
 }
 
