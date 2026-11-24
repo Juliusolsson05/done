@@ -7,7 +7,7 @@
 // month or quarter; the tasks with no date beside it (or, on a narrow screen,
 // under it), to drag onto a day or open.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { CheckIcon, ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon, SlidersHorizontalIcon } from 'lucide-react'
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, PanelRightCloseIcon, PanelRightOpenIcon, SlidersHorizontalIcon } from 'lucide-react'
 import { useTaskPeople } from '@/components/assignees'
 import { Avatars } from '@/components/avatars'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ import { play } from '@/lib/sounds'
 import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { DAY_PX, placed, spanOf, type Placed, type Zoom } from '@/lib/timeline-layout'
 import { HOLD_MS, IDLE, press, released, type PressState } from '@/lib/timeline-press'
-import { initialLeft, LEAD, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
+import { edgeOf, initialLeft, LEAD, leadFor, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
 import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { cn } from '@/lib/utils'
 
@@ -106,6 +106,9 @@ const INSET = 2
 const LEAST_BAR = 10
 // Below this a bar has no grips: they would leave nothing to move it by.
 const GRIPS_FROM = 22
+// The chip in a row whose bar is off screen: its width, and its gap from the edge.
+const EDGE_CHIP = 16
+const EDGE_GAP = 4
 
 export function Timeline() {
   const { data, dragging, edit, update, shown: inScope, me } = useApp()
@@ -167,6 +170,14 @@ export function Timeline() {
     return { left: el.scrollLeft / px, width: Math.max(1, el.clientWidth - leftWidth) / px }
   }
   const [range, setRange] = useState<[Day, Day]>(() => onScreen(span, daysBetween(span.start, addDays(TODAY, -LEAD)), 30))
+  // The same, unrounded, for the rows whose bar is off screen.
+  const [seen, setSeen] = useState({ left: 0, width: Infinity })
+  const look = () => {
+    const now = view()
+    setRange(onScreen(span, now.left, now.width))
+    setSeen(now)
+    return now
+  }
   // The day at the left edge, kept when the range, the zoom or the width
   // changes; before the first scroll, where the view opens.
   const anchor = useRef<Day | null>(null)
@@ -176,18 +187,18 @@ export function Timeline() {
     const { width: viewDays } = view()
     const left = anchor.current ? daysBetween(span.start, anchor.current) : initialLeft(span, TODAY, earliest, viewDays)
     el.scrollLeft = Math.max(0, left) * px
-    const now = view()
-    setRange(onScreen(span, now.left, now.width))
+    look()
     // Laid out anew whenever the range, the zoom or the panes change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [span.start, span.days, px, rootWidth, chartShown])
   const onScroll = () => {
-    const { left, width } = view()
+    const { left } = look()
     anchor.current = addDays(span.start, Math.round(left))
-    setRange(onScreen(span, left, width))
   }
+  // Brings a day to the left of the chart with the same room before it as
+  // when the view opens.
   const showDay = (day: Day) =>
-    scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - LEAD) * px, behavior: 'smooth' })
+    scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - leadFor(view().width)) * px, behavior: 'smooth' })
   const setZoom = (next: Zoom) => {
     anchor.current = addDays(span.start, Math.round(view().left))
     setZoomState(next)
@@ -413,6 +424,28 @@ export function Timeline() {
     if (moved && moved.mode !== 'end') left += moved.days * px
     if (moved?.mode === 'end') barWidth += moved.days * px
     if (moved?.mode === 'start') barWidth -= moved.days * px
+    // Wholly off the days on screen (an overdue task dated before them, or
+    // one weeks ahead): a chip at that edge of the row says which way it is,
+    // and brings it into view, so the row does not look empty.
+    const edge = moved ? null : edgeOf(span, first, task.due ?? first, seen.left, seen.width)
+    if (edge)
+      return (
+        <button
+          type="button"
+          aria-label={`Show ${task.title}, ${fullDay(first)}`}
+          title={`${edge === 'before' ? 'Earlier' : 'Later'}: ${fullDay(first)}`}
+          onClick={() => showDay(first)}
+          style={{
+            ...projectStyle(data.projects, task.projectId),
+            left: edge === 'before' ? seen.left * px + EDGE_GAP : (seen.left + seen.width) * px - EDGE_GAP - EDGE_CHIP,
+            width: EDGE_CHIP,
+          }}
+          // A finger's width of presses around the small chip.
+          className="absolute top-1/2 z-10 grid h-5 -translate-y-1/2 place-content-center rounded-md border border-project-edge bg-project-tint text-project after:absolute after:-inset-2.5"
+        >
+          {edge === 'before' ? <ChevronLeftIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+        </button>
+      )
     return (
       <TimelineBar
         task={task}
@@ -435,7 +468,7 @@ export function Timeline() {
       .map((p) => (
         <div key={p.task.id} className={cn('flex', rowHeight)}>
           <div className={cn(leftCell, 'px-2')} style={{ width: leftWidth }}>
-            <TitleCell task={p.task} showProject={!byProject} />
+            <TitleCell task={p.task} showProject={!byProject && !layout.narrow} faces={!layout.narrow} />
           </div>
           <div className="relative shrink-0" style={{ width }} {...dropTarget}>
             {barFor(p)}
@@ -683,7 +716,9 @@ export function Timeline() {
 
 // A row of the titles column: the check, the title (a tap opens the task)
 // and who is on it, small.
-function TitleCell({ task, showProject }: { task: Task; showProject: boolean }) {
+// On a phone in portrait (`faces` false) the title needs every bit of the
+// row, so who is on the task is left to the task's sheet.
+function TitleCell({ task, showProject, faces }: { task: Task; showProject: boolean; faces: boolean }) {
   const { edit } = useApp()
   const [leaving, finish] = useFinish(task.id)
   const { on } = useTaskPeople(task)
@@ -695,7 +730,7 @@ function TitleCell({ task, showProject }: { task: Task; showProject: boolean }) 
       <button type="button" onClick={() => edit(task.id)} title={task.title} className="min-w-0 flex-1 truncate text-left text-[13px]">
         {task.title}
       </button>
-      <Avatars people={on} size="xs" max={2} className="shrink-0" />
+      {faces && <Avatars people={on} size="xs" max={2} className="shrink-0" />}
     </div>
   )
 }
