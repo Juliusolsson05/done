@@ -7,37 +7,80 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0ED515BB08864C9F19E402D6 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B82947093255AF676A709466 /* WidgetKit.framework */; };
 		1762AFF8ABC2A9ED479B0076 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = B2C90187317D9D06CE453308 /* assets */; };
+		3171BE65F485C4D4B0721AF1 /* DoneShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAF9A139AC980406E2FF82E /* DoneShared.swift */; };
+		3800C94D89E8C5D513B77094 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B82947093255AF676A709466 /* WidgetKit.framework */; };
+		4BC909FD7A27B70C54AB80A3 /* done-widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		5A8B940D652003C523699C9C /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */; };
+		5B749E232B05C87B6108835B /* DoneWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 033209D9A0BF1DF11018FD87 /* DoneWidgets.swift */; };
+		6132127DDEFC70575F00B802 /* DoneNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A67572AD166EAE042F9FC3D /* DoneNative.swift */; };
 		61DE0B4E33D72FA9FFF16282 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F3D6FA5AD0C2A62D8C7AD16 /* WebKit.framework */; };
+		67530E4410F8ECB89499EA9B /* DoneShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAF9A139AC980406E2FF82E /* DoneShared.swift */; };
 		694FD07F8902422E80D5C139 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2BA77CF18ED43E22D38AB1 /* UIKit.framework */; };
 		70C8649522D7736390D02C07 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A686B5647A23F372E043B9E /* MetalKit.framework */; };
 		7B2B34BBBA6DA2425BE2880A /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2398F41C6029C9EFF1E391D7 /* Security.framework */; };
 		7D000DB4CAE26E07613C0837 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 18A48479A76ACE8A28D57A47 /* Metal.framework */; };
+		7FF2932DC7BE6A144FCB896D /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 40090A73884EE5FDE66DE995 /* ActivityKit.framework */; };
 		88BBDC1BA70145A75356433E /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 6D7AB91A507FF9FDB0D7FBEE /* main.mm */; };
 		AA92D656445D4780826D399C /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 9A6C632E7716C947BBA93DC0 /* LaunchScreen.storyboard */; };
 		AB8A00B797FFA39BAA9D971C /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7B5AF2469CE037F151CECF2E /* QuartzCore.framework */; };
 		B401EDBDBF818B6CBDA633A1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4D8DE9179E9A257A61DCCF6F /* Assets.xcassets */; };
+		C563B0B7C20306C65C9A7102 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = ABCD7FF19B3C6F2AFD27EB3A /* SwiftUI.framework */; };
+		D8A7253ED928CFBDC760CC5B /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 40090A73884EE5FDE66DE995 /* ActivityKit.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		DC7622B98B29B65372CD4BE5 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 57E014AD4C6A613D4925DEEC /* libapp.a */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		683F9EBA5AD64CA399999CBA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A99AB76CC3B0D358C6086D2D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 71C7735243D74CC1B8665BEB;
+			remoteInfo = "done-widgets";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2E10A289515DC197D87AD532 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4BC909FD7A27B70C54AB80A3 /* done-widgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		033209D9A0BF1DF11018FD87 /* DoneWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneWidgets.swift; sourceTree = "<group>"; };
+		128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = "done-widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18A48479A76ACE8A28D57A47 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		21628AF0E753960D3449FAF5 /* done-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "done-app_iOS.entitlements"; sourceTree = "<group>"; };
 		2398F41C6029C9EFF1E391D7 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		3081ECF93AB42347FE0B8732 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		3C967CB2903B38B6CF28E8AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3EAF9A139AC980406E2FF82E /* DoneShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneShared.swift; sourceTree = "<group>"; };
+		40090A73884EE5FDE66DE995 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
 		4A686B5647A23F372E043B9E /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		4D8DE9179E9A257A61DCCF6F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		57E014AD4C6A613D4925DEEC /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		6D7AB91A507FF9FDB0D7FBEE /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		778140358B750F7D65AD7742 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
+		7A67572AD166EAE042F9FC3D /* DoneNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneNative.swift; sourceTree = "<group>"; };
 		7B5AF2469CE037F151CECF2E /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		7F3D6FA5AD0C2A62D8C7AD16 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		8158583E8FC76035673C6808 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9A6C632E7716C947BBA93DC0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		9B4F016559A6B43240CEC821 /* done-widgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "done-widgets.entitlements"; sourceTree = "<group>"; };
 		9D2BA77CF18ED43E22D38AB1 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		ABCD7FF19B3C6F2AFD27EB3A /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		B2C90187317D9D06CE453308 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		B82947093255AF676A709466 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		D1690484F377AF46D98BB1EB /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		DEBE0789EDBFDDFCD4944CAC /* done-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "done-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -48,6 +91,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				DC7622B98B29B65372CD4BE5 /* libapp.a in Frameworks */,
+				3800C94D89E8C5D513B77094 /* WidgetKit.framework in Frameworks */,
+				D8A7253ED928CFBDC760CC5B /* ActivityKit.framework in Frameworks */,
 				5A8B940D652003C523699C9C /* CoreGraphics.framework in Frameworks */,
 				7D000DB4CAE26E07613C0837 /* Metal.framework in Frameworks */,
 				70C8649522D7736390D02C07 /* MetalKit.framework in Frameworks */,
@@ -58,6 +103,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		48CDB6D3FD6E997D0902873B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0ED515BB08864C9F19E402D6 /* WidgetKit.framework in Frameworks */,
+				C563B0B7C20306C65C9A7102 /* SwiftUI.framework in Frameworks */,
+				7FF2932DC7BE6A144FCB896D /* ActivityKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -65,6 +120,7 @@
 			isa = PBXGroup;
 			children = (
 				DEBE0789EDBFDDFCD4944CAC /* done-app_iOS.app */,
+				128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -90,6 +146,7 @@
 		12F4CAC0C9D96F090DDC777B /* done-app */ = {
 			isa = PBXGroup;
 			children = (
+				7A67572AD166EAE042F9FC3D /* DoneNative.swift */,
 				6D7AB91A507FF9FDB0D7FBEE /* main.mm */,
 				E93C13449BD92F26CF1226E7 /* bindings */,
 			);
@@ -113,24 +170,47 @@
 				9A6C632E7716C947BBA93DC0 /* LaunchScreen.storyboard */,
 				1499691E29EF53FF0E18F72E /* done-app_iOS */,
 				E6B59476C07D9BFCB61EA1B4 /* Externals */,
+				5A096C4DAC27A70D84BCD451 /* Shared */,
 				12BB460E7D1D5051918756D1 /* Sources */,
 				0EB78174FCC7CDB62DDF7CE7 /* src */,
+				518BB4C4CC95F8E1B2097AC3 /* Widgets */,
 				C3759677DEC8DA9EA38EDAB8 /* Frameworks */,
 				0B84917B25620A7E78863A00 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
+		518BB4C4CC95F8E1B2097AC3 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				9B4F016559A6B43240CEC821 /* done-widgets.entitlements */,
+				033209D9A0BF1DF11018FD87 /* DoneWidgets.swift */,
+				8158583E8FC76035673C6808 /* Info.plist */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		5A096C4DAC27A70D84BCD451 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				3EAF9A139AC980406E2FF82E /* DoneShared.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		C3759677DEC8DA9EA38EDAB8 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				40090A73884EE5FDE66DE995 /* ActivityKit.framework */,
 				56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */,
 				57E014AD4C6A613D4925DEEC /* libapp.a */,
 				18A48479A76ACE8A28D57A47 /* Metal.framework */,
 				4A686B5647A23F372E043B9E /* MetalKit.framework */,
 				7B5AF2469CE037F151CECF2E /* QuartzCore.framework */,
 				2398F41C6029C9EFF1E391D7 /* Security.framework */,
+				ABCD7FF19B3C6F2AFD27EB3A /* SwiftUI.framework */,
 				9D2BA77CF18ED43E22D38AB1 /* UIKit.framework */,
 				7F3D6FA5AD0C2A62D8C7AD16 /* WebKit.framework */,
+				B82947093255AF676A709466 /* WidgetKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -150,9 +230,41 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
+		"TEMP_A453EEF7-1196-42E6-B1A5-A93EC8AAA3CE" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
+			sourceTree = "<group>";
+		};
+		"TEMP_DA2E925C-18C7-4519-BB37-32EBBFFAF8BA" /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		71C7735243D74CC1B8665BEB /* done-widgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 637C90CFC1278F205AED2660 /* Build configuration list for PBXNativeTarget "done-widgets" */;
+			buildPhases = (
+				09F6F0B1A739E69100725B3F /* Sources */,
+				48CDB6D3FD6E997D0902873B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "done-widgets";
+			packageProductDependencies = (
+			);
+			productName = "done-widgets";
+			productReference = 128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		885BFF6CDFA5AE741A5F83C8 /* done-app_iOS */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = EE3832244C479FBD7551DA71 /* Build configuration list for PBXNativeTarget "done-app_iOS" */;
@@ -161,10 +273,12 @@
 				BABE79111C8719B5F1DA1103 /* Sources */,
 				413C7B8694A1714ED2B92CA7 /* Resources */,
 				09548DC355D530FE3F07C379 /* Frameworks */,
+				2E10A289515DC197D87AD532 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5C12964A18FC96B3865AB82B /* PBXTargetDependency */,
 			);
 			name = "done-app_iOS";
 			packageProductDependencies = (
@@ -199,6 +313,7 @@
 			projectRoot = "";
 			targets = (
 				885BFF6CDFA5AE741A5F83C8 /* done-app_iOS */,
+				71C7735243D74CC1B8665BEB /* done-widgets */,
 			);
 		};
 /* End PBXProject section */
@@ -241,17 +356,60 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		09F6F0B1A739E69100725B3F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3171BE65F485C4D4B0721AF1 /* DoneShared.swift in Sources */,
+				5B749E232B05C87B6108835B /* DoneWidgets.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BABE79111C8719B5F1DA1103 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6132127DDEFC70575F00B802 /* DoneNative.swift in Sources */,
+				67530E4410F8ECB89499EA9B /* DoneShared.swift in Sources */,
 				88BBDC1BA70145A75356433E /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		5C12964A18FC96B3865AB82B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 71C7735243D74CC1B8665BEB /* done-widgets */;
+			targetProxy = 683F9EBA5AD64CA399999CBA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		04CB7E58AE7041026A7652F5 /* debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					arm64,
+				);
+				CODE_SIGN_ENTITLEMENTS = "Widgets/done-widgets.entitlements";
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app.widgets;
+				PRODUCT_NAME = "done-widgets";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = debug;
+		};
 		257A53325679CBB9FEC92C79 /* debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -323,6 +481,7 @@
 					arm64,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = "done-app_iOS/done-app_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
@@ -339,11 +498,11 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app;
-				PRODUCT_NAME = "done";
+				PRODUCT_NAME = done;
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "99MUK5B6TA";
 			};
 			name = release;
 		};
@@ -355,6 +514,7 @@
 					arm64,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = "done-app_iOS/done-app_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
@@ -371,11 +531,11 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app;
-				PRODUCT_NAME = "done";
+				PRODUCT_NAME = done;
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
-				DEVELOPMENT_TEAM = "99MUK5B6TA";
 			};
 			name = debug;
 		};
@@ -435,6 +595,30 @@
 			};
 			name = release;
 		};
+		F7ADBE79395B834834A139DD /* release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = (
+					arm64,
+				);
+				CODE_SIGN_ENTITLEMENTS = "Widgets/done-widgets.entitlements";
+				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app.widgets;
+				PRODUCT_NAME = "done-widgets";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -443,6 +627,15 @@
 			buildConfigurations = (
 				257A53325679CBB9FEC92C79 /* debug */,
 				8F4ED742F4E0D5CFB006299C /* release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = debug;
+		};
+		637C90CFC1278F205AED2660 /* Build configuration list for PBXNativeTarget "done-widgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				04CB7E58AE7041026A7652F5 /* debug */,
+				F7ADBE79395B834834A139DD /* release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;

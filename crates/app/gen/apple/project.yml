@@ -64,6 +64,14 @@ targets:
         CFBundleVersion: "0.1.0"
         # The focus countdown in the Dynamic Island and on the Lock Screen.
         NSSupportsLiveActivities: true
+        # done:// links: how the browser hands a finished sign-in back to the
+        # app (crates/app/src/lib.rs, the deep-link plugin). Tauri wrote this
+        # into Info.plist once, at `tauri ios init`; Info.plist is generated
+        # from this file, so it must be here or the next regeneration drops it
+        # and sign-in stops returning to the app.
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER).done
+            CFBundleURLSchemes: [done]
     entitlements:
       path: done-app_iOS/done-app_iOS.entitlements
       # The app writes the widgets' data where the extension can read it.
@@ -78,6 +86,11 @@ targets:
         ENABLE_BITCODE: false
         # Sources/done-app/DoneNative.swift: the Dynamic Island and widget bridge.
         SWIFT_VERSION: "5.0"
+        # Tauri's "Build Rust Code" step (preBuildScripts below) writes this
+        # target's entitlements file during the build, keeping what is in it;
+        # Xcode stops a build whose entitlements file changes after it was
+        # read. The content is the same, so the signature is right.
+        CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
         ARCHS: [arm64]
         VALID_ARCHS: arm64 
         LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
