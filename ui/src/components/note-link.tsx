@@ -7,26 +7,31 @@
 // chips are plain DOM that cannot take props.
 import { createContext, useContext, type ReactNode } from 'react'
 import { FileTextIcon } from 'lucide-react'
-import { isBlank, titleOf, type Note } from '@/lib/notes'
+import { titleOf, type Note } from '@/lib/notes'
 import { cn } from '@/lib/utils'
 
 export interface NoteLinks {
-  // Every note stored, whatever space is chosen, so a link to a note in
-  // another space still shows its title.
+  // Every note stored, whatever space is chosen: a chip looks its note up
+  // here, so a link to a note in another space still shows its title.
   notes: Note[]
+  // The notes of the space chosen, the only ones the @ list offers: a
+  // workspace note must not take a personal note's title into its text,
+  // where the others in it would read it.
+  offered: Note[]
   open(id: number): void
-  // The notes that link to this one, newest first.
+  // The notes of the space chosen that link to this one, newest first.
   linkedFrom(id: number): Note[]
 }
 
-export const NoteLinksContext = createContext<NoteLinks>({ notes: [], open: () => {}, linkedFrom: () => [] })
+export const NoteLinksContext = createContext<NoteLinks>({ notes: [], offered: [], open: () => {}, linkedFrom: () => [] })
 export const useNoteLinks = (): NoteLinks => useContext(NoteLinksContext)
 
-// The linked note's title now, or null when there is no such note (it was
-// deleted). A note emptied of its words has no title worth showing either.
+// The linked note's title now, or null only when there is no such note (it
+// was deleted). A note emptied of its words still exists and still opens: it
+// is called what the list calls it, New note.
 export function linkedTitle(notes: Note[], id: number): string | null {
   const note = notes.find((n) => n.id === id)
-  return note && !isBlank(note.text) ? titleOf(note.text) : null
+  return note ? titleOf(note.text) : null
 }
 
 export const MISSING_HINT = 'This note is missing: it was deleted'

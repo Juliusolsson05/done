@@ -78,6 +78,8 @@ function useWidth(): [(el: HTMLElement | null) => void, number | null] {
   return [setEl, width]
 }
 
+const NO_NOTES: Note[] = []
+
 export function Notes() {
   const { ui, data, scope, team } = useApp()
   const isMobile = useIsMobile()
@@ -423,12 +425,15 @@ export function Notes() {
   }
   // Read on every render by the chips, so a rename shows at once. Who links
   // to whom is worked out once per change of the notes, not per chip.
+  // Only the space chosen links from: a note elsewhere is not to be listed here.
   const linkers = useMemo(() => {
     const by = new Map<number, Note[]>()
-    for (const n of [...(stored ?? [])].sort(byNewest)) for (const to of noteLinksIn(n.text)) if (to !== n.id) by.set(to, [...(by.get(to) ?? []), n])
+    for (const n of [...(notes ?? [])].sort(byNewest)) for (const to of noteLinksIn(n.text)) if (to !== n.id) by.set(to, [...(by.get(to) ?? []), n])
     return by
-  }, [stored])
-  const noteLinks: NoteLinks = { notes: stored ?? [], open: follow, linkedFrom: (id) => linkers.get(id) ?? [] }
+  }, [notes])
+  // The same empty list until the notes load, so the editor, which redraws
+  // its chips when the list changes, does not do so on every render.
+  const noteLinks: NoteLinks = { notes: stored ?? NO_NOTES, offered: notes ?? NO_NOTES, open: follow, linkedFrom: (id) => linkers.get(id) ?? [] }
 
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)

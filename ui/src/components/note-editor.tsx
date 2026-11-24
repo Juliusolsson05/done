@@ -169,7 +169,7 @@ export function NoteEditor({
     // the list stays short above a phone's keyboard.
     const notes = open
       ? noteSuggestions(
-          latest.current.links.notes.map((n) => ({ id: n.id, title: titleOf(n.text), updatedAt: n.updatedAt, blank: isBlank(n.text) })),
+          latest.current.links.offered.map((n) => ({ id: n.id, title: titleOf(n.text), updatedAt: n.updatedAt, blank: isBlank(n.text) })),
           at.query,
           latest.current.id,
         )

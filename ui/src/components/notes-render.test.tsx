@@ -102,7 +102,11 @@ describe('a note with mentions', () => {
 describe('a note linking another note', () => {
   const PLAN = 1795306779859111
   // The linked note as it is now: renamed since the link was written.
-  const links: NoteLinks = { notes: [{ id: PLAN, text: '# Seed round plan (v2)\nDetails', updatedAt: 1 }], open() {}, linkedFrom: () => [] }
+  const notes = [
+    { id: PLAN, text: '# Seed round plan (v2)\nDetails', updatedAt: 1 },
+    { id: 7, text: '  \n', updatedAt: 2 },
+  ]
+  const links: NoteLinks = { notes, offered: notes, open() {}, linkedFrom: () => [] }
   const drawLinked = (text: string) =>
     renderToStaticMarkup(
       <AppContext.Provider value={app}>
@@ -117,6 +121,14 @@ describe('a note linking another note', () => {
     expect(html).toMatch(new RegExp(`<button[^>]*data-note-link="${PLAN}"`))
     expect(html).toContain('Seed round plan (v2)')
     expect(html).not.toContain('href="done:note')
+  })
+
+  it('shows a note emptied of its words as New note, still to be opened, not as missing', () => {
+    const html = drawLinked('See [Draft](done:note/7)')
+    expect(html).toMatch(/<button[^>]*data-note-link="7"/)
+    expect(html).not.toContain('disabled')
+    expect(html).not.toContain('missing')
+    expect(html).toContain('New note')
   })
 
   it('shows a link to a note that is gone as the words it was written with, marked missing', () => {
