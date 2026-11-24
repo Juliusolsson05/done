@@ -64,7 +64,7 @@
 <p class="meta">24 Nov 2026 · version 0.1.189 · screenshots taken from the live web app (thedone.app, signed in, real data) at exact device sizes: iPhone 17 portrait 402×874 pt and landscape 874×402 pt, iPad (A16) portrait 820×1180 pt and landscape 1180×820 pt. The iPhone and iPad apps show this same interface inside the Tauri web view. Safe-area problems (notch, Dynamic Island, status bar, home indicator) cannot show in a browser frame, so those findings come from the code and are marked as such.</p>
 
 <nav class="toc">
-  <a href="#fixed"><b>Fixed: before and after</b></a><a href="#summary">Summary</a><a href="#matrix">Device matrix</a><a href="#cross">Cross-cutting causes</a>
+  <a href="#fixed"><b>Fixed: before and after</b></a><a href="#open-plan"><b>How to close the open points</b></a><a href="#summary">Summary</a><a href="#matrix">Device matrix</a><a href="#cross">Cross-cutting causes</a>
   <a href="#today">Today</a><a href="#inbox">Inbox</a><a href="#upcoming">Upcoming</a><a href="#lists">Lists</a><a href="#project">Project</a>
   <a href="#mine">Assigned to me</a><a href="#completed">Completed</a><a href="#board">Board</a><a href="#timeline">Timeline</a>
   <a href="#notes">Notes</a><a href="#focus">Focus</a><a href="#timesheet">Time sheet</a><a href="#search">Search</a>
@@ -305,6 +305,23 @@
 <li><span class="sev missing">not built</span>Full-screen phone search, Settings in grouped rows, a segmented control for Board columns on a phone, New Task chips for date/priority/list, pinned notes and swipe to delete in Notes.</li>
 <li><span class="sev ugly">to check on device</span>The writing bar's position above the real keyboard, checkbox taps in notes and hold-to-drag on Timeline were built and tested in code, not yet on a phone.</li>
 </ul>
+<h2 id="open-plan">How to close the open points (researched 24 Nov)</h2>
+<div class="view wide"><div>
+<h3>1. iPhone landscape: Dynamic Island over the content</h3>
+<p><b>Why:</b> WebKit passes the page whatever safe area its own native view reports. Other Tauri and SwiftUI apps hit the same: in landscape the side insets come through as 0 (Tauri issue 11475, still open: "a white titlebar at the top and on both left and right in landscape"), or only appear after focusing a text field. Turning off the scroll view's automatic inset adjustment (what <code>tauri-plugin-ios-webview-insets</code> does) fixes a different symptom; we tried it and it did not change the side insets.</p>
+<p><b>Fix:</b> stop relying on <code>env()</code> for the sides. Read the window's real safe area natively (<code>keyWindow.safeAreaInsets</code>, on the main thread) through a small Tauri command, call it on load and on every resize/orientation change, and set <code>--safe-top/right/bottom/left</code> on <code>&lt;html&gt;</code>. The interface then uses <code>max(env(safe-area-inset-left), var(--safe-left, 0px))</code> everywhere it uses an inset (one replacement across the code). This is the approach of <code>tauri-plugin-edge-to-edge</code>, which injects <code>--safe-area-inset-*</code> variables the same way. Verify in the simulator held sideways, where the bug reproduces.</p>
+<h3>2. Widget and Dynamic Island focus timer</h3>
+<ul>
+<li><b>Keep the target through regeneration:</b> <code>tauri ios build</code> regenerates the Xcode project from <code>project.yml</code> with XcodeGen, so a widget target added in Xcode's GUI disappears. Declare the Widget Extension target and the App Group entitlement in <code>project.yml</code> (Tauri supports a custom template through <code>bundle &gt; ios &gt; template</code>). XcodeGen 2.45+ needs a <code>path:</code> on an app-extension target that has <code>info:</code> and <code>properties:</code>, or the widget fails to load with no build error.</li>
+<li><b>Bridge:</b> a small Tauri iOS plugin in Swift (or <code>tauri-plugin-live-activity</code>, a community plugin for ActivityKit and the Dynamic Island, early alpha, iOS 16.1+) with <code>focus_start(task, endsAt)</code>, <code>focus_end()</code>, <code>widget_snapshot(json)</code>. The interface already sends the focus end time to Rust on every change (<code>focus_set</code>), so the hook point exists.</li>
+<li><b>Live Activity:</b> <code>ActivityConfiguration</code> with compact, minimal and expanded Dynamic Island views and a Lock Screen view; <code>Text(timerInterval:)</code> counts down without the app running; <code>NSSupportsLiveActivities</code> in Info.plist; the activity attributes type shared by app and extension through a local Swift package.</li>
+<li><b>Widget:</b> the app writes a small JSON snapshot (today's tasks, running focus) into the App Group container and calls <code>WidgetCenter.shared.reloadAllTimelines()</code>; buttons through App Intents (iOS 17); taps deep-link into the app (<code>done://task/…</code>, on top of the existing deep-link plugin).</li>
+</ul>
+<h3>3. Writing bar above the keyboard</h3>
+<p>iOS 26.0 had a WebKit bug where <code>visualViewport.offsetTop</code> stayed above 0 after the keyboard closed, misplacing fixed bars; testers report it fixed in 26.1 (Julius's iPhone runs 26.5.2). Check on the device; if the bar still drifts, move it to a native <code>inputAccessoryView</code> on the web view, the approach native-shell keyboard plugins use.</p>
+<h3>4. Selection in notes</h3>
+<p>CodeMirror 6.43.0 started drawing its own selection handles on iOS; done has 6.43.15, so selection handles in notes should work. Check on the device together with the checkbox taps and Timeline hold-to-drag.</p>
+</div></div>
 <h2 id="plan">Fix plan, in order</h2>
 <ol class="plan">
 <li><b>Layouts by device, not width</b> (phone / tablet / desktop) and <b>all four safe-area insets on the app shell</b>. Fixes the cut-off header, landscape and most of iPad at once. Verify on the iPhone 17 and iPad (A16) simulators in both orientations.</li>
