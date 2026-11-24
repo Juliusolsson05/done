@@ -2,7 +2,7 @@
 
 Branch `fix/mobile-layout-safe-areas` · Worktree `../done-wt/mobile-layout-safe-areas` · Base `origin/main` @ 946002b
 Source: the mobile audit (`docs/mobile-audit/index.html` on `mobile-audit`), "Cross-cutting causes" 1 and 2.
-Status: implementing. Size: standard plan.
+Status: implemented, not pushed. Size: standard plan.
 
 ## Outcome
 
@@ -35,8 +35,10 @@ UNCONFIRMED: all are defaults chosen without the owner; Julius owns design.
 
 ## Out of scope (other branches)
 
-Timeline, Notes, task sheet, quick add, Settings content, menus and row touch actions. Popovers' collision padding is not inset-aware (Radix takes numbers only).
+Timeline, Notes, task sheet, quick add, Settings content, menus and row touch actions. Left to them: the side insets of the task sheet (`task-editor.tsx`) and the phone quick add (`quick-add.tsx`), the hover-only buttons on task rows, and Settings switching to `isMacApp`.
+
+Not done here: popovers' collision padding is not inset-aware (Radix takes numbers only; insets are 0 on an iPad's sides anyway). The "Show sidebar" button sits 8 points outside the page's edge on Timeline and Board, where the page margin is 32 points; that is so on the Mac today and is left as it is.
 
 ## Verification
 
-`npx tsc -b`, `npx vitest run`; unit tests for `layoutFor`, the iOS agent check and the view history, shown failing against the old rule. Simulators: not run here (no builds on this branch); to check on iPhone 17 and iPad (A16) in both orientations.
+`npx tsc -b` clean, `npx vitest run` 30 files / 555 tests pass. Unit tests for `layoutFor` (2 of 4 fail against the old width-only rule: iPhone sideways and iPad), the iOS agent check and the view history. A `vite build` to a scratch folder has no width media queries left for `md`/`max-md` and the class merges (sidebar width and offset, dialog overflow, Kbd) come out as intended. Simulators: not run here (no builds on this branch); to check on iPhone 17 and iPad (A16) in both orientations.
