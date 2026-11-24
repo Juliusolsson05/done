@@ -8,9 +8,60 @@
 //! The protocol is small enough here (five methods) that it is written out
 //! rather than pulled in as a framework.
 
-use done_core::{Change, Error, Note, Project, SaveNote, State, Store, Task};
+use done_core::{Change, Entry, Error, Note, Project, SaveNote, State, Store, Synced, Task};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
+
+/// Where the tools read and change tasks: the tasks file on this Mac (the
+/// `done mcp` command), or one account on the hosted server (its `/mcp`
+/// address, for Claude and other apps that connect over the internet).
+///
+/// WHY a trait over the few calls the tools make, rather than a second MCP
+/// server for the hosted one: both stores already answer these calls with
+/// the same rules, so every tool, its wording and its tests stay in one place.
+pub trait Tasks {
+    /// Today, YYYY-MM-DD, as the person's clock shows it.
+    fn today(&self) -> Result<String, Error>;
+    /// A moment (ms since 1970) as HH:MM on the person's clock.
+    fn clock(&self, ms: i64) -> Result<String, Error>;
+    fn state(&self, today: &str) -> Result<State, Error>;
+    fn sync(&self, change: Change) -> Result<Synced, Error>;
+    fn finished(&self, limit: i64) -> Result<Vec<Task>, Error>;
+    fn entries(&self, day: &str) -> Result<Vec<Entry>, Error>;
+    fn notes(&self) -> Result<Vec<Note>, Error>;
+    fn save_note(&self, note: SaveNote) -> Result<Note, Error>;
+    fn delete_note(&self, id: i64) -> Result<(), Error>;
+}
+
+impl Tasks for Store {
+    fn today(&self) -> Result<String, Error> {
+        Store::today(self)
+    }
+    fn clock(&self, ms: i64) -> Result<String, Error> {
+        Store::clock(self, ms)
+    }
+    fn state(&self, today: &str) -> Result<State, Error> {
+        Store::state(self, today)
+    }
+    fn sync(&self, change: Change) -> Result<Synced, Error> {
+        Store::sync(self, change)
+    }
+    fn finished(&self, limit: i64) -> Result<Vec<Task>, Error> {
+        Store::finished(self, limit)
+    }
+    fn entries(&self, day: &str) -> Result<Vec<Entry>, Error> {
+        Store::entries(self, day)
+    }
+    fn notes(&self) -> Result<Vec<Note>, Error> {
+        Store::notes(self)
+    }
+    fn save_note(&self, note: SaveNote) -> Result<Note, Error> {
+        Store::save_note(self, note)
+    }
+    fn delete_note(&self, id: i64) -> Result<(), Error> {
+        Store::delete_note(self, id)
+    }
+}
 
 /// Versions of the protocol this server can speak; the newest is last.
 const VERSIONS: [&str; 3] = ["2024-11-05", "2025-03-26", "2025-06-18"];
@@ -18,7 +69,7 @@ const VERSIONS: [&str; 3] = ["2024-11-05", "2025-03-26", "2025-06-18"];
 /// How many project colours the interface has to choose from.
 const COLOURS: i64 = 8;
 
-pub fn serve(store: &Store, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+pub fn serve(store: &dyn Tasks, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
     for line in input.lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -40,7 +91,9 @@ fn failure(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-fn handle(store: &Store, message: &Value) -> Option<Value> {
+/// One JSON-RPC message in, the reply out (None for a notification). The
+/// hosted server's `/mcp` address calls this for each request it is sent.
+pub fn handle(store: &dyn Tasks, message: &Value) -> Option<Value> {
     // A message without an id is a notification: nothing is sent back.
     let id = message.get("id")?.clone();
     let params = message.get("params").cloned().unwrap_or(Value::Null);
@@ -263,7 +316,7 @@ fn apply(task: &mut Task, args: &Value, state: &State, today: &str) -> Result<()
 /// Reads the tasks, lets `edit` decide what to change, and saves. If the app
 /// saved in between, the whole thing is done again on the fresh state, so an
 /// agent never overwrites something it did not see.
-fn change(store: &Store, edit: impl Fn(&State, &str) -> Result<(Change, Value), String>) -> Result<Value, String> {
+fn change(store: &dyn Tasks, edit: impl Fn(&State, &str) -> Result<(Change, Value), String>) -> Result<Value, String> {
     for _ in 0..5 {
         let today = store.today().map_err(|e| e.to_string())?;
         let state = store.state(&today).map_err(|e| e.to_string())?;
@@ -345,7 +398,7 @@ fn linked_ids(text: &str, mark: &str) -> Vec<i64> {
 
 /// The tasks a note's mentions can point at: open ones and those finished
 /// today (the state), and those finished earlier.
-fn known_tasks(store: &Store, state: &State) -> Result<Vec<Task>, String> {
+fn known_tasks(store: &dyn Tasks, state: &State) -> Result<Vec<Task>, String> {
     let mut known = state.tasks.clone();
     known.extend(store.finished(500).map_err(|e| e.to_string())?);
     Ok(known)
@@ -399,7 +452,7 @@ fn note_folder(args: &Value, notes: &[Note]) -> Option<Option<String>> {
 }
 
 /// The projects, for naming a note's project and finding one by its name.
-fn current_state(store: &Store) -> Result<State, String> {
+fn current_state(store: &dyn Tasks) -> Result<State, String> {
     let today = store.today().map_err(|e| e.to_string())?;
     store.state(&today).map_err(|e| e.to_string())
 }
@@ -422,7 +475,7 @@ fn note_text(args: &Value) -> Result<String, String> {
     Ok(text.to_string())
 }
 
-fn existing_note(store: &Store, args: &Value) -> Result<Note, String> {
+fn existing_note(store: &dyn Tasks, args: &Value) -> Result<Note, String> {
     note_in(&store.notes().map_err(|e| e.to_string())?, args)
 }
 
@@ -449,7 +502,7 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
+fn call(store: &dyn Tasks, name: &str, args: &Value) -> Result<Value, String> {
     match name {
         "list_tasks" => {
             let today = store.today().map_err(|e| e.to_string())?;
@@ -682,7 +735,7 @@ mod tests {
     use std::path::Path;
 
     /// Sends the lines as an agent would and returns each reply.
-    fn talk(store: &Store, lines: &[Value]) -> Vec<Value> {
+    fn talk(store: &dyn Tasks, lines: &[Value]) -> Vec<Value> {
         let input: String = lines.iter().map(|l| format!("{l}\n")).collect();
         let mut output = Vec::new();
         serve(store, input.as_bytes(), &mut output).unwrap();

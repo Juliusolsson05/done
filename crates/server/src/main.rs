@@ -8,6 +8,8 @@
 
 mod accounts;
 mod auth;
+mod oauth;
+mod remote_mcp;
 mod collab;
 mod pages;
 mod pg;
@@ -323,6 +325,15 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/auth/exchange", post(auth::exchange))
         .route("/auth/apple", post(auth::apple))
         .route("/auth/review", post(auth::review))
+        // MCP for apps that connect by address (Claude's connectors), and the
+        // sign-in they go through first.
+        .route("/mcp", post(remote_mcp::post).get(remote_mcp::other).delete(remote_mcp::other))
+        .route("/.well-known/oauth-protected-resource", get(oauth::protected_resource))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth::protected_resource))
+        .route("/.well-known/oauth-authorization-server", get(oauth::authorization_server))
+        .route("/oauth/register", post(oauth::register))
+        .route("/oauth/authorize", get(oauth::authorize).post(oauth::answer))
+        .route("/oauth/token", post(oauth::token))
         .route("/auth/dev", get(auth::dev))
         .route("/api/me", get(auth::me))
         .route("/api/account/delete", post(auth::delete_account))
@@ -577,6 +588,7 @@ mod tests {
             apple_audience: "app.thedone.ios".into(),
             apple_keys_url: format!("{google_at}/keys"),
             review_password: Some(REVIEW_PASSWORD.into()),
+            time_zone: "America/Los_Angeles".into(),
         };
         let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
@@ -628,6 +640,18 @@ mod tests {
         /// Returns where the server sent the browser afterwards.
         async fn sign_in(&mut self) -> String {
             let off = self.get("/auth/google").await;
+            let to = reqwest::Url::parse(off.headers()["location"].to_str().unwrap()).unwrap();
+            let word = to.query_pairs().find(|(k, _)| k == "state").unwrap().1.to_string();
+            let back = self.get(&format!("/auth/google/callback?code=abc&state={word}")).await;
+            back.headers()["location"].to_str().unwrap().to_string()
+        }
+
+        /// Signs in from a sign-in started with `then`, and returns where the
+        /// server sent the browser afterwards.
+        async fn sign_in_then(&mut self, then: &str) -> String {
+            let mut start = reqwest::Url::parse("http://x/auth/google").unwrap();
+            start.query_pairs_mut().append_pair("then", then);
+            let off = self.get(&format!("/auth/google?{}", start.query().unwrap())).await;
             let to = reqwest::Url::parse(off.headers()["location"].to_str().unwrap()).unwrap();
             let word = to.query_pairs().find(|(k, _)| k == "state").unwrap().1.to_string();
             let back = self.get(&format!("/auth/google/callback?code=abc&state={word}")).await;
@@ -954,5 +978,77 @@ mod tests {
         assert_eq!(signed["account"]["email"], "review@thedone.app");
         let state = b.http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(signed["token"].as_str().unwrap()).send().await.unwrap();
         assert_eq!(state.status(), 200);
+    }
+
+    /// Claude's whole way in: register, sign in to done, allow, trade the code
+    /// for a token, then use the tools through /mcp as that person.
+    #[tokio::test]
+    async fn an_mcp_client_signs_in_and_uses_the_tools() {
+        let (at, google, _kept) = hosted(9).await;
+        let mut b = Browser::new(&at);
+        // Without a token, /mcp says where to sign in.
+        let bare = b.post("/mcp", serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })).await;
+        assert_eq!(bare.status(), 401);
+        assert!(bare.headers()["www-authenticate"].to_str().unwrap().contains("/.well-known/oauth-protected-resource"));
+
+        let back = "https://claude.ai/api/mcp/auth_callback";
+        let client: serde_json::Value = b.post("/oauth/register", serde_json::json!({ "redirect_uris": [back], "client_name": "Claude" })).await.json().await.unwrap();
+        let client_id = client["client_id"].as_str().unwrap().to_string();
+        let verifier = "a-verifier-long-enough-to-be-a-real-pkce-secret-0123456789";
+        let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(<sha2::Sha256 as sha2::Digest>::digest(verifier.as_bytes()));
+        let mut ask = reqwest::Url::parse(&format!("{at}/oauth/authorize")).unwrap();
+        ask.query_pairs_mut()
+            .append_pair("client_id", &client_id)
+            .append_pair("redirect_uri", back)
+            .append_pair("state", "s1")
+            .append_pair("code_challenge", &challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("response_type", "code");
+        let path = format!("/oauth/authorize?{}", ask.query().unwrap());
+
+        // Signed out: off to Google, and back to the same ask afterwards.
+        let off = b.get(&path).await;
+        assert!(off.headers()["location"].to_str().unwrap().starts_with("/auth/google?then="));
+        google.says(person("2001", "cleo@example.com"));
+        assert_eq!(b.sign_in_then(&path).await, path);
+
+        // An address the client did not register is never sent anything.
+        let elsewhere = path.replace("claude.ai", "evil.example");
+        let page = b.get(&elsewhere).await.text().await.unwrap();
+        assert!(page.contains("did not register"), "{page}");
+
+        let page = b.get(&path).await.text().await.unwrap();
+        assert!(page.contains("Claude") && page.contains("cleo@example.com"), "{page}");
+        let mut form: Vec<(String, String)> = ask.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        form.push(("allow".into(), "yes".into()));
+        let request = b.http.post(format!("{at}/oauth/authorize")).form(&form);
+        let allowed = b.send(request).await;
+        let to = reqwest::Url::parse(allowed.headers()["location"].to_str().unwrap()).unwrap();
+        assert!(to.as_str().starts_with(back));
+        let code = to.query_pairs().find(|(k, _)| k == "code").unwrap().1.to_string();
+
+        // The code is worth nothing without the verifier.
+        let trade = |verifier: &str| vec![("grant_type", "authorization_code".to_string()), ("code", code.clone()), ("code_verifier", verifier.to_string()), ("redirect_uri", back.to_string()), ("client_id", client_id.clone())];
+        let wrong = b.http.post(format!("{at}/oauth/token")).form(&trade("not-the-verifier")).send().await.unwrap();
+        assert_eq!(wrong.status(), 400);
+        let tokens: serde_json::Value = b.http.post(format!("{at}/oauth/token")).form(&trade(verifier)).send().await.unwrap().json().await.unwrap();
+        let token = tokens["access_token"].as_str().unwrap().to_string();
+
+        let mcp = |body: serde_json::Value| b.http.post(format!("{at}/mcp")).bearer_auth(&token).json(&body).send();
+        let init: serde_json::Value = mcp(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18" } })).await.unwrap().json().await.unwrap();
+        assert_eq!(init["result"]["serverInfo"]["name"], "done");
+        let added: serde_json::Value = mcp(serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "add_task", "arguments": { "title": "Book the dentist" } } })).await.unwrap().json().await.unwrap();
+        assert!(added["result"]["isError"] != true, "{added}");
+        let listed: serde_json::Value = mcp(serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "list_tasks", "arguments": {} } })).await.unwrap().json().await.unwrap();
+        assert!(listed.to_string().contains("Book the dentist"), "{listed}");
+        // A notification gets no reply.
+        assert_eq!(mcp(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await.unwrap().status(), 202);
+
+        // The refresh token renews; it is not itself an access token.
+        let refresh = tokens["refresh_token"].as_str().unwrap();
+        let renewed = b.http.post(format!("{at}/oauth/token")).form(&[("grant_type", "refresh_token"), ("refresh_token", refresh)]).send().await.unwrap();
+        assert_eq!(renewed.status(), 200);
+        let as_access = b.http.post(format!("{at}/mcp")).bearer_auth(refresh).json(&serde_json::json!({ "jsonrpc": "2.0", "id": 4, "method": "ping" })).send().await.unwrap();
+        assert_eq!(as_access.status(), 401);
     }
 }
