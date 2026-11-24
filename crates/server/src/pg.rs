@@ -776,6 +776,19 @@ impl Db {
         Ok(db)
     }
 
+    /// Today in a time zone (an IANA name), YYYY-MM-DD: `/mcp`'s today.
+    pub async fn today_in(&self, zone: &str) -> Result<String, Fail> {
+        let client = self.pool.get().await?;
+        Ok(client.query_one("SELECT to_char(now() AT TIME ZONE $1, 'YYYY-MM-DD')", &[&zone]).await?.get(0))
+    }
+
+    /// A moment (ms since 1970) as HH:MM in a time zone.
+    pub async fn clock_in(&self, ms: i64, zone: &str) -> Result<String, Fail> {
+        let client = self.pool.get().await?;
+        let seconds = ms as f64 / 1000.0;
+        Ok(client.query_one("SELECT to_char(to_timestamp($1) AT TIME ZONE $2, 'HH24:MI')", &[&seconds, &zone]).await?.get(0))
+    }
+
     /// The name an account is kept under, if it is known.
     pub async fn name_of(&self, id: &str) -> Result<Option<String>, Fail> {
         let client = self.pool.get().await?;

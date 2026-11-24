@@ -47,6 +47,10 @@ pub struct Config {
     /// The App Review login's password (DONE_REVIEW_PASSWORD). None: the
     /// login is off and answers as if it did not exist.
     pub review_password: Option<String>,
+    /// The zone `/mcp` tells days and times in (DONE_TIME_ZONE, by default
+    /// America/Los_Angeles). An MCP client does not say where its person is;
+    /// the apps do, per request, and are unaffected.
+    pub time_zone: String,
 }
 
 fn need(name: &str) -> String {
@@ -88,6 +92,7 @@ impl Config {
             dev,
             collab_url,
             review_password,
+            time_zone: std::env::var("DONE_TIME_ZONE").ok().filter(|z| !z.trim().is_empty()).unwrap_or_else(|| "America/Los_Angeles".into()),
             apple_audience: std::env::var("DONE_APPLE_AUDIENCE").ok().filter(|a| !a.trim().is_empty()).unwrap_or_else(|| "app.thedone.ios".into()),
             apple_keys_url: "https://appleid.apple.com/auth/keys".into(),
             public_url,
@@ -192,7 +197,7 @@ pub(crate) fn unseal(key: &Key, sealed: &str) -> Option<String> {
 /// What an app sends in place of the cookie: the same signed session, as a
 /// header. A web view inside an app is not the server's own site, so the
 /// cookie is never sent from it.
-fn bearer(headers: &HeaderMap, key: &Key) -> Option<Session> {
+pub(crate) fn bearer(headers: &HeaderMap, key: &Key) -> Option<Session> {
     let sealed = headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
     live(serde_json::from_str(&unseal(key, sealed)?).ok()?)
 }
@@ -268,9 +273,14 @@ struct SigningIn {
     then: Option<String>,
 }
 
-/// An invite page's own path, and nothing else.
+/// An invite page's own path, or the page where an MCP client (Claude) is
+/// let in, and nothing else.
 fn back_to(then: Option<String>) -> Option<String> {
     let then = then?;
+    // A path on this server, so the redirect cannot leave it.
+    if then.starts_with("/oauth/authorize?") && then.len() <= 4096 && !then.contains(['\r', '\n', '\\']) {
+        return Some(then);
+    }
     let token = then.strip_prefix("/invite/")?;
     (!token.is_empty() && token.len() <= 128 && token.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(then)
 }

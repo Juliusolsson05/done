@@ -1197,6 +1197,7 @@ dependencies = [
  "cookie",
  "deadpool-postgres",
  "done-core",
+ "done-mcp",
  "futures-util",
  "jsonwebtoken",
  "rand 0.10.4",
