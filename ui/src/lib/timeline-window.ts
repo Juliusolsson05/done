@@ -40,3 +40,59 @@ export function onScreen(span: Span, left: number, width: number): [Day, Day] {
   const last = Math.min(span.days - 1, Math.ceil(left + width) - 1)
   return [addDays(span.start, first), addDays(span.start, Math.max(first, last))]
 }
+
+// On a pane too narrow for NARROW_DAYS days (a phone, at week zoom), four
+// days before today would leave today at the right edge and the coming days
+// off screen: it gets a single day of room instead.
+export const NARROW_DAYS = 10
+export const NARROW_LEAD = 1
+export const leadFor = (viewDays: number): number => (viewDays < NARROW_DAYS ? NARROW_LEAD : LEAD)
+
+// Days of room kept right of today when the opening position reaches back.
+export const RIGHT_ROOM = 2
+
+// Where the Timeline opens, as the first day at the left edge of the bars
+// (in days from the span's start): today with LEAD days of room before it
+// (one on a narrow pane, leadFor).
+// When the earliest bar starts before that and today would still be on
+// screen with room to its right, it opens from a day before that bar
+// instead, so neither is cut off at the edge. `viewDays`: how many days the
+// chart shows at once.
+export function initialLeft(span: Span, today: Day, earliest: Day | null, viewDays: number): number {
+  const todayAt = daysBetween(span.start, today)
+  let left = todayAt - leadFor(viewDays)
+  if (earliest) {
+    const before = daysBetween(span.start, earliest) - 1
+    if (before < left && todayAt - before + 1 + RIGHT_ROOM <= viewDays) left = before
+  }
+  return Math.max(0, Math.min(left, span.days - Math.ceil(viewDays)))
+}
+
+// How the Timeline divides the width it has: the column of titles on the
+// left, whether its controls go into one View menu, and whether the tasks
+// with no date get a column of their own on the right. Decided by the width
+// the view has, not the window's: a Mac window with the sidebar open and an
+// iPad in portrait have the same room.
+export const SIDE_PANEL = 240
+export function paneLayout(width: number): { left: number; compact: boolean; side: boolean; narrow: boolean } {
+  // A phone in portrait gives the titles about half: a third left them a
+  // couple of words ("Hop H…"), and the chart scrolls anyway. Its rows also
+  // drop the project dot and the faces (`narrow`), so the title has the
+  // room. A bit over a third up to 700, never so little that a title cannot
+  // be read; from 700 the column is as wide as on the Mac.
+  const narrow = width < 500
+  const left = narrow ? Math.max(170, Math.round(width * 0.52)) : width < 700 ? Math.min(260, Math.max(140, Math.round(width * 0.38))) : 260
+  // Zoom, grouping, Today, Filter and No date fit beside the title from 880.
+  const wide = width >= 880
+  return { left, compact: !wide, side: wide, narrow }
+}
+
+// Whether a bar lies wholly off the days on screen, and on which side, so its
+// row can say where it went instead of looking empty (an overdue task dated
+// before the window). `left` and `width` are the days on screen, in days
+// from the span's start; a bar covers its days from `first` to `last`.
+export function edgeOf(span: Span, first: Day, last: Day, left: number, width: number): 'before' | 'after' | null {
+  if (daysBetween(span.start, last) + 1 <= left) return 'before'
+  if (daysBetween(span.start, first) >= left + width) return 'after'
+  return null
+}
