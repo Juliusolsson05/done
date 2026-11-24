@@ -143,6 +143,9 @@ export function Timeline() {
   const undated = open.filter((t) => !t.due && !t.start)
   const shown = open.length
   const total = openTasks(inScope.tasks).length
+  // A filter that matches nothing replaces the chart; when it is cleared
+  // the chart comes back, scrolled to where it was (or to today).
+  const chartShown = !(isFiltering(filter) && shown === 0)
 
   // The days drawn: a week before the earliest task to four weeks after the
   // latest, all at once, so the scrollbar shows the whole range.
@@ -177,7 +180,7 @@ export function Timeline() {
     setRange(onScreen(span, now.left, now.width))
     // Laid out anew whenever the range, the zoom or the panes change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [span.start, span.days, px, rootWidth])
+  }, [span.start, span.days, px, rootWidth, chartShown])
   const onScroll = () => {
     const { left, width } = view()
     anchor.current = addDays(span.start, Math.round(left))
@@ -635,7 +638,7 @@ export function Timeline() {
       {/* On a phone the help goes above the chart: below it, New task would sit on it. */}
       {isMobile && <p className="mb-2 shrink-0 text-xs text-faint">{help}</p>}
 
-      {isFiltering(filter) && shown === 0 ? (
+      {!chartShown ? (
         <NothingMatches />
       ) : (
         // At least a few rows high, so a short landscape screen still shows a
