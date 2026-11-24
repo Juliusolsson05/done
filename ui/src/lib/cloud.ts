@@ -90,3 +90,23 @@ export async function finishSignIn(link: string): Promise<boolean> {
   write(SESSION, JSON.stringify(await response.json()))
   return cloudSession() !== null
 }
+
+// Sign-ins that finish in one request rather than a trip through the
+// browser: Apple's (the iPhone app hands over the token Apple gave it) and
+// the App Review login. Both answer `{token, account}`, like `/auth/exchange`.
+// Throws with the server's own words when it says no.
+async function signInWith(path: string, body: unknown): Promise<void> {
+  if (!CLOUD_URL) throw new Error('This app has no account to sign in to.')
+  const response = await fetch(`${CLOUD_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = (await response.json().catch(() => ({}))) as { error?: string }
+  if (!response.ok) throw new Error(data.error || 'Signing in did not work. Try again.')
+  write(SESSION, JSON.stringify(data))
+  if (cloudSession() === null) throw new Error('Signing in did not work. Try again.')
+}
+
+export const signInWithAppleToken = (token: string, name: string) => signInWith('/auth/apple', { identity_token: token, name })
+export const signInWithPassword = (username: string, password: string) => signInWith('/auth/review', { username, password })
