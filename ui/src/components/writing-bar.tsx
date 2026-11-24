@@ -34,8 +34,10 @@ export interface Viewport {
 }
 
 // The visual viewport, followed while `on`: it shrinks when the keyboard
-// comes up and moves when the page scrolls under it.
-export function useVisualViewport(on: boolean, onChange?: (viewport: Viewport) => void): Viewport | null {
+// comes up and moves when the page scrolls under it. `onResize` is told when
+// its size changes (the keyboard came, went or changed height), not when it
+// is only scrolled: scrolling is the reader's own.
+export function useVisualViewport(on: boolean, onResize?: (viewport: Viewport) => void): Viewport | null {
   const [viewport, setViewport] = useState<Viewport | null>(null)
   useEffect(() => {
     const vv = window.visualViewport
@@ -46,16 +48,17 @@ export function useVisualViewport(on: boolean, onChange?: (viewport: Viewport) =
     const read = () => {
       const next = { top: vv.offsetTop, left: vv.offsetLeft, width: vv.width, height: vv.height, inset: keyboardInset(window.innerHeight, vv) }
       setViewport(next)
-      onChange?.(next)
+      return next
     }
-    read()
-    vv.addEventListener('resize', read)
+    const resized = () => onResize?.(read())
+    resized()
+    vv.addEventListener('resize', resized)
     vv.addEventListener('scroll', read)
     return () => {
-      vv.removeEventListener('resize', read)
+      vv.removeEventListener('resize', resized)
       vv.removeEventListener('scroll', read)
     }
-    // onChange is read when the viewport moves, not a reason to listen again.
+    // onResize is read when the viewport changes, not a reason to listen again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [on])
   return viewport

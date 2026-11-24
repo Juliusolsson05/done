@@ -77,11 +77,27 @@ class TaskBox extends WidgetType {
     mark.setAttribute('aria-checked', String(this.checked))
     mark.setAttribute('aria-label', this.checked ? 'Ticked' : 'Not ticked')
     // A tap ticks it and nothing else: the keyboard does not come up, the
-    // cursor stays where it was.
+    // cursor stays where it was. On a touch screen the tap is taken at
+    // touchend (which also stops the browser focusing the note), unless the
+    // finger moved: that was the page being scrolled.
+    const toggle = () => toggleTaskAt(view, view.posAtDOM(mark))
+    let start: { x: number; y: number } | null = null
+    mark.addEventListener('touchstart', (event) => {
+      const touch = event.touches[0]
+      start = touch ? { x: touch.clientX, y: touch.clientY } : null
+    }, { passive: true })
+    mark.addEventListener('touchend', (event) => {
+      const touch = event.changedTouches[0]
+      const still = start && touch && Math.abs(touch.clientX - start.x) < 10 && Math.abs(touch.clientY - start.y) < 10
+      start = null
+      if (!still) return
+      event.preventDefault()
+      toggle()
+    }, { passive: false })
     mark.addEventListener('mousedown', (event) => event.preventDefault())
     mark.addEventListener('click', (event) => {
       event.preventDefault()
-      toggleTaskAt(view, view.posAtDOM(mark))
+      toggle()
     })
     return mark
   }
@@ -194,12 +210,13 @@ function dateField(initial: number | null) {
 // 17 (the editor's own size, set by the page) at 1.45 with 6 between lines,
 // headings 22 and 19, lists hanging from their marker.
 const look = EditorView.theme({
-  '.cm-line.cm-title': { fontSize: '28px', lineHeight: '1.2', fontWeight: '700', letterSpacing: '-0.015em', paddingBottom: '8px' },
-  '.cm-line.cm-title .cm-placeholder': { fontWeight: '700' },
-  '.cm-note-date': { fontSize: '13px', lineHeight: '18px', color: 'var(--tertiary)', paddingBottom: '14px' },
   '.cm-line.cm-h1': { fontSize: '22px', lineHeight: '1.3', fontWeight: '700', paddingTop: '10px' },
   '.cm-line.cm-h2': { fontSize: '19px', lineHeight: '1.35', fontWeight: '650', paddingTop: '8px' },
   '.cm-line.cm-h3': { fontSize: 'inherit', fontWeight: '650', paddingTop: '6px' },
+  // After the headings, so a first line marked # is still set as the title.
+  '.cm-line.cm-title': { fontSize: '28px', lineHeight: '1.2', fontWeight: '700', letterSpacing: '-0.015em', paddingTop: '0', paddingBottom: '8px' },
+  '.cm-line.cm-title .cm-placeholder': { fontWeight: '700' },
+  '.cm-note-date': { fontSize: '13px', lineHeight: '18px', color: 'var(--tertiary)', paddingBottom: '14px' },
   // A list item hangs from its marker: wrapped lines start under the words,
   // not under the bullet. Deeper items step in.
   '.cm-line.cm-li': {
