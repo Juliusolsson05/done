@@ -30,8 +30,9 @@ copying a title by hand, which neither opens the other note nor follows a rename
    with nothing typed, the newest notes. The note being written and blank notes are never offered. Arrow
    keys, Enter/Tab and a tap choose from the one combined list.
 3. **Editor**: a note link is one atom (as a task mention is): a note icon and the linked note's current
-   title, looked up by id. A note that no longer exists shows the stored label greyed and struck through,
-   with a "missing" tooltip. A click or tap opens the linked note.
+   title, looked up by id (a note emptied of its words is "New note", as the list calls it, and still
+   opens). Only a note that no longer exists shows the stored label greyed and struck through, with a
+   "missing" tooltip. Links written inside code stay text, as the read view shows them. A click or tap opens the linked note.
 4. **Read view**: a note link is a small tappable chip with the same look and the same missing state.
 5. **Opening**: the Notes page opens that note (under All notes, search cleared, as a search hit does);
    on a phone the note replaces the open one, and back goes to the list as before.
@@ -50,8 +51,11 @@ copying a title by hand, which neither opens the other note nor follows a rename
    view's. The caret goes beside it with the arrow keys or a tap next to it.
 5. **Title lookup over every stored note**, not only the current space's, so a link to a note in another
    space still shows its title; opening one outside the current space says where it is instead of failing.
+   The picker offers only the chosen space's notes, so a workspace note never takes a personal note's
+   title into its shared text (review of #73).
 6. **Read view: always the inline chip**, never a card: a note can be long; its title is what identifies it.
-7. **Backlinks shown only while writing**, in the refs row, not folded with tasks and links.
+7. **Backlinks shown only while writing**, in the refs row, not folded with tasks and links; only from
+   notes in the chosen space.
 
 ## Verification
 
