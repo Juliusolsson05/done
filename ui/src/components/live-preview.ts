@@ -216,6 +216,8 @@ const look = EditorView.theme({
   // After the headings, so a first line marked # is still set as the title.
   '.cm-line.cm-title': { fontSize: '28px', lineHeight: '1.2', fontWeight: '700', letterSpacing: '-0.015em', paddingTop: '0', paddingBottom: '8px' },
   '.cm-line.cm-title .cm-placeholder': { fontWeight: '700' },
+  // A paragraph break: about 40% of a line, with no spacing of its own.
+  '.cm-line.cm-blank': { lineHeight: '0.6em', paddingTop: '0', paddingBottom: '0' },
   '.cm-note-date': { fontSize: '13px', lineHeight: '18px', color: 'var(--tertiary)', paddingBottom: '14px' },
   // A list item hangs from its marker: wrapped lines start under the words,
   // not under the bullet. Deeper items step in.

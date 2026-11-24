@@ -76,6 +76,14 @@ describe('live preview: what is hidden', () => {
     expect(lines.find((l) => l.line === 4)?.classes).not.toContain('cm-task-done')
   })
 
+  it('draws an empty line short, except on the cursor’s line and as the title', () => {
+    const blank = (doc: string, active: number[] = []) =>
+      previewRanges(stateOf(doc), new Set(active)).lines.filter((l) => l.classes.includes('cm-blank')).map((l) => l.line)
+    expect(blank('1. a\n\n2. b\n  \nend')).toEqual([2, 4])
+    expect(blank('1. a\n\n2. b', [2])).toEqual([])
+    expect(blank('\nbody')).toEqual([])
+  })
+
   it('never hides across a line break', () => {
     const doc = '# A\n**b\nc**\n- x'
     const state = stateOf(doc)

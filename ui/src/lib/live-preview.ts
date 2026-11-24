@@ -48,6 +48,10 @@ export function previewRanges(state: EditorState, active: Set<number>): { hides:
   // The first line is the note's title, as in Apple Notes, marked or not.
   look(1).classes.push('cm-title')
 
+  // An empty line is Markdown's paragraph break: drawn short, as Apple Notes
+  // spaces its paragraphs, except where the cursor is (it is typed on there).
+  for (let n = 2; n <= doc.lines; n++) if (!active.has(n) && doc.line(n).text.trim() === '') look(n).classes.push('cm-blank')
+
   syntaxTree(state).iterate({
     enter(ref) {
       const name = ref.name
