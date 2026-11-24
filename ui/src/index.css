@@ -39,18 +39,18 @@
 
 :root {
   /* The screen's safe area, one variable per side, used by every inset in the
-     app instead of env() directly. Each side is the larger of what WebKit
-     says and what the iPhone/iPad app read from the window natively
-     (--native-safe-*, set by lib/safe-area.ts). WHY both: in the Tauri web view
-     on iOS, env(safe-area-inset-left/right) is 0 when the phone is held sideways
-     (#70: the Dynamic Island covered the start of every view, while Safari on
-     the same simulator reported 62 pt), so the native value is needed there;
-     everywhere else env() is right from the first frame, before the app has
-     answered, and the native value is absent (0). */
-  --safe-top: max(env(safe-area-inset-top), var(--native-safe-top, 0px));
-  --safe-right: max(env(safe-area-inset-right), var(--native-safe-right, 0px));
-  --safe-bottom: max(env(safe-area-inset-bottom), var(--native-safe-bottom, 0px));
-  --safe-left: max(env(safe-area-inset-left), var(--native-safe-left, 0px));
+     app instead of env() directly. In the iPhone/iPad app the values the app
+     reads from its window natively win (--native-safe-*, set on <html> by
+     lib/safe-area.ts, zeros included); everywhere else, and in the moment
+     before the app has answered, it is WebKit's env().
+     WHY not env() alone: in done's iOS web view env() keeps the portrait insets
+     when the iPhone is held sideways (top 62, sides 0 on an iPhone 17), so the
+     Dynamic Island covered the start of every view and an empty band sat at
+     the top (#70); lib/safe-area.ts explains how the right values are found. */
+  --safe-top: var(--native-safe-top, env(safe-area-inset-top));
+  --safe-right: var(--native-safe-right, env(safe-area-inset-right));
+  --safe-bottom: var(--native-safe-bottom, env(safe-area-inset-bottom));
+  --safe-left: var(--native-safe-left, env(safe-area-inset-left));
   color-scheme: light;
 
   /* The content sheet and everything that sits on it. */

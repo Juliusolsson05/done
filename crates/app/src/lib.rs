@@ -74,13 +74,12 @@ struct Focus(Mutex<Option<Session>>);
 /// The window's safe area in points, `[top, right, bottom, left]`, as UIKit
 /// knows it. iPhone and iPad only; `None` elsewhere.
 ///
-/// WHY the app asks UIKit instead of trusting `env(safe-area-inset-*)`: in this
-/// web view WebKit reports the side insets as 0 when the phone is held
-/// sideways, so the Dynamic Island covered the start of every view (#70).
-/// Safari on the same simulator reports 62 pt each side, and switching the
-/// scroll view's automatic inset adjustment off did not change it (#65). The
-/// window the web view is in has the right values, so they are read from there
-/// and the page sets them as CSS variables (ui/src/lib/safe-area.ts).
+/// WHY: in this web view `env(safe-area-inset-*)` keeps the portrait values
+/// when the iPhone is held sideways, so the Dynamic Island covered the start of
+/// every view (#70). The window reports the same portrait values (measured on
+/// the iPhone 17 simulator: [62, 0, 34, 0] at 874×402 pt), so the page turns
+/// them for landscape itself (ui/src/lib/safe-area.ts `insetsFor`); what this
+/// answer gives it is the island's real size on each model.
 ///
 /// UIKit must be touched on the main thread: `with_webview` runs the closure
 /// there, and the answer comes back over a channel. The command is async so it
