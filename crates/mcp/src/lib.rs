@@ -423,8 +423,23 @@ fn note_text(args: &Value) -> Result<String, String> {
 }
 
 fn existing_note(store: &Store, args: &Value) -> Result<Note, String> {
+    note_in(&store.notes().map_err(|e| e.to_string())?, args)
+}
+
+/// The note an agent named by id, among notes already read.
+fn note_in(notes: &[Note], args: &Value) -> Result<Note, String> {
     let id = args.get("id").and_then(Value::as_i64).ok_or("Give the note's id, from list_notes.")?;
-    store.notes().map_err(|e| e.to_string())?.into_iter().find(|n| n.id == id).ok_or_else(|| format!("There is no note {id}. list_notes gives the ids."))
+    notes.iter().find(|n| n.id == id).cloned().ok_or_else(|| format!("There is no note {id}. list_notes gives the ids."))
+}
+
+/// The notes read before a save, with the saved note as it is now: what a
+/// reply's note links are looked up in, without reading every note again.
+fn with_saved(mut notes: Vec<Note>, saved: &Note) -> Vec<Note> {
+    match notes.iter_mut().find(|n| n.id == saved.id) {
+        Some(n) => *n = saved.clone(),
+        None => notes.push(saved.clone()),
+    }
+    notes
 }
 
 /// list_notes gives at most this many, newest first, and says how many it left out.
@@ -636,19 +651,21 @@ fn call(store: &Store, name: &str, args: &Value) -> Result<Value, String> {
             let text = note_text(args)?;
             let state = current_state(store)?;
             let project_id = note_project(args, &state)?.flatten();
-            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
+            let notes = store.notes().map_err(|e| e.to_string())?;
+            let folder = note_folder(args, &notes);
             let note = store.save_note(SaveNote { id: None, text, updated_at: now_ms(), project_id, folder, space_id: None }).map_err(|e| e.to_string())?;
-            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?, &store.notes().map_err(|e| e.to_string())?))
+            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?, &with_saved(notes, &note)))
         }
         "update_note" => {
-            let note = existing_note(store, args)?;
+            let notes = store.notes().map_err(|e| e.to_string())?;
+            let note = note_in(&notes, args)?;
             let state = current_state(store)?;
             let text = if args.get("text").is_some() { note_text(args)? } else { note.text.clone() };
             let project_id = note_project(args, &state)?.unwrap_or(note.project_id);
             // Not said: the note keeps its folder.
-            let folder = note_folder(args, &store.notes().map_err(|e| e.to_string())?);
+            let folder = note_folder(args, &notes);
             let note = store.save_note(SaveNote { id: Some(note.id), text, updated_at: now_ms(), project_id, folder, space_id: note.space_id }).map_err(|e| e.to_string())?;
-            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?, &store.notes().map_err(|e| e.to_string())?))
+            Ok(describe_note_in(&note, &state, &known_tasks(store, &state)?, &with_saved(notes, &note)))
         }
         "delete_note" => {
             let note = existing_note(store, args)?;
