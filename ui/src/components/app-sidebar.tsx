@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   CalendarDaysIcon,
   CircleCheckIcon,
@@ -42,6 +42,7 @@ import { Countdown } from '@/components/focus-view'
 import { NameField } from '@/components/note-folders'
 import { ProjectDot } from '@/components/marks'
 import { useFocus, useNameField } from '@/hooks/use-focus'
+import { useSidebarDocked } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { restart } from '@/lib/backend'
 import { play } from '@/lib/sounds'
@@ -141,8 +142,45 @@ function NoteFolders() {
   )
 }
 
+// An iPad held upright has no room for the sidebar beside the page, so there
+// it is put away, as Mail and Notes put theirs away, and the button at the
+// page's top left brings it back (App.tsx). Choosing a view puts it away
+// again. Turned sideways, it comes back as it was. Being put away like this
+// is not remembered: the sidebar's cookie keeps what was last chosen by hand,
+// for the next time there is room. On a Mac and a phone this does nothing.
+const chosenOpen = () => !document.cookie.split('; ').includes('sidebar_state=false')
+
+function useSidebarMakesRoom(view: View) {
+  const docked = useSidebarDocked()
+  const { open, setOpen } = useSidebar()
+  const was = useRef(docked)
+  const seenView = useRef(view)
+  const automatically = (next: boolean) => {
+    if (next === open) return
+    const chosen = chosenOpen()
+    setOpen(next)
+    // setOpen wrote the cookie; put back what was chosen by hand.
+    document.cookie = `sidebar_state=${chosen}; path=/; max-age=${60 * 60 * 24 * 7}`
+  }
+  // Once, before the first paint, so it is never seen open and then closing.
+  useLayoutEffect(() => {
+    if (!docked) automatically(false)
+  }, [])
+  useEffect(() => {
+    if (was.current === docked) return
+    was.current = docked
+    automatically(docked && chosenOpen())
+  }, [docked])
+  useEffect(() => {
+    if (seenView.current === view) return
+    seenView.current = view
+    if (!docked) automatically(false)
+  }, [view])
+}
+
 export function AppSidebar() {
   const { info, ui, focus, openView: open, newProject, search, shown, keep, team, me, scope } = useApp()
+  useSidebarMakesRoom(ui.view)
   const { setOpenMobile } = useSidebar()
   const count = counts(shown.tasks, TODAY, keep)
   const spaces = workspaces(team)
