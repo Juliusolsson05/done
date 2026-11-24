@@ -219,7 +219,9 @@ function Sheet({ task }: { task: Task }) {
             <AssigneePage task={task} onBack={() => setChoosing(false)} />
           </div>
         )}
-        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)]', choosing && 'hidden')}>
+        {/* Each group keeps its height and the sheet scrolls: as flex items they
+            would otherwise shrink to fit, clipping the last rows (24 Nov). */}
+        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)] [&>*]:shrink-0', choosing && 'hidden')}>
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <textarea
               value={title}
