@@ -230,18 +230,18 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_2E03B87C-CBBE-4548-A11C-BECA79A6EE1C" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
-			sourceTree = "<group>";
-		};
-		"TEMP_8A2796FB-1D18-43D1-B096-E769F25FBA18" /* arm64 */ = {
+		"TEMP_0F1A6C20-C181-4049-A23E-D570AB484F0A" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_C2F6E8A8-D168-4650-A7E5-A76D157D25E8" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

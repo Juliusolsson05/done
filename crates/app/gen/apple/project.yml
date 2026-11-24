@@ -84,7 +84,7 @@ targets:
       path: done-app_iOS/done-app_iOS.entitlements
       # The app writes the widgets' data where the extension can read it.
       properties:
-        com.apple.security.application-groups: [group.dev.done.app]
+        com.apple.security.application-groups: [group.app.thedone]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -155,7 +155,7 @@ targets:
     entitlements:
       path: Widgets/done-widgets.entitlements
       properties:
-        com.apple.security.application-groups: [group.dev.done.app]
+        com.apple.security.application-groups: [group.app.thedone]
     settings:
       base:
         PRODUCT_NAME: done-widgets

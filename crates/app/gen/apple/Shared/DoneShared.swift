@@ -14,7 +14,10 @@ import ActivityKit
 
 /// The App Group both targets belong to: the only place the extension can
 /// read what the app wrote. Declared in both entitlements files (project.yml).
-let doneAppGroup = "group.dev.done.app"
+// App Group names are global across all developer accounts: the first choice,
+// group.dev.done.app, was already taken ("not available" when signing for a
+// device), so it is named from done's domain, thedone.app.
+let doneAppGroup = "group.app.thedone"
 
 /// The widgets' data: written by the app (`done_widget_snapshot`), read by the
 /// extension's timeline. A file, not UserDefaults, so one write replaces it
