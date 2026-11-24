@@ -73,14 +73,14 @@ export function TimeSheet() {
   return (
     <div className="max-w-4xl">
       <ViewHeader title="Time sheet" sub={fullDay(day)}>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Day before" onClick={() => go(addDays(day, -1))}>
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground max-md:size-11" aria-label="Day before" onClick={() => go(addDays(day, -1))}>
           <ChevronLeftIcon />
         </Button>
         {day !== TODAY && <HeaderButton onClick={() => go(TODAY)}>Today</HeaderButton>}
         <Button
           variant="ghost"
           size="icon-sm"
-          className="text-muted-foreground"
+          className="text-muted-foreground max-md:size-11"
           aria-label="Day after"
           disabled={day >= TODAY}
           onClick={() => go(addDays(day, 1))}
@@ -123,7 +123,7 @@ export function TimeSheet() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    className="text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                     aria-label={'Remove from the time sheet: ' + entry.title}
                     onClick={() => remove(entry)}
                   >

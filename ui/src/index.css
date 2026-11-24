@@ -138,6 +138,16 @@
   /* A project's colour as set on the element, and the two tints a timeline
      bar is made of. */
   --color-project: var(--project);
+  /* The fixed project colours by number, for icons that are not a project's
+     (the More rows in Lists on a phone used these and drew nothing, 23 Nov). */
+  --color-project-0: var(--project-0);
+  --color-project-1: var(--project-1);
+  --color-project-2: var(--project-2);
+  --color-project-3: var(--project-3);
+  --color-project-4: var(--project-4);
+  --color-project-5: var(--project-5);
+  --color-project-6: var(--project-6);
+  --color-project-7: var(--project-7);
   --color-project-tint: color-mix(in srgb, var(--project) 15%, white);
   --color-project-edge: color-mix(in srgb, var(--project) 42%, white);
 

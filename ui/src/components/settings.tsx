@@ -116,6 +116,13 @@ function AccountPane() {
   )
 }
 
+// The iPhone and iPad app: it has a tasks file of its own like the Mac app
+// (`isDesktop`), but no terminal for the MCP server, no ⌘ for text size and no
+// self-update (the updater is the Mac's; 23 Nov audit showed all three there).
+// An iPad's web view says MacIntel, so a touch screen tells it apart.
+const onIos =
+  isDesktop && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
@@ -134,7 +141,7 @@ export function Settings() {
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
             too; in the web app there is no file here to read. */}
-        {(!account || isDesktop) && (
+        {(!account || isDesktop) && !onIos && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
@@ -163,7 +170,7 @@ export function Settings() {
 
         {/* A browser has its own zoom and nothing to update, so these two
             are for the desktop app only. */}
-        {isDesktop && (
+        {isDesktop && !onIos && (
           <>
             <Pane title="Text size">
               <div className="flex items-center gap-2">

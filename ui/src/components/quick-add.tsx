@@ -13,7 +13,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { carryDismissed, dismissOnBackspace, type Dismissed } from '@/lib/date-phrases'
 import { describeDay, spellDay, TODAY } from '@/lib/days'
-import { peopleSpans, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
+import { peopleSpans, prioritySpan, projectSpan, readLine, suggestPeople, suggestProjects, takePerson, takeSuggestion, type Person } from '@/lib/quick-add'
 import { defaultProjectFor, handleOf, workspaceOf } from '@/lib/team'
 import { play } from '@/lib/sounds'
 import { addTask, PRIORITY_NAME, projectName, setGoal } from '@/lib/tasks'
@@ -65,7 +65,7 @@ function QuickAdd() {
   const personSuggestion = suggestion ? null : suggestPeople(text, caret, people)
   // The date, the project and the people, marked in the field where they were typed.
   const project = projectSpan(text, data.projects)
-  const marks = [read.date && { start: read.date.start, end: read.date.end }, project, ...peopleSpans(text, people)]
+  const marks = [read.date && { start: read.date.start, end: read.date.end }, project, prioritySpan(text, read.date), ...peopleSpans(text, people)]
     .filter((m): m is { start: number; end: number } => !!m)
     .sort((a, b) => a.start - b.start)
 
