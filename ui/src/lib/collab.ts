@@ -133,7 +133,12 @@ export class LiveNote {
     this.toldAt = now
     // An idle person's cursor stays, fainter.
     const color = activity.idle ? faded(this.user.color) : this.user.color
+    // Added to what is there, not in its place: the editor keeps the cursor
+    // and the selection in the same state (y-codemirror.next's `cursor`), and
+    // replacing the whole state took them from the others' view at every
+    // heartbeat and every change between active and idle (23 Nov 2026).
     this.awareness.setLocalState({
+      ...this.awareness.getLocalState(),
       user: { ...this.user, color, colorLight: faded(this.user.color) },
       activity,
     })

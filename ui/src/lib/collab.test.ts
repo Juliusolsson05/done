@@ -177,6 +177,24 @@ describe('a live note', () => {
     b.destroy()
   })
 
+  // 23 Nov 2026: saying who you are replaced the whole state, cursor and
+  // selection included, so the others lost your cursor every few seconds.
+  it('keeps the cursor and selection when it says who it is or goes idle', async () => {
+    room = new Room()
+    const a = window_()
+    const b = window_()
+    await settle()
+    const cursor = { anchor: 'start', head: 'end' }
+    a.awareness.setLocalStateField('cursor', cursor)
+    a.setUser({ account: '1001', name: 'Julius', picture: '', color: '#1e4fbf' })
+    await settle()
+    const theirs = () => [...b.awareness.getStates().entries()].find(([id]) => id === a.doc.clientID)?.[1] as { cursor?: unknown; user?: { name: string } } | undefined
+    expect(theirs()?.user?.name).toBe('Julius')
+    expect(theirs()?.cursor).toEqual(cursor)
+    a.destroy()
+    b.destroy()
+  })
+
   it('is not live when the server keeps saying no, and stops asking', async () => {
     vi.useFakeTimers()
     let asked = 0
