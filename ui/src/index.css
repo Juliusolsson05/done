@@ -278,7 +278,9 @@
   }
   input,
   textarea,
-  article {
+  article,
+  [contenteditable],
+  [contenteditable] * {
     -webkit-touch-callout: default;
     -webkit-user-select: text;
     user-select: text;

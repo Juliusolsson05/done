@@ -41,6 +41,33 @@ export function titleOf(text: string): string {
   return 'New note'
 }
 
+// A line read without its Markdown: no heading or list marker, no checklist
+// box, no ** or ~~, a link as its words.
+const plainLine = (line: string): string =>
+  withoutMentionSyntax(line)
+    .replace(/^\s{0,3}#{1,6}(\s+|$)/, '')
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+    .replace(/(\*\*|__|~~|\*|_)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/\s+#+\s*$/, '')
+    .trim()
+
+// What the list shows under a note's title, as Apple Notes does: the first
+// line with words after the title's line.
+export function snippetOf(text: string): string {
+  let titled = false
+  for (const line of text.split('\n')) {
+    const plain = plainLine(line)
+    if (!plain) continue
+    if (!titled) {
+      titled = true
+      continue
+    }
+    return plain
+  }
+  return ''
+}
+
 // When a note was last changed: the time if today, otherwise the date.
 export function whenText(updatedAt: number, now: number): string {
   const at = new Date(updatedAt)
