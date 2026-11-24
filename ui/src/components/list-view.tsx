@@ -114,11 +114,39 @@ const EMPTY: Record<string, [string, string]> = {
   mine: ['Nothing assigned to you', 'When someone in a workspace puts you on a task, it shows up here.'],
 }
 
+// Assigned to me, "Only me": just the tasks you are the only one on (Julius,
+// 23 Nov). Remembered on this device.
+const ONLY_ME = 'done.mine.onlyMe'
+function readOnlyMe(): boolean {
+  try {
+    return localStorage.getItem(ONLY_ME) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function ListView() {
   const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject } = useApp()
   const view = ui.view
-  // Assigned to me: the tasks someone put you on, in the scope.
-  const source = view.kind === 'mine' ? shown.tasks.filter((t) => me !== null && (t.assignees ?? []).includes(me)) : shown.tasks
+  const [onlyMe, setOnlyMe] = useState(readOnlyMe)
+  const toggleOnlyMe = () => {
+    const next = !onlyMe
+    setOnlyMe(next)
+    try {
+      localStorage.setItem(ONLY_ME, next ? '1' : '0')
+    } catch {
+      // Not remembered; it still works for this visit.
+    }
+  }
+  // Assigned to me: the tasks someone put you on, in the scope; with Only me,
+  // those you are alone on.
+  const source =
+    view.kind === 'mine'
+      ? shown.tasks.filter((t) => {
+          const on = t.assignees ?? []
+          return me !== null && on.includes(me) && (!onlyMe || on.length === 1)
+        })
+      : shown.tasks
   const list = sections(view, source, TODAY, keep)
   const count = list.reduce((n, s) => n + s.tasks.length, 0)
   const addUnderSection = list.some((s) => s.addHere)
@@ -133,7 +161,19 @@ export function ListView() {
       {view.kind === 'inbox' && <ViewHeader title="Inbox" />}
       {view.kind === 'today' && <ViewHeader title="Today" sub={fullDay(TODAY)} />}
       {view.kind === 'upcoming' && <ViewHeader title="Upcoming" />}
-      {view.kind === 'mine' && <ViewHeader title="Assigned to me" />}
+      {view.kind === 'mine' && (
+        <ViewHeader title="Assigned to me">
+          <Button
+            variant={onlyMe ? 'secondary' : 'ghost'}
+            size="sm"
+            className={onlyMe ? 'text-foreground' : 'text-muted-foreground'}
+            aria-pressed={onlyMe}
+            onClick={toggleOnlyMe}
+          >
+            Only me
+          </Button>
+        </ViewHeader>
+      )}
       {view.kind === 'project' && (
         <ViewHeader title={<ProjectTitle id={view.id} />}>
           {ui.confirmDelete ? (
