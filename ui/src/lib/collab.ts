@@ -50,6 +50,10 @@ export const backoff = (attempt: number): number => Math.min(10_000, 500 * 2 ** 
 // the ordinary way.
 export class NotLive extends Error {}
 
+// How many "not found" answers a note gets before it is written the ordinary
+// way for good: with the backoff, about a minute.
+export const NOT_FOUND_TRIES = 6
+
 export class LiveNote {
   readonly doc = new Y.Doc()
   readonly text = this.doc.getText(TEXT)
@@ -66,6 +70,8 @@ export class LiveNote {
   private retry: ReturnType<typeof setTimeout> | undefined
   private watch: ReturnType<typeof setInterval> | undefined
   private stopped = false
+  // How many times asking for a ticket was answered "not found".
+  private notFound = 0
   private listeners = new Set<() => void>()
   private user: User | null = null
   private lastActive = Date.now()
@@ -172,7 +178,15 @@ export class LiveNote {
     try {
       opening = await this.open()
     } catch (error) {
-      if (error instanceof NotLive) return this.setStatus('off')
+      if (error instanceof NotLive) {
+        // Written the ordinary way meanwhile. Asked again a few times: a note
+        // made on this device reaches the server a moment after it is opened,
+        // and the first ask can come before it (23 Nov: one such answer left
+        // a new note off for good, so nobody saw who else was in it).
+        this.setStatus('off')
+        if (this.notFound++ < NOT_FOUND_TRIES) this.later()
+        return
+      }
       this.setStatus(this.synced ? 'offline' : 'opening')
       return this.later()
     }

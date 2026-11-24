@@ -2,7 +2,7 @@
 // the middle of a conversation that is not a task. The list on the left, the
 // open note on the right; on a phone one at a time.
 import { Fragment, useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
-import { inScope, spaceForNew, workspaceOf, workspaces } from '@/lib/team'
+import { inScope, spaceForNew, workspaceOf } from '@/lib/team'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -38,7 +38,8 @@ import { markInline, mentionId, mentionsIn } from '@/lib/mentions'
 import { TaskMention, TaskMentionInline } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
-import { Faces, LiveBar, useLiveNote, useLiveStatus, usePresence } from '@/components/live-note'
+import { LiveBar, LiveFaces, useLiveNote, useLiveStatus } from '@/components/live-note'
+import type { LiveNote } from '@/lib/collab'
 import { play } from '@/lib/sounds'
 import { forgetLast, recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
@@ -378,14 +379,12 @@ export function Notes() {
     })
   }
 
-  // Who is in which workspace note now, for the faces in the list.
-  const watched = workspaces(team)
-    .map((w) => w.id)
-    .filter((id) => scope === 'all' || scope === id)
-  const presence = usePresence(watched, team?.me ?? null)
-
   const sorted = notes ? [...notes].sort(byNewest) : []
   const current = sorted.find((n) => n.id === openId)
+  // The open note's live copy, held here so the header can show who is in it.
+  const shared = current !== undefined && workspaceOf(spaceOfNote(current, data.projects), team) !== undefined
+  const live = useLiveNote(shared ? current.id : null, team)
+  useLiveStatus(live)
   const now = Date.now()
   // A search looks through every note, as Apple Notes does; otherwise the
   // list is the chosen folder's.
@@ -485,7 +484,8 @@ export function Notes() {
             <ChevronLeftIcon />
             <span className="truncate">{folder ?? 'All notes'}</span>
           </Button>
-          <div className="ml-auto flex min-w-0 flex-wrap justify-end gap-1">
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+            <LiveFaces live={live} />
             {folderPicker}
             {projectPicker}
             {readToggle}
@@ -494,7 +494,7 @@ export function Notes() {
             </Button>
           </div>
         </div>
-        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+        {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
       </div>
     )
   }
@@ -536,6 +536,7 @@ export function Notes() {
       {/* On a wide screen the folders are in the sidebar, so the title says which one is open. */}
       <ViewHeader title={folder ?? (isMobile ? 'All notes' : 'Notes')}>
         {isMobile && folder !== null && <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />}
+        {!isMobile && current && <LiveFaces live={live} />}
         {!isMobile && folderPicker}
         {!isMobile && projectPicker}
         {!isMobile && readToggle}
@@ -605,8 +606,6 @@ export function Notes() {
                           >
                             {titleOf(note.text)}
                           </span>
-                          {/* Who has it open now, active or idle. */}
-                          <Faces people={presence.get(note.id) ?? []} size="xs" className="shrink-0" />
                         </span>
                         <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
                           {whenText(note.updatedAt, now)}
@@ -638,7 +637,7 @@ export function Notes() {
               {reading ? (
                 <NoteDocument text={current.text} />
               ) : (
-                <NoteText key={current.id} note={current} focused={current.id === fresh} onChange={type} onLive={typeLive} />
+                <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />
               )}
             </div>
           )}
@@ -653,11 +652,9 @@ export function Notes() {
 // A note in a workspace is written live with the others in it (lib/collab.ts):
 // its text then comes from the room, and is never saved from here (the room
 // saves it), so `onLive` only keeps the list's title up to date.
-function NoteText({ note, focused, onChange, onLive }: { note: Note; focused: boolean; onChange: (text: string) => void; onLive: (text: string) => void }) {
-  const { data, team } = useApp()
+function NoteText({ note, live, focused, onChange, onLive }: { note: Note; live: LiveNote | null; focused: boolean; onChange: (text: string) => void; onLive: (text: string) => void }) {
+  const { data } = useApp()
   const links = linksIn(note.text)
-  const shared = workspaceOf(spaceOfNote(note, data.projects), team) !== undefined
-  const live = useLiveNote(shared ? note.id : null, team)
   useLiveStatus(live)
   const binding = useMemo(() => (live ? { text: live.text, awareness: live.awareness, undo: live.undo } : undefined), [live])
   const writtenLive = live !== null && live.status !== 'off'

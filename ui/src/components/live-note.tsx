@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { WifiOffIcon } from 'lucide-react'
 import { Avatar } from '@/components/avatars'
 import { liveTicket } from '@/lib/backend'
-import { httpUrl, LiveNote, NotLive, type Opening } from '@/lib/collab'
+import { LiveNote, NotLive, type Opening } from '@/lib/collab'
 import { useApp } from '@/lib/app-context'
 import { hereText, idleText, peopleHere, type Here } from '@/lib/presence'
 import { tintOf, type Team } from '@/lib/team'
@@ -98,7 +98,22 @@ function useHere(live: LiveNote | null, me: string | null): Here[] {
   return useMemo(() => (live ? peopleHere(live.awareness.getStates(), me) : []), [live, me, states])
 }
 
-// Above a live note: who is here, and whether the connection is.
+// Who else has the open note, for the page header next to its actions.
+// Julius, 23 Nov: the faces belong in the header, where they are seen.
+export function LiveFaces({ live }: { live: LiveNote | null }) {
+  const { me } = useApp()
+  const here = useHere(live, me)
+  if (!here.length) return null
+  return (
+    <span className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
+      <Faces people={here} />
+      <span className="max-md:hidden">{hereText(here)}</span>
+    </span>
+  )
+}
+
+// Above a live note: whether the connection is there. Who is here is in the
+// header (LiveFaces).
 export function LiveBar({ live }: { live: LiveNote }) {
   const { me } = useApp()
   useLiveStatus(live)
@@ -109,7 +124,7 @@ export function LiveBar({ live }: { live: LiveNote }) {
   if (here.length) lastSeen.current = here[0].name.split(/\s+/)[0]
   const others = lastSeen.current
   return (
-    <div className="mb-3 flex min-h-7 flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground empty:hidden">
       {live.status === 'offline' && (
         <span className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1">
           <WifiOffIcon className="size-3.5" />
@@ -117,65 +132,6 @@ export function LiveBar({ live }: { live: LiveNote }) {
         </span>
       )}
       {live.status === 'opening' && !live.synced && <span>Opening…</span>}
-      {here.length > 0 && (
-        <span className="ml-auto flex items-center gap-2">
-          <Faces people={here} />
-          <span>{hereText(here)}</span>
-        </span>
-      )}
     </div>
   )
-}
-
-// Who is in which note of the workspaces being looked at, for the faces on
-// the notes list. Asked of the live notes service every few seconds while
-// the list is in view.
-export function usePresence(spaces: number[], me: string | null): Map<number, Here[]> {
-  const [here, setHere] = useState<Map<number, Here[]>>(new Map())
-  const key = spaces.join(',')
-  useEffect(() => {
-    if (!spaces.length) return setHere(new Map())
-    let stopped = false
-    const off = new Set<number>()
-    const look = async () => {
-      if (document.visibilityState === 'hidden') return
-      const found = new Map<number, Here[]>()
-      for (const space of spaces) {
-        if (off.has(space)) continue
-        try {
-          const { ticket, url } = await open({ space })
-          const answer = await fetch(`${httpUrl(url)}/presence?ticket=${encodeURIComponent(ticket)}`)
-          if (!answer.ok) continue
-          const { notes } = (await answer.json()) as {
-            notes: Record<string, { id: string; name: string; picture: string; activity?: { idle?: boolean; since?: number } }[]>
-          }
-          for (const [note, people] of Object.entries(notes)) {
-            const list = people
-              .filter((p) => p.id !== me)
-              .map((p) => ({
-                account: p.id,
-                name: p.name,
-                picture: p.picture,
-                color: tintOf(p.id),
-                activity: { idle: !!p.activity?.idle, since: p.activity?.since ?? 0 },
-              }))
-              .sort((a, b) => Number(a.activity.idle) - Number(b.activity.idle))
-            if (list.length) found.set(Number(note), list)
-          }
-        } catch (error) {
-          if (error instanceof NotLive) off.add(space)
-        }
-      }
-      if (!stopped) setHere(found)
-    }
-    void look()
-    const timer = setInterval(() => void look(), 10_000)
-    return () => {
-      stopped = true
-      clearInterval(timer)
-    }
-    // The spaces by value: a new array with the same spaces is the same question.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, me])
-  return here
 }

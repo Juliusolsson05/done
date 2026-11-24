@@ -15,7 +15,7 @@ vi.hoisted(() => {
     document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
   })
 })
-import { backoff, httpUrl, LiveNote, NotLive, socketUrl, TEXT } from '@/lib/collab'
+import { backoff, httpUrl, LiveNote, NOT_FOUND_TRIES, NotLive, socketUrl, TEXT } from '@/lib/collab'
 
 // A room: answers a window's state with what it lacks, and passes every
 // change and every awareness message on to the others.
@@ -177,12 +177,39 @@ describe('a live note', () => {
     b.destroy()
   })
 
-  it('is not live when the server says no', async () => {
+  it('is not live when the server keeps saying no, and stops asking', async () => {
+    vi.useFakeTimers()
+    let asked = 0
     const off = new LiveNote(8, async () => {
+      asked++
       throw new NotLive()
     })
     await settle()
     expect(off.status).toBe('off')
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(asked).toBe(NOT_FOUND_TRIES + 1)
+    vi.useRealTimers()
     off.destroy()
+  })
+
+  // 23 Nov 2026: a note made in the Mac app asked for a ticket before the
+  // note reached the server, got "not found" once, and stayed off for good:
+  // nobody in it saw anyone else.
+  it('goes live after "not found" once the server has the note', async () => {
+    room = new Room()
+    vi.useFakeTimers()
+    let asked = 0
+    const late = new LiveNote(7, async () => {
+      asked++
+      if (asked === 1) throw new NotLive()
+      return { ticket: `t${asked}`, url: 'https://collab.example' }
+    })
+    await settle()
+    expect(late.status).toBe('off')
+    await vi.advanceTimersByTimeAsync(600)
+    await settle()
+    expect(late.status).toBe('live')
+    vi.useRealTimers()
+    late.destroy()
   })
 })
