@@ -54,12 +54,12 @@ import { cn } from '@/lib/utils'
 
 type BuiltIn = Exclude<View['kind'], 'project'>
 
-// On a phone a row is tall enough to hit with a thumb.
+// Under a finger (a phone, an iPad) a row is tall enough to hit with a thumb.
 // A row with a count beside it keeps room for the count, so a long name is
 // cut short before it, never under it.
-const ROW = 'group-has-data-[sidebar=menu-badge]/menu-item:pr-8 max-md:h-11 max-md:pr-9 max-md:text-base'
+const ROW = 'group-has-data-[sidebar=menu-badge]/menu-item:pr-8 touch:h-11 touch:pr-9 touch:text-base'
 // The count sits in the middle of the taller row.
-const BADGE = 'max-md:top-3 max-md:text-sm'
+const BADGE = 'touch:top-3 touch:text-sm'
 
 // `space`: the workspace the new project is made in; null for your own.
 function NewProject({ space }: { space: number | null }) {
@@ -239,7 +239,8 @@ export function AppSidebar() {
                 <SearchIcon className="text-muted-foreground" />
                 <span>Search</span>
               </SidebarMenuButton>
-              <SidebarMenuBadge className={cn('font-normal text-faint max-md:hidden', BADGE)}>⌘K</SidebarMenuBadge>
+              {/* A shortcut hint is for a keyboard; a finger has none to press. */}
+              <SidebarMenuBadge className={cn('font-normal text-faint touch:hidden', BADGE)}>⌘K</SidebarMenuBadge>
             </SidebarMenuItem>
             {/* The Inbox is your own. In a workspace it shows only what lost its project there. */}
             {(typeof scope !== 'number' || count.inbox > 0) && nav('inbox', 'Inbox', InboxIcon, count.inbox)}
