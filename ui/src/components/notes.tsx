@@ -663,13 +663,22 @@ function NoteText({ note, live, focused, onChange, onLive }: { note: Note; live:
       {writtenLive && <LiveBar live={live} />}
       <NoteRefs note={note.id} tasks={mentionsIn(note.text)} links={links} />
       {!writtenLive ? (
-        <NoteEditor key="own" text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} />
+        <NoteEditor key="own" text={note.text} onChange={onChange} focused={focused} tasks={data.tasks} date={note.updatedAt} />
       ) : live.synced ? (
-        <NoteEditor key="live" text={note.text} onChange={onLive} focused={focused} tasks={data.tasks} live={binding} onActivity={() => live.active()} />
+        <NoteEditor
+          key="live"
+          text={note.text}
+          onChange={onLive}
+          focused={focused}
+          tasks={data.tasks}
+          live={binding}
+          date={note.updatedAt}
+          onActivity={() => live.active()}
+        />
       ) : (
         // Until the room's copy has arrived there is nothing to type into:
         // the note as stored, to read.
-        <NoteEditor key="waiting" text={note.text} onChange={() => {}} focused={false} tasks={data.tasks} readOnly />
+        <NoteEditor key="waiting" text={note.text} onChange={() => {}} focused={false} tasks={data.tasks} date={note.updatedAt} readOnly />
       )}
     </div>
   )
