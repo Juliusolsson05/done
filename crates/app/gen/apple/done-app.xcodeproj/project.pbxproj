@@ -230,18 +230,18 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_A453EEF7-1196-42E6-B1A5-A93EC8AAA3CE" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
-			sourceTree = "<group>";
-		};
-		"TEMP_DA2E925C-18C7-4519-BB37-32EBBFFAF8BA" /* arm64 */ = {
+		"TEMP_3CB5066F-6AD4-4877-9225-246272B15C88" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = arm64;
+			sourceTree = "<group>";
+		};
+		"TEMP_C25CFB7E-63D6-498E-A6B4-E10C1CC0CD40" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -253,6 +253,7 @@
 			buildPhases = (
 				09F6F0B1A739E69100725B3F /* Sources */,
 				48CDB6D3FD6E997D0902873B /* Frameworks */,
+				236552C22256ADA0EA52F5FC /* Use the app's version */,
 			);
 			buildRules = (
 			);
@@ -332,6 +333,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		236552C22256ADA0EA52F5FC /* Use the app's version */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Use the app's version";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "app=\"$SRCROOT/done-app_iOS/Info.plist\"\nout=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\nshort=$(/usr/libexec/PlistBuddy -c \"Print CFBundleShortVersionString\" \"$app\")\nbuild=$(/usr/libexec/PlistBuddy -c \"Print CFBundleVersion\" \"$app\")\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $short\" -c \"Set :CFBundleVersion $build\" \"$out\"\n";
+		};
 		7408C4D0AD8D09D245A61702 /* Build Rust Code */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
