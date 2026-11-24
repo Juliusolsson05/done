@@ -11,6 +11,7 @@ vi.hoisted(() => {
   Object.assign(globalThis, { window: globalThis })
 })
 import { MARKDOWN } from '@/components/notes'
+import { NoteLinksContext, type NoteLinks } from '@/components/note-link'
 import { AppContext, type App } from '@/lib/app-context'
 import { toggleExpanded } from '@/lib/expanded'
 import type { Task } from '@/lib/tasks'
@@ -95,5 +96,32 @@ describe('a note with mentions', () => {
     expect(opened).toMatch(/data-task="11"[\s\S]*?aria-checked="true"/)
     expect(opened).toMatch(/data-task="10"[\s\S]*?aria-checked="false"/)
     toggleExpanded(BANK)
+  })
+})
+
+describe('a note linking another note', () => {
+  const PLAN = 1795306779859111
+  // The linked note as it is now: renamed since the link was written.
+  const links: NoteLinks = { notes: [{ id: PLAN, text: '# Seed round plan (v2)\nDetails', updatedAt: 1 }], open() {}, linkedFrom: () => [] }
+  const drawLinked = (text: string) =>
+    renderToStaticMarkup(
+      <AppContext.Provider value={app}>
+        <NoteLinksContext.Provider value={links}>
+          <Markdown options={MARKDOWN}>{text}</Markdown>
+        </NoteLinksContext.Provider>
+      </AppContext.Provider>,
+    )
+
+  it('draws the link as a chip with the linked note’s title as it is now', () => {
+    const html = drawLinked(`See [Seed round plan](done:note/${PLAN}) first`)
+    expect(html).toMatch(new RegExp(`<button[^>]*data-note-link="${PLAN}"`))
+    expect(html).toContain('Seed round plan (v2)')
+    expect(html).not.toContain('href="done:note')
+  })
+
+  it('shows a link to a note that is gone as the words it was written with, marked missing', () => {
+    const html = drawLinked('See [Old plan](done:note/42)')
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="This note is missing[^"]*"/)
+    expect(html).toContain('Old plan')
   })
 })

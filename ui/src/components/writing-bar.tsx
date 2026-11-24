@@ -140,7 +140,7 @@ export function WritingBar({ view, viewport }: { view: EditorView; viewport: Vie
       {button('Bulleted list', <ListIcon />, () => editLines(view, toggleBullet))}
       {button('Heading', <HeadingIcon />, () => editLines(view, cycleHeading))}
       {button('Bold', <BoldIcon />, () => bold(view))}
-      {button('Mention a task', <AtSignIcon />, () => mention(view))}
+      {button('Mention a task or link a note', <AtSignIcon />, () => mention(view))}
       <button
         type="button"
         tabIndex={-1}
