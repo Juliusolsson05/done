@@ -22,6 +22,21 @@
    that is never set keeps them from following the system's dark mode. */
 @custom-variant dark (&:is(.dark *));
 
+/* The layout is decided by the device, not by width alone (an iPhone turned
+   sideways is wider than 768 and still a phone; an iPad is a window made for
+   a finger), so it is decided once, in hooks/use-mobile.ts, and written to
+   <html data-layout="phone|tablet|desktop">. These read it. :where keeps
+   them as specific as the media queries they replace. */
+@custom-variant phone (&:where([data-layout="phone"] *));
+@custom-variant wide (&:where([data-layout="tablet"] *, [data-layout="desktop"] *));
+@custom-variant touch (&:where([data-layout="phone"] *, [data-layout="tablet"] *));
+@custom-variant desktop (&:where([data-layout="desktop"] *));
+/* Every `md:` and `max-md:` in done means "in a window" and "on a phone", not
+   a width, so the two follow the same rule: md is wide, max-md is phone.
+   `sm:` and `lg:` stay widths (dialog sizes, the Focus digits). */
+@custom-variant md (&:where([data-layout="tablet"] *, [data-layout="desktop"] *));
+@custom-variant max-md (&:where([data-layout="phone"] *));
+
 :root {
   color-scheme: light;
 
