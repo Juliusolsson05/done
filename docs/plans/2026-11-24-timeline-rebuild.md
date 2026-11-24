@@ -35,6 +35,8 @@ The Timeline reads and works on iPhone portrait (402×874), iPhone landscape (87
 - **A one-day bar at quarter zoom is 10 px** and bars under 22 px have no grips — why: a 2 px bar cannot be seen or pressed, and grips would leave nothing to move it by.
 - **Undated rows are draggable only with a fine pointer** — HTML5 drag does nothing on iOS; there a tap opens the task.
 
+- **After the coordinator's look at 402, 874, 820 and 1180 pt (follow-up)**: under 500 px the title column takes 52 % (at least 170 px) and its rows show no project dot and no faces (chosen over one face, whose "+1" would take the room back); on a pane showing fewer than 10 days, today opens (and Today scrolls) with one day of room instead of four; a row whose bar is wholly off the days on screen shows a 16 px chevron chip at that edge in the bar's colour, which scrolls the bar into view (`edgeOf`). Project header span bars get no chip.
+
 ## Change
 
 - `ui/src/lib/timeline-window.ts`: `initialLeft` (opening scroll in days), `paneLayout(width)`.
