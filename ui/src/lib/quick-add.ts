@@ -105,6 +105,18 @@ export function projectSpan(text: string, projects: Project[]): { start: number;
   return null
 }
 
+// Where in the line the priority was written ("p1" to "p4"), for marking it
+// in the field as the date and the project are (Julius, 24 Nov: "p1 is blue
+// like other references"). The first one only, as parseQuickAdd takes only
+// the first; one inside the date phrase is not a priority.
+export function prioritySpan(text: string, date?: { start: number; end: number } | null): { start: number; end: number } | null {
+  for (const m of text.matchAll(/(?<=^|\s)p[1-4](?=\s|$)/gi)) {
+    if (date && m.index >= date.start && m.index < date.end) continue
+    return { start: m.index, end: m.index + m[0].length }
+  }
+  return null
+}
+
 export interface Suggestion {
   // The part of the line Tab replaces: the "@" and what follows it, up to the caret.
   start: number

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>done mobile audit</title>
+<style>
+  :root {
+    --bg: #fbfbf9; --card: #ffffff; --ink: #1d1d1f; --ink2: #55565b; --faint: #8a8b90; --line: #e6e5e1;
+    --blue: #1e4fbf; --red: #c2362b; --amber: #b26a00; --green: #2e7d32; --chip: #f1f0ec;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 120px; }
+  h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 6px; }
+  h2 { font-size: 24px; letter-spacing: -0.01em; margin: 56px 0 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 0 0 8px; }
+  h4 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin: 16px 0 6px; }
+  p { margin: 0 0 10px; }
+  .sub { color: var(--ink2); max-width: 760px; }
+  .meta { color: var(--faint); font-size: 13px; margin-bottom: 24px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 8px; }
+  nav.toc a { background: var(--chip); color: var(--ink); text-decoration: none; padding: 4px 10px; border-radius: 999px; font-size: 13px; }
+  nav.toc a:hover { background: #e7e5df; }
+  .sev { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; margin-right: 6px; vertical-align: 1px; }
+  .broken { background: #fbe9e7; color: var(--red); }
+  .ugly { background: #fff3e0; color: var(--amber); }
+  .missing { background: #e8eefb; color: var(--blue); }
+  .ok { background: #e8f5e9; color: var(--green); }
+  .top { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .view { display: grid; grid-template-columns: 260px 1fr; gap: 22px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin: 14px 0; }
+  .view.wide { grid-template-columns: 1fr; }
+  .shots { display: flex; flex-direction: column; gap: 8px; }
+  .shots img { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: zoom-in; }
+  .shots .cap { font-size: 12px; color: var(--faint); margin-top: -4px; }
+  .wide .shots { flex-direction: row; flex-wrap: wrap; }
+  .wide .shots figure { flex: 1 1 360px; margin: 0; }
+  ul { margin: 4px 0 10px; padding-left: 20px; }
+  li { margin: 3px 0; }
+  code { font: 12.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f6f5f1; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink2); }
+  tr:last-child td { border-bottom: 0; }
+  .step { counter-increment: step; }
+  ol.plan { padding-left: 22px; }
+  ol.plan li { margin: 8px 0; }
+  .note { background: #f6f5f1; border-radius: 10px; padding: 10px 14px; color: var(--ink2); font-size: 14px; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; }
+  dialog img { max-width: 96vw; max-height: 92vh; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+  dialog::backdrop { background: rgba(20,20,20,.6); }
+  @media (max-width: 760px) {
+    main { padding: 24px 16px 80px; }
+    .view { grid-template-columns: 1fr; }
+    h1 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>done on iPhone and iPad: every view, what is wrong, how to fix it</h1>
+<p class="sub">An audit of done's phone and tablet interface, view by view, with screenshots, the options each view has, its edge cases, what is broken, ugly or missing, and the fix. Ends with the native widget and Dynamic Island focus timer.</p>
+<p class="meta">24 Nov 2026 · version 0.1.189 · screenshots taken from the live web app (thedone.app, signed in, real data) at exact device sizes: iPhone 17 portrait 402×874 pt and landscape 874×402 pt, iPad (A16) portrait 820×1180 pt and landscape 1180×820 pt. The iPhone and iPad apps show this same interface inside the Tauri web view. Safe-area problems (notch, Dynamic Island, status bar, home indicator) cannot show in a browser frame, so those findings come from the code and are marked as such.</p>
+
+<nav class="toc">
+  <a href="#fixed"><b>Fixed: before and after</b></a><a href="#summary">Summary</a><a href="#matrix">Device matrix</a><a href="#cross">Cross-cutting causes</a>
+  <a href="#today">Today</a><a href="#inbox">Inbox</a><a href="#upcoming">Upcoming</a><a href="#lists">Lists</a><a href="#project">Project</a>
+  <a href="#mine">Assigned to me</a><a href="#completed">Completed</a><a href="#board">Board</a><a href="#timeline">Timeline</a>
+  <a href="#notes">Notes</a><a href="#focus">Focus</a><a href="#timesheet">Time sheet</a><a href="#search">Search</a>
+  <a href="#quickadd">New task</a><a href="#details">Task details</a><a href="#notifications">Notifications</a><a href="#settings">Settings</a><a href="#scope">Workspace picker</a>
+  <a href="#landscape">iPhone landscape</a><a href="#ipad">iPad</a><a href="#native">Widget and Dynamic Island</a><a href="#plan">Fix plan</a>
+</nav>
+
+<h2 id="summary">Summary</h2>
+<div class="top">
+  <div class="box"><h3><span class="sev broken">broken</span>Landscape and iPad get the desktop app</h3><p>The phone layout switches on width alone: under 768 pt wide. An iPhone turned sideways (874 pt) and every iPad (820 and 1180 pt) get the Mac layout: a sidebar, <code>⌘K</code> hints, hover-only buttons, no bottom bar, no New task button. Nothing in that layout keeps clear of the status bar, Dynamic Island or home indicator.</p></div>
+  <div class="box"><h3><span class="sev broken">broken</span>Header cut off: safe areas only exist in the phone layout</h3><p>Every safe-area inset in the code is scoped to the phone layout (<code>max-md:</code>) or to phone-only components. With <code>viewport-fit=cover</code> the page draws under the status bar everywhere else, so on iPad and in iPhone landscape the top of every view sits under the status bar, and the left edge under the Dynamic Island. No left/right inset is used anywhere.</p></div>
+  <div class="box"><h3><span class="sev broken">broken</span>Timeline is broken at every size</h3><p>Phone: day columns about 28 pt wide, titles clipped to a few letters, check circles and faces drawn on top of each other, the first bar starts off screen, no controls. iPad portrait: the chart is a strip about 150 pt wide. Even iPad landscape and the Mac: titles are cut by the next row, the first bar starts off screen, the page scrolls sideways.</p></div>
+  <div class="box"><h3><span class="sev broken">broken</span>Notes are a Markdown source editor, not Apple Notes</h3><p>A note shows its raw Markdown: <code># Title</code>, <code>**bold**</code>, <code>- </code> list dashes. Apple Notes shows formatted text you type into. Spacing, type size, title treatment and the keyboard toolbar are all missing. On iPad and landscape the note gets a column 110 to 200 pt wide.</p></div>
+  <div class="box"><h3><span class="sev ugly">ugly</span>Desktop controls in a phone</h3><p>Focus, Time sheet, Settings and Search are the desktop forms shrunk: tiny inputs (iOS zooms on focus), chips that wrap, 10 pt arrows, a centered command palette instead of a search screen.</p></div>
+  <div class="box"><h3><span class="sev missing">missing</span>Actions that only exist with a mouse</h3><p>Right-click menus, hover buttons and drag-only moves have no touch equivalent on several views; Assigned to me is not reachable from Lists; New task has no date, priority or list buttons.</p></div>
+</div>
+
+<h2 id="matrix">Device matrix</h2>
+<table>
+  <tr><th>View</th><th>iPhone portrait</th><th>iPhone landscape</th><th>iPad portrait</th><th>iPad landscape</th></tr>
+  <tr><td>Today / Upcoming / Inbox / Project</td><td><span class="sev ugly">ugly</span>works; New task floats over rows</td><td><span class="sev broken">broken</span>desktop layout, 3 rows visible</td><td><span class="sev broken">broken</span>desktop layout, header under status bar</td><td><span class="sev ugly">ugly</span>desktop layout, header under status bar</td></tr>
+  <tr><td>Lists</td><td><span class="sev ugly">ugly</span>icons missing, Assigned to me missing</td><td colspan="3"><span class="sev missing">n/a</span>replaced by the sidebar</td></tr>
+  <tr><td>Board</td><td><span class="sev ugly">ugly</span>one column at a time, move by long press only</td><td><span class="sev broken">broken</span>desktop board, drag only</td><td><span class="sev ugly">ugly</span>desktop board</td><td><span class="sev ugly">ugly</span>desktop board</td></tr>
+  <tr><td>Timeline</td><td><span class="sev broken">broken</span>unreadable</td><td><span class="sev broken">broken</span>2 rows visible, page scrolls sideways</td><td><span class="sev broken">broken</span>chart ~150 pt wide</td><td><span class="sev broken">broken</span>titles cut, first bar off screen</td></tr>
+  <tr><td>Notes</td><td><span class="sev broken">broken</span>raw Markdown, cramped toolbar, two back links</td><td><span class="sev broken">broken</span>3 columns, note ~200 pt wide</td><td><span class="sev broken">broken</span>3 columns, note ~110 pt wide, toolbar cut</td><td><span class="sev ugly">ugly</span>raw Markdown</td></tr>
+  <tr><td>Focus / Time sheet</td><td><span class="sev ugly">ugly</span>desktop form</td><td><span class="sev ugly">ugly</span></td><td><span class="sev ugly">ugly</span></td><td><span class="sev ugly">ugly</span></td></tr>
+  <tr><td>Search</td><td><span class="sev ugly">ugly</span>desktop palette over a dimmed page</td><td colspan="3"><span class="sev ugly">ugly</span>desktop palette, opened by a <code>⌘K</code> hint a tablet user cannot press</td></tr>
+  <tr><td>New task</td><td><span class="sev missing">missing</span>no date/priority/list buttons</td><td colspan="3"><span class="sev missing">missing</span>inline desktop add row</td></tr>
+  <tr><td>Task details</td><td><span class="sev ok">good</span>native-style sheet</td><td colspan="3"><span class="sev ugly">ugly</span>desktop editor</td></tr>
+</table>
+
+<h2 id="cross">Cross-cutting causes</h2>
+<div class="view wide"><div>
+<h3>1. One width breakpoint decides phone or desktop</h3>
+<p><code>ui/src/hooks/use-mobile.ts</code>: <code>MOBILE_BREAKPOINT = 768</code>, width only. It ignores whether the device has a mouse, so a touch device wider than 767 pt gets the Mac interface. <b>Fix:</b> three layouts, decided by input and size, not width alone: phone (compact width, or any touch device under 600 pt tall, which covers iPhone landscape), tablet (touch, regular width: a two-column layout with a sidebar that collapses, touch-sized rows, no shortcut hints), desktop (fine pointer). Use <code>(pointer: coarse)</code> and <code>(hover: none)</code> alongside width.</p>
+<h3>2. Safe areas only in the phone layout</h3>
+<p>The insets appear in: the phone page padding (<code>App.tsx:481</code>, <code>max-md:</code> only), the phone header (<code>phone.tsx:79</code>), bottom bar (<code>phone.tsx:189</code>), the floating New task (<code>phone.tsx:210</code>), the task sheet (<code>task-editor.tsx:191</code>), New task (<code>quick-add.tsx:318</code>), the filter sheet (<code>view-filter.tsx:206</code>) and the sidebar footer (<code>app-sidebar.tsx:277</code>, phone only). Never <code>safe-area-inset-left</code> or <code>-right</code>. The desktop layout, which iPad and iPhone landscape get, has none. <b>Fix:</b> pad the app shell itself with all four insets (<code>padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)</code>) on every layout, and only let deliberate full-bleed backgrounds ignore them; fixed elements (find bar <code>find-bar.tsx:117</code> at <code>top-3</code>, toasts, popovers, dialogs) offset by the inset too.</p>
+<h3>3. Desktop components reused as-is</h3>
+<p>Focus, Time sheet, Settings, Search, the note toolbar and Timeline render their desktop markup at phone width. Inputs use 12–14 px text, which makes iOS zoom the page on focus; targets are under 44 pt. <b>Fix:</b> a phone version of each, using the iOS grouped-list pattern the Lists and Task details screens already use well.</p>
+<h3>4. Mouse-only interactions</h3>
+<p>Right-click task menus, hover-revealed buttons, drag on Timeline and Board, keyboard shortcuts. <b>Fix:</b> every action reachable by tap: swipe actions on rows (complete, date, delete), long-press menus, and visible buttons where desktop uses hover.</p>
+<h3>5. What the code shows beyond the screenshots</h3>
+<ul>
+<li><span class="sev broken">broken</span><b>Long press opens the wrong menu.</b> The menu's target is set only by the browser's right-click event (<code>App.tsx:441-454</code>), which iOS never fires; the long press opens the menu with the last target (it starts as the workspace). Everything only in that menu (Status, Due, Priority, Project, Assign, Focus on this, Make today's goal, Add subtask) was unreachable on a phone.</li>
+<li><span class="sev broken">broken</span><b>Notes have autocorrect and predictions off</b>: CodeMirror's defaults (<code>autocorrect: off</code>, <code>writingsuggestions: false</code>) are not overridden (<code>note-editor.tsx:176</code>). Text selection may be blocked: <code>index.css:249-260</code> turns <code>user-select</code> off on <code>body</code> and back on only for inputs, textareas and articles, not the editor.</li>
+<li><span class="sev broken">broken</span><b>Timeline on touch</b>: bars are <code>touch-none</code> and a drag starts on pointer-down (<code>timeline.tsx:183-189, 537</code>), so a pan moves the task a day; resize handles are 6–8 px; the No date list is hidden on phones and uses HTML5 drag. On phones the Timeline has no bounded height (<code>md:h-svh</code> only), so its sticky date header scrolls away.</li>
+<li><span class="sev broken">broken</span><b>Rotating changes which element scrolls</b>: phones scroll the window, the wide layout an inner panel (<code>App.tsx:468, 478</code>), so rotation loses the scroll position.</li>
+<li><span class="sev ugly">ugly</span><b>Toasts under the Dynamic Island</b> (<code>App.tsx:538</code>, no inset offset); the phone back button always returns to Lists (<code>phone.tsx:87</code>); an open note on a phone has no nav bar, its back link scrolls away (<code>notes.tsx:476-499</code>).</li>
+<li><span class="sev ugly">ugly</span><b>Settings in the iPhone app shows Mac panes</b>: <code>isDesktop</code> is true for any Tauri, iOS included (<code>backend.ts:34</code>), so MCP setup, text size with ⌘ and "done updates itself" appear, though the updater is Mac-only.</li>
+<li><span class="sev ok">fine</span>Inputs are already 16 px or larger (no zoom on focus); hover styles are limited to devices that hover; rubber-band scrolling is off.</li>
+</ul>
+</div></div>
+
+<h2 id="today">Today</h2>
+<div class="view"><div class="shots"><img src="phone-today.png" alt="Today on iPhone"><div class="cap">iPhone portrait</div></div><div>
+<h4>Options</h4><ul><li>Set today's goal (the one large task)</li><li>Overdue and Today sections; complete with the circle; open a task by tapping it</li><li>New task (floating), badge on the Today tab with the overdue count</li></ul>
+<h4>Problems</h4><ul>
+<li><span class="sev ugly">ugly</span>The floating New task button sits on top of the last visible row with no background, so it covers a task title (here "Get started on full lawyer…").</li>
+<li><span class="sev ugly">ugly</span>"Set today's goal" is a dashed box that looks disabled.</li>
+<li><span class="sev missing">missing</span>No swipe to complete, reschedule or delete; no pull to refresh; no way to reorder.</li>
+<li><span class="sev missing">missing</span>The Today badge counts overdue tasks only (4) while the screen title says 13; the meaning is unclear.</li></ul>
+<h4>Edge cases</h4><ul><li>Very long titles wrap to four lines and push faces to their own line.</li><li>No tasks and no goal: empty text, but the floating button still floats over nothing.</li><li>Many overdue tasks: Today's own tasks are pushed below the fold with no jump.</li></ul>
+<h4>Fix</h4><p>Give the floating button a solid pill with shadow and add bottom padding to the list equal to its height; add swipe actions; make the goal card a normal row with a target icon.</p>
+</div></div>
+
+<h2 id="inbox">Inbox</h2>
+<div class="view"><div class="shots"><img src="phone-inbox.png" alt="Inbox empty"><div class="cap">Empty inbox</div></div><div>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Two ways to add on one screen: the inline "+ Add task" and the floating "New Task".</li><li><span class="sev ugly">ugly</span>The empty state is two small lines at the top of an empty page.</li></ul>
+<h4>Fix</h4><p>One add control on phone (the floating one); centered empty state with an icon.</p></div></div>
+
+<h2 id="upcoming">Upcoming</h2>
+<div class="view"><div class="shots"><img src="phone-upcoming.png" alt="Upcoming"><div class="cap">iPhone portrait</div></div><div>
+<h4>Options</h4><ul><li>Days grouped by date, task notes previewed under titles, subtask counts</li></ul>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>The day header ("Tomorrow Tuesday 24 November") scrolls away; with many tasks you lose which day you are in. Should be sticky.</li><li><span class="sev missing">missing</span>No week strip to jump to a day (Apple Reminders/Things have one).</li><li><span class="sev ugly">ugly</span>Note previews are cut mid-word with no fade.</li></ul></div></div>
+
+<h2 id="lists">Lists</h2>
+<div class="view"><div class="shots"><img src="phone-lists.png" alt="Lists"><img src="phone-lists-more.png" alt="Lists scrolled"><div class="cap">Top and scrolled</div></div><div>
+<h4>Options</h4><ul><li>Workspace picker, Search, Today/Upcoming/Inbox/Completed tiles, My Lists (projects) with counts, Add List, More: Notes, Board, Timeline, Focus, Time sheet, Settings; bell for notifications</li></ul>
+<h4>Problems</h4><ul>
+<li><span class="sev ugly">ugly</span>Notes, Board, Timeline, Focus and Time sheet have no icons; Settings does. The rows look broken.</li>
+<li><span class="sev missing">missing</span><b>Assigned to me is not here.</b> On the phone there is no way to reach it except search.</li>
+<li><span class="sev ugly">ugly</span>Completed tile has no count while the others do.</li>
+<li><span class="sev ugly">ugly</span>Large empty area under "13 left for today".</li></ul>
+<h4>Fix</h4><p>Add Assigned to me (with count) as a tile or row; give every More row a colored icon like Settings; count on Completed (today's finished).</p></div></div>
+
+<h2 id="project">Project</h2>
+<div class="view"><div class="shots"><img src="phone-project.png" alt="Project Hop"><img src="phone-task-menu-over-project-menu.png" alt="Task menu and project menu"><img src="phone-subtasks-expanded.png" alt="Subtasks expanded"><div class="cap">Project, its ⋯ sheet with the task menu, subtasks open</div></div><div>
+<h4>Options</h4><ul><li>Tasks with dates, faces, subtask counts; ⋯ menu (Rename, Delete project); New task; project notes listed under the tasks</li></ul>
+<h4>Problems</h4><ul><li><span class="sev missing">missing</span>No sections or sort/group options; 32 tasks are one long list.</li><li><span class="sev missing">missing</span>No "show completed" toggle.</li><li><span class="sev ugly">ugly</span>The task menu is a desktop dropdown with sub-menus that open on hover (Status ›, Due ›, Priority ›, Project ›, Assign ›); on a phone it should be an action sheet like the project's ⋯ menu.</li><li><span class="sev ugly">ugly</span>Open subtasks show each subtask's whole notes in full (a wall of text under "Order equipment"); clamp to two lines.</li><li><span class="sev ugly">ugly</span>Large title is fine, but the project color dot is tiny and misaligned with the title.</li></ul></div></div>
+
+<h2 id="mine">Assigned to me</h2>
+<div class="view"><div><h4>Status</h4><p><span class="sev missing">missing</span>Not reachable from the phone's Lists screen (see Lists). On iPad/landscape it is in the sidebar with the new <b>Only me</b> toggle in its header. Edge case: Only me plus a workspace scope with nobody else assigned shows the same list either way; no hint explains the difference.</p></div></div>
+
+<h2 id="completed">Completed</h2>
+<div class="view"><div class="shots"><img src="phone-completed.png" alt="Completed"></div><div>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Strikethrough plus grey plus filled blue circle: three signals for one state; hard to read.</li><li><span class="sev missing">missing</span>No undo/uncomplete affordance visible, no search within, no "clear".</li></ul></div></div>
+
+<h2 id="board">Board</h2>
+<div class="view"><div class="shots"><img src="phone-board.png" alt="Board"><img src="phone-board-stacked-columns.png" alt="Board columns stacked"><img src="phone-board-filter.png" alt="Board filter"><div class="cap">Top, further down, Filter sheet</div></div><div>
+<h4>Options</h4><ul><li>Filter (project, priority, date, words), columns To do / In progress / Done, "Press and hold a card to move it"</li></ul>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>On a phone the columns are stacked: To do (30 cards) first, then In progress, then Done today, so reaching In progress means scrolling past 30 cards, and "press and hold to move" means dragging across all of them.</li><li><span class="sev missing">missing</span>Moving is long-press-and-drag only; no "Move to…" in a menu.</li><li><span class="sev ugly">ugly</span>"35 of 35 tasks" and "Clear" show even when the filter changes nothing.</li></ul>
+<h4>Fix</h4><p>Segmented control (To do · In progress · Done) on phone showing one column at a time; Status in the long-press menu and the task sheet as the way to move.</p></div></div>
+
+<h2 id="timeline">Timeline</h2>
+<div class="view wide"><div class="shots">
+<figure><img src="phone-timeline.png" alt="Timeline iPhone"><div class="cap">iPhone portrait</div></figure>
+<figure><img src="landscape-timeline.png" alt="Timeline iPhone landscape"><div class="cap">iPhone landscape</div></figure>
+<figure><img src="ipad-portrait-timeline.png" alt="Timeline iPad portrait"><div class="cap">iPad portrait</div></figure>
+<figure><img src="ipad-landscape-timeline.png" alt="Timeline iPad landscape"><div class="cap">iPad landscape</div></figure>
+</div><div>
+<h4>Options</h4><ul><li>Week / Month / Quarter zoom, Group by project or date, Today, Filter, No date column, drag a task to move it, drag its ends to change length, fold a project by its name, Add task</li></ul>
+<h4>Problems (all sizes)</h4><ul>
+<li><span class="sev broken">broken</span>The first bar starts left of the visible area ("arness matching algo fully built out"): the view does not scroll to the earliest task or to today with room on the left.</li>
+<li><span class="sev broken">broken</span>Titles are drawn beside short bars and run under the next row's bar and faces; on narrow screens they are clipped to a few letters.</li>
+<li><span class="sev broken">broken</span>Each row shows a check circle inside a pale block and sometimes the person's face on top: on phone the two overlap into double circles.</li>
+<li><span class="sev broken">broken</span>The page itself scrolls sideways (horizontal scrollbar at the bottom of the page in landscape and iPad), on top of the chart's own scroller.</li>
+<li><span class="sev broken">broken</span>Phone: Week/Month/Quarter, Group by, Filter and No date are not shown at all; day columns are about 28 pt wide.</li>
+<li><span class="sev broken">broken</span>iPhone landscape: the chart box is two rows tall; header controls are cut at the right edge ("Ta…").</li>
+<li><span class="sev broken">broken</span>iPad portrait: the chart is a ~150 pt strip next to a wide No date column.</li>
+<li><span class="sev missing">missing</span>Drag uses the mouse; nothing replaces it on touch (move/resize by menu or date picker).</li></ul>
+<h4>Fix</h4><p>Treat as a rebuild, not a tweak: one row per task with the title <i>in a fixed left column</i> (sticky), the bars in a scrollable grid to its right; scroll to today on open; no page-level horizontal overflow; on phone, a list grouped by week with date ranges instead of a Gantt chart, with the Gantt as an optional landscape view; No date as a collapsible section, not a column; touch: tap a bar to open the task, edit dates in the sheet.</p></div></div>
+
+<h2 id="notes">Notes</h2>
+<div class="view wide"><div class="shots">
+<figure><img src="phone-notes-folders.png" alt="Folders"><div class="cap">Folders</div></figure>
+<figure><img src="phone-notes-all.png" alt="All notes"><div class="cap">All notes</div></figure>
+<figure><img src="phone-note-editor.png" alt="Editing a note"><div class="cap">Editing: raw Markdown</div></figure>
+<figure><img src="phone-note-read.png" alt="Reading a note"><div class="cap">Read view</div></figure>
+<figure><img src="landscape-notes.png" alt="Notes landscape"><div class="cap">iPhone landscape</div></figure>
+<figure><img src="ipad-portrait-notes.png" alt="Notes iPad portrait"><div class="cap">iPad portrait</div></figure>
+<figure><img src="ipad-landscape-notes.png" alt="Notes iPad landscape"><div class="cap">iPad landscape</div></figure>
+</div><div>
+<h4>Options</h4><ul><li>Folders (All notes, named folders, New folder), search, New note, per note: folder picker, project picker, Read/Edit toggle, delete, @task mentions, links, live editing with others in a workspace</li></ul>
+<h4>Problems</h4><ul>
+<li><span class="sev broken">broken</span><b>The editor shows Markdown source</b> (<code>#</code>, <code>**</code>, <code>-</code>) while you write. Apple Notes is rich text: the title is the first line in large bold, formatting is applied, not marked up. "Read" is a separate mode instead of the default.</li>
+<li><span class="sev broken">broken</span>Note toolbar on phone: folder, project, Read and delete crammed into one row above the text; no Done button to dismiss the keyboard; no keyboard accessory (checklist, list, format, camera).</li>
+<li><span class="sev ugly">ugly</span>Navigation: two stacked back links ("‹ Lists" and "‹ Folders") on All notes; Apple Notes has one.</li>
+<li><span class="sev ugly">ugly</span>"+ New note" is a small text link at the top; Apple Notes uses a compose button at the bottom right.</li>
+<li><span class="sev ugly">ugly</span>Spacing and type: body 15–16 px with tight paragraphs; Apple Notes uses 17 pt body, large bold title, generous line height, 20 pt side margins.</li>
+<li><span class="sev ugly">ugly</span>Task mentions render as long blue highlighted runs that break mid-sentence; in Read they become a card holding the task's whole notes (wall of text).</li>
+<li><span class="sev broken">broken</span>iPad portrait/iPhone landscape: sidebar + list + editor side by side leaves the note 110–200 pt wide; toolbar buttons cut off ("New nc").</li>
+<li><span class="sev missing">missing</span>Checklists, pinned notes, swipe to delete in the list, share sheet, note date shown under the title.</li></ul>
+<h4>Edge cases</h4><ul><li>A note with only a title shows as "untitled" if the first line is a Markdown heading marker only.</li><li>Live note while offline: the bar says Offline but the editor looks the same.</li><li>Very long notes: the editor grows with the page; the toolbar scrolls away with it.</li></ul>
+<h4>Fix</h4><p>Replace the source editor on touch devices with a rich-text editor that stores the same Markdown (for example TipTap/ProseMirror with a Markdown serializer, which also has a Yjs binding for live notes), styled to Apple Notes metrics: first line as title (28 pt bold), 17 pt body, 1.4 line height, 20 pt margins; a keyboard accessory bar (checklist, bullet, heading, @task, Done); notes list in Apple's style with title, date and first line; compose button bottom right; one back button. On iPad: two columns (list + note), sidebar hidden by default.</p></div></div>
+
+<h2 id="focus">Focus</h2>
+<div class="view"><div class="shots"><img src="phone-focus.png" alt="Focus"></div><div>
+<h4>Options</h4><ul><li>Up next, what you are working on (task picker), length chips 15 min to 2 h or custom minutes, reminders (text + every N min), Start focus</li></ul>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Desktop form: length chips wrap (2 h on its own line), "min" inputs about 45 pt wide with small text (iOS zooms on focus), Reminders row cramped.</li><li><span class="sev missing">missing</span>While running, nothing outside the app shows the timer: no Live Activity, no lock-screen countdown, no notification at the end when the app is closed. See <a href="#native">Widget and Dynamic Island</a>.</li></ul>
+<h4>Fix</h4><p>A big circular duration picker or wheel, one row per reminder, a large Start button; start a Live Activity on Start.</p></div></div>
+
+<h2 id="timesheet">Time sheet</h2>
+<div class="view"><div class="shots"><img src="phone-time-sheet.png" alt="Time sheet"></div><div>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Day arrows are about 10 pt glyphs: far below 44 pt targets.</li><li><span class="sev missing">missing</span>No week view or totals; no swipe between days.</li></ul></div></div>
+
+<h2 id="search">Search</h2>
+<div class="view"><div class="shots"><img src="phone-search.png" alt="Search"></div><div>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>It is the desktop command palette floating mid-screen over a dimmed page; on a device the keyboard covers its lower half.</li><li><span class="sev missing">missing</span>No recent searches, no filter chips (tasks / notes / projects).</li></ul>
+<h4>Fix</h4><p>A full-screen search page with the field at the top (iOS style), results grouped, Cancel to close.</p></div></div>
+
+<h2 id="quickadd">New task</h2>
+<div class="view"><div class="shots"><img src="phone-quick-add.png" alt="New task"><img src="phone-quick-add-parsed.png" alt="New task with parsed chips"><div class="cap">Empty, and with "Call the bank tomorrow p1 @hop"</div></div><div>
+<h4>Options</h4><ul><li>Type a title with natural dates, <code>p1</code> priority and <code>@list</code> ("Try call the bank tomorrow p1 @home")</li></ul>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Typed parts are marked in blue in the field ("tomorrow", "@hop") but "p1" is not, though it is read as Priority 1 (chips under the field show Tomorrow · Priority 1 · Hop).</li><li><span class="sev missing">missing</span>No buttons for date, priority, list, assignee: only typed syntax, which nobody discovers.</li><li><span class="sev ugly">ugly</span>Panel pinned to the top edge; Add stays pale until typing; Cancel and Add are small.</li><li><span class="sev broken">broken</span>(code) The top padding uses the safe-area inset, but only this panel: on iPad, New task is the inline desktop row instead.</li></ul>
+<h4>Fix</h4><p>Bottom sheet above the keyboard with a row of chips (Today, Tomorrow, Date…, Priority, List, Assign), like Todoist/Things.</p></div></div>
+
+<h2 id="details">Task details</h2>
+<div class="view"><div class="shots"><img src="phone-task-details.png" alt="Task details"><img src="phone-task-details-no-subtasks.png" alt="A task with 4 subtasks shows none"><div class="cap">"Order equipment" has 4 subtasks: the sheet shows none</div></div><div>
+<h4>Options</h4><ul><li>Title, notes, Date, Starts, Priority, List, Assignees, Delete; Cancel/Done</li></ul>
+<h4>Status</h4><p><span class="sev ok">good</span>The best screen on the phone: native grouped-list style.</p>
+<h4>Missing</h4><ul><li><span class="sev broken">broken</span><b>Subtasks are not shown at all</b>: "Order equipment" has four, the sheet shows none, and none can be added.</li><li><span class="sev missing">missing</span>Start focus on this task, status (To do / In progress), make today's goal, duplicate, repeat.</li></ul></div></div>
+
+<h2 id="notifications">Notifications</h2>
+<div class="view"><div class="shots"><img src="phone-notifications.png" alt="Notifications"></div><div>
+<h4>Problems</h4><ul><li><span class="sev missing">missing</span>No Mark all as read; it is unclear whether tapping opens the task; no push notifications on the phone.</li></ul></div></div>
+
+<h2 id="settings">Settings</h2>
+<div class="view"><div class="shots"><img src="phone-settings.png" alt="Settings"></div><div>
+<h4>Options</h4><ul><li>Account (Sign out, Delete my account), Workspaces (open, Create workspace), Mac app download (web only), Sounds</li></ul>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>Desktop panes, not iOS grouped rows; Sign out and Delete account are small text buttons side by side (destructive one too easy to hit).</li><li><span class="sev missing">missing</span>In the iPhone app: no version or "update available" (the Version and Text size panes are desktop-only); no notification settings; no default list or start-of-week.</li></ul></div></div>
+
+<h2 id="scope">Workspace picker</h2>
+<div class="view"><div class="shots"><img src="phone-scope-picker.png" alt="Workspace picker"></div><div>
+<h4>Problems</h4><ul><li><span class="sev ugly">ugly</span>A desktop dropdown over the Lists screen; on a phone this should be a sheet. Edge case: a scope with one workspace still shows All / Only you / Hop, three choices that look the same to a solo user.</li></ul></div></div>
+
+<h2 id="landscape">iPhone landscape</h2>
+<div class="view wide"><div class="shots">
+<figure><img src="landscape-today.png" alt="Today landscape"><div class="cap">Today</div></figure>
+<figure><img src="landscape-notes.png" alt="Notes landscape"><div class="cap">Notes</div></figure>
+<figure><img src="landscape-timeline.png" alt="Timeline landscape"><div class="cap">Timeline</div></figure>
+</div><div>
+<p><span class="sev broken">broken</span>At 874 pt wide the app becomes the Mac app: sidebar with <code>⌘K</code>, hover rows, no bottom bar or New task, three rows of content visible. With <code>viewport-fit=cover</code> and no left inset, the sidebar's left edge sits under the Dynamic Island when it is on the left, and the bottom rows under the home indicator.</p>
+<p><b>Fix:</b> keep the phone layout in landscape (height under 600 pt on a touch device), apply left/right insets, and decide per view: lists stay lists, Timeline can use landscape for its chart.</p></div></div>
+
+<h2 id="ipad">iPad</h2>
+<div class="view"><div class="shots"><img src="sim-before-ipad-portrait.png" alt="iPad simulator: header over the status bar"><img src="sim-before-iphone-portrait.png" alt="iPhone simulator portrait"><div class="cap">iOS simulator, the real app: on iPad the "done" header sits on the status bar clock; on iPhone portrait the insets are right</div></div><div><p><b>Seen in the iPad simulator (the app itself, not the website):</b> the sidebar's "done" header is drawn over the status bar's time and date, and the sidebar shows <code>⌘K</code> and <code>Q</code> hints with no keyboard attached. iPhone portrait is correct at top and bottom. </p><p><span class="sev broken">broken</span>Both orientations get the Mac layout. Portrait (820 pt) is too narrow for sidebar + list + content (Notes, Timeline above). No top inset, so the title row sits under the iPad status bar: the cut-off header. Hover-only buttons and right-click menus have no touch path. <code>⌘K</code> hints show without a keyboard.</p>
+<p><b>Fix:</b> a tablet layout: collapsible sidebar (hidden by default in portrait, like iPad Mail/Notes), two columns at most, 44 pt rows, all four insets, long-press menus. Keep keyboard shortcuts working when a keyboard is attached, but hide the hints unless one is.</p></div></div>
+
+<h2 id="native">Widget and Dynamic Island focus timer</h2>
+<div class="view wide"><div>
+<p>From the Done tasks "Make a widget for the done app with all the tasks and focus. Make the knob on apple show the focus timer." and "Polish done mobile app experience… Prepare everything we need to do to make it be released in the App Store."</p>
+<h4>What it takes</h4><ul>
+<li><b>Widget (WidgetKit, SwiftUI):</b> a Widget Extension target in the Xcode project (<code>crates/app/gen/apple</code>); small (today count + next task), medium (next 3–4 tasks with check circles via App Intents on iOS 17+), large (Today list), lock-screen widgets (count, running focus). Data: the app writes a small JSON snapshot (today's tasks, the running focus) into an App Group container after every change and calls <code>WidgetCenter.reloadAllTimelines()</code>.</li>
+<li><b>Focus timer in the Dynamic Island (ActivityKit Live Activity):</b> the same extension adds an <code>ActivityConfiguration</code>: compact (timer + task initial), minimal, expanded (task title, time left, Pause/Done buttons via App Intents), plus the lock-screen banner. Start/stop it from the app when focus starts or ends; the countdown uses <code>Text(timerInterval:)</code> so it ticks without the app running.</li>
+<li><b>Bridge from the web UI:</b> a small Tauri iOS plugin in Swift with three calls: <code>widget_snapshot(json)</code>, <code>focus_start(task, ends_at)</code>, <code>focus_end()</code>. The UI calls them where it already saves tasks and starts focus. There is a community plugin, <code>tauri-plugin-widgets</code>, that writes JSON to an App Group and reloads widgets, but owning ~150 lines of Swift is simpler than its JSON-UI layer.</li>
+<li><b>Signing:</b> App Group and the extension need provisioning under team 99MUK5B6TA (development builds) and, for TestFlight/App Store, distribution profiles. Live Activities need iOS 16.2+ and <code>NSSupportsLiveActivities</code> in Info.plist.</li></ul>
+<h4>Unknowns</h4><ul><li>Whether <code>tauri ios build</code> keeps a hand-added extension target when it regenerates the Xcode project; may need the target added by a script after <code>tauri ios init</code>.</li><li>Widget taps need deep links into the app (<code>done://task/…</code>), which also do not exist yet beyond sign-in.</li></ul></div></div>
+
+<h2 id="fixed">Fixed: before and after</h2>
+<p class="sub">Built on 24 Nov in four branches merged into one (<code>fix/mobile-polish</code>): layout and safe areas, Timeline, Notes, touch fixes. 599 interface tests pass. "After" screenshots come from the merged interface on a copy of the real tasks at the same device sizes, and from the iOS simulator for the iPad and landscape shots.</p>
+<div class="view wide"><div><h3>Timeline on iPhone</h3><p>Titles in their own column (half the width on a phone), bars beside them, today one day from the left, a ‹ chip for bars off screen, View / Today / Filter controls that fit, and press-and-hold before a bar moves so a pan scrolls.</p></div><div class="shots"><figure><img src="phone-timeline.png" alt="Timeline on iPhone before"><div class="cap">Before</div></figure><figure><img src="after-phone-timeline.png" alt="Timeline on iPhone after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Timeline on iPad, landscape</h3><p>Titles never run under bars, the first bar is no longer cut off, no sideways page scroll, No date capped beside the chart.</p></div><div class="shots"><figure><img src="ipad-landscape-timeline.png" alt="Timeline on iPad, landscape before"><div class="cap">Before</div></figure><figure><img src="after-ipad-landscape-timeline-v1.png" alt="Timeline on iPad, landscape after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Timeline on iPad, portrait</h3><p>The chart gets the width instead of a 150 pt strip.</p></div><div class="shots"><figure><img src="ipad-portrait-timeline.png" alt="Timeline on iPad, portrait before"><div class="cap">Before</div></figure><figure><img src="after-ipad-portrait-timeline-v1.png" alt="Timeline on iPad, portrait after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>A note</h3><p>Live preview: headings, bold, bullets and numbers shown formatted, Markdown marks only on the line you are on; the first line is a 28 pt title with the date under it; one sticky bar with back and ⋯ (folder, project, read, delete). Autocorrect and predictions on; a writing bar above the keyboard (checklist, bullet, heading, bold, @task, Done).</p></div><div class="shots"><figure><img src="phone-note-editor.png" alt="A note before"><div class="cap">Before</div></figure><figure><img src="after-phone-note.png" alt="A note after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Notes list</h3><p>Apple Notes rows (title, date and first line), one back button, a compose button at the bottom right.</p></div><div class="shots"><figure><img src="phone-notes-all.png" alt="Notes list before"><div class="cap">Before</div></figure><figure><img src="after-phone-notes-all-v1.png" alt="Notes list after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Task details</h3><p>Subtasks shown (tick, add), plus Status, Make today’s goal and Focus on this; the sheet scrolls.</p></div><div class="shots"><figure><img src="phone-task-details-no-subtasks.png" alt="Task details before"><div class="cap">Before</div></figure><figure><img src="after-phone-task-details.png" alt="Task details after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>New task</h3><p>“p1” is marked in blue like the date and the list.</p></div><div class="shots"><figure><img src="phone-quick-add-parsed.png" alt="New task before"><div class="cap">Before</div></figure><figure><img src="after-phone-quick-add.png" alt="New task after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Lists</h3><p>Assigned to me is back (with its count), every More row has its icon, Completed has a count.</p></div><div class="shots"><figure><img src="phone-lists-more.png" alt="Lists before"><div class="cap">Before</div></figure><figure><img src="after-phone-lists.png" alt="Lists after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>iPad, the app itself (simulator)</h3><p>The header is clear of the status bar; in portrait the sidebar is put away behind a button; no keyboard hints without a keyboard.</p></div><div class="shots"><figure><img src="sim-before-ipad-portrait.png" alt="iPad, the app itself (simulator) before"><div class="cap">Before</div></figure><figure><img src="sim-after-ipad-portrait.png" alt="iPad, the app itself (simulator) after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>iPhone landscape</h3><p>Stays the phone layout (tab bar, New Task) instead of the Mac layout. <b>Still open:</b> the Dynamic Island covers the start of the content, see below.</p></div><div class="shots"><figure><img src="landscape-today.png" alt="iPhone landscape before"><div class="cap">Before</div></figure><figure><img src="sim-after-iphone-landscape.png" alt="iPhone landscape after"><div class="cap">After</div></figure></div></div>
+<div class="view wide"><div><h3>Today</h3><p>The New Task button is a solid pill, so rows under it no longer show through.</p></div><div class="shots"><figure><img src="phone-today.png" alt="Today before"><div class="cap">Before</div></figure><figure><img src="after-phone-today.png" alt="Today after"><div class="cap">After</div></figure></div></div>
+
+<h3>Also changed, without a screenshot</h3>
+<ul>
+<li><b>Layout by device:</b> phone when narrow or a touch screen with a short side under 500 pt (iPhone landscape), tablet for other touch screens (iPad: 44 pt sidebar rows, no shortcut hints, no hover-only buttons, sidebar put away in portrait), desktop for the Mac (unchanged).</li>
+<li><b>Safe areas on every layout</b>: app shell, sidebar, nav bar, tab bar, New Task, find bar, toasts and dialogs keep clear of the notch, status bar and home indicator. All zero on a Mac.</li>
+<li><b>Long press</b> opens the menu for what was pressed (it opened the last right-clicked target).</li>
+<li><b>Back</b> returns to where you came from, not always Lists, and says where it goes.</li>
+<li><b>Settings in the iPhone/iPad app</b> no longer shows the Mac's MCP, text size and update panes.</li>
+<li><b>Time sheet</b>: the remove button shows on touch screens; 44 pt day arrows on phones.</li>
+<li><b>Upcoming</b>: day headings stay in sight on a phone.</li>
+<li><b>Rotating</b> no longer switches which element scrolls.</li>
+</ul>
+<h3>Still open</h3>
+<ul>
+<li><span class="sev broken">open</span><b>iPhone landscape, in the app:</b> the page is told the left and right safe areas are 0, so the Dynamic Island covers the start of the content (Safari on the same simulator reports 62 pt each side). Turning off the web view's automatic inset adjustment did not change it; needs a look at how Tauri's iOS view controller lays out the web view.</li>
+<li><span class="sev missing">not built</span>Widget and Dynamic Island focus timer (plan above).</li>
+<li><span class="sev missing">not built</span>Full-screen phone search, Settings in grouped rows, a segmented control for Board columns on a phone, New Task chips for date/priority/list, pinned notes and swipe to delete in Notes.</li>
+<li><span class="sev ugly">to check on device</span>The writing bar's position above the real keyboard, checkbox taps in notes and hold-to-drag on Timeline were built and tested in code, not yet on a phone.</li>
+</ul>
+<h2 id="plan">Fix plan, in order</h2>
+<ol class="plan">
+<li><b>Layouts by device, not width</b> (phone / tablet / desktop) and <b>all four safe-area insets on the app shell</b>. Fixes the cut-off header, landscape and most of iPad at once. Verify on the iPhone 17 and iPad (A16) simulators in both orientations.</li>
+<li><b>Timeline rebuild</b>: sticky title column, scroll to today, no page overflow, phone list mode, touch editing via the task sheet. Applies to the Mac too.</li>
+<li><b>Notes as Apple Notes</b>: rich-text editor on touch (Markdown stored, Yjs kept), Apple Notes metrics, keyboard accessory bar, one back button, compose button, two-column iPad.</li>
+<li><b>Touch actions everywhere</b>: swipe actions on rows, long-press menus, New task chips, Board Move to, sticky day headers, Assigned to me in Lists, icons in More.</li>
+<li><b>Phone versions of Focus, Time sheet, Search, Settings, workspace picker</b> in the grouped-list style of Task details.</li>
+<li><b>Widget and Live Activity</b>: Swift plugin + Widget Extension + App Group; deep links.</li>
+<li><b>App Store readiness</b>: icons, launch screen, privacy manifest, TestFlight.</li>
+</ol>
+<p class="note">What this audit did not cover: the native shell on a real device (safe areas, keyboard avoidance, scrolling feel, haptics) beyond what the code shows; dark mode; Dynamic Type sizes; VoiceOver. Those need the simulator or the device and are the first check after step 1.</p>
+</main>
+<dialog id="zoom" onclick="this.close()"><img alt=""></dialog>
+<script>
+  const d = document.getElementById('zoom');
+  document.querySelectorAll('.shots img').forEach(img => img.addEventListener('click', () => { d.querySelector('img').src = img.src; d.showModal(); }));
+</script>
+</body>
+</html>

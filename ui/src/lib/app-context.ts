@@ -10,6 +10,8 @@ import type { Scope, Shown, Team } from '@/lib/team'
 // What is on screen right now. Not saved: a reload always starts in Today.
 export interface Ui {
   view: View
+  // The views left to get here, for a phone's back button (lib/view-history).
+  history: View[]
   adding: boolean
   // The quick add box is naming today's goal rather than adding to the view.
   asGoal: boolean
@@ -55,6 +57,8 @@ export interface App {
   dragging: RefObject<boolean>
 
   openView(view: View): void
+  // Back to the view this one was opened from; Lists when there is none.
+  back(): void
   add(): void
   addGoal(): void
   edit(id: number): void

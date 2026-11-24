@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { XIcon } from 'lucide-react'
+import { PlusIcon, XIcon } from 'lucide-react'
+import { TaskCheck } from '@/components/task-row'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -14,7 +15,7 @@ import { AssigneePage, AssigneePicker, AssigneeRow } from '@/components/assignee
 import { useFocus } from '@/hooks/use-focus'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
-import { isSubtask, patchTask, PRIORITY_NAME, tidyDates, type Task } from '@/lib/tasks'
+import { addSubtask, isSubtask, patchTask, PRIORITY_NAME, setGoal, subtasksOf, tidyDates, type Task } from '@/lib/tasks'
 import { describeDay, TODAY, type Day } from '@/lib/days'
 import { cn } from '@/lib/utils'
 
@@ -218,7 +219,9 @@ function Sheet({ task }: { task: Task }) {
             <AssigneePage task={task} onBack={() => setChoosing(false)} />
           </div>
         )}
-        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)]', choosing && 'hidden')}>
+        {/* Each group keeps its height and the sheet scrolls: as flex items they
+            would otherwise shrink to fit, clipping the last rows (24 Nov). */}
+        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)] [&>*]:shrink-0', choosing && 'hidden')}>
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <textarea
               value={title}
@@ -274,6 +277,11 @@ function Sheet({ task }: { task: Task }) {
             )}
             <AssigneeRow task={task} className={row} onOpen={() => setChoosing(true)} />
           </div>
+          {/* What the long-press menu offers on a Mac, here as rows a finger can
+              reach (23 Nov audit: the phone sheet had no subtasks, status,
+              focus or goal). A subtask has none of these. */}
+          {!isSubtask(task) && <SheetSubtasks parent={task} />}
+          {!isSubtask(task) && <SheetActions task={task} row={row} value={value} close={close} />}
           <button
             type="button"
             onClick={() => close(() => removeTask(task.id))}
@@ -283,6 +291,82 @@ function Sheet({ task }: { task: Task }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// The task's subtasks in the sheet: tick one off, or add another with Return.
+function SheetSubtasks({ parent }: { parent: Task }) {
+  const { data, update, complete, reopen } = useApp()
+  const [title, setTitle] = useState('')
+  const subtasks = subtasksOf(data.tasks, parent.id)
+  const add = (event: FormEvent) => {
+    event.preventDefault()
+    if (!title.trim()) return
+    play('confirm')
+    update((d) => addSubtask(d, parent.id, title.trim()))
+    setTitle('')
+  }
+  return (
+    <section className="flex flex-col gap-1.5">
+      <h3 className="px-4 text-footnote text-secondary-foreground uppercase">Subtasks</h3>
+      <div className="overflow-hidden rounded-xl bg-background pl-4">
+        {subtasks.map((sub) => (
+          <div key={sub.id} className="flex min-h-11 items-center gap-3 border-b border-border py-1.5 pr-4">
+            <TaskCheck task={sub} checked={!!sub.done} onChange={() => (sub.done ? reopen(sub.id) : complete(sub.id))} className="size-5" />
+            <span className={cn('min-w-0 flex-1 text-body wrap-anywhere', sub.done && 'text-tertiary line-through')}>{sub.title}</span>
+          </div>
+        ))}
+        <form onSubmit={add} className="flex min-h-11 items-center gap-3 pr-4">
+          <PlusIcon className="size-5 text-tertiary" />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Add subtask"
+            aria-label="Add subtask"
+            enterKeyHint="done"
+            className="min-w-0 flex-1 bg-transparent text-body outline-none"
+          />
+        </form>
+      </div>
+    </section>
+  )
+}
+
+// Status, focus and today's goal: saved at once, as the long-press menu does.
+function SheetActions({ task, row, value, close }: { task: Task; row: string; value: string; close: (then: () => void) => void }) {
+  const { update, me, focusOn, closeAll } = useApp()
+  const goal = task.goalDay === TODAY
+  const change: typeof update = (fn, notice) => {
+    play('confirm')
+    update(fn, notice)
+  }
+  return (
+    <div className="overflow-hidden rounded-xl bg-background pl-4">
+      <label className={row}>
+        <span className="text-body">Status</span>
+        <select
+          value={task.status === 'doing' ? 'doing' : 'todo'}
+          onChange={(e) => change((d) => patchTask(d, task.id, { status: e.target.value === 'doing' ? 'doing' : undefined }))}
+          className={value}
+          dir="rtl"
+        >
+          <option value="todo">To do</option>
+          <option value="doing">In progress</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className={cn(row, 'w-full text-left text-body text-primary active:bg-secondary')}
+        onClick={() =>
+          change((d) => (goal ? patchTask(d, task.id, { goalDay: null, goalBy: null }) : setGoal(d, task.id, TODAY, me)), task.id)
+        }
+      >
+        {goal ? 'Remove as today’s goal' : 'Make today’s goal'}
+      </button>
+      <button type="button" className={cn(row, 'w-full text-left text-body text-primary active:bg-secondary')} onClick={() => close(() => (closeAll(), focusOn(task.id)))}>
+        Focus on this
+      </button>
     </div>
   )
 }

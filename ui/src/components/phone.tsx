@@ -23,25 +23,49 @@ import {
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  UserCheckIcon,
   TimerIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { useApp, colorStyle } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
 import { tick } from '@/lib/haptics'
-import { colorIndex, counts, openTasks, type View } from '@/lib/tasks'
+import { colorIndex, counts, isSubtask, openTasks, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The three lists that are tabs of their own. Everything else is reached from
-// Lists, and shows a way back to it.
+// Lists, and shows a way back to where it was opened from.
 const TABS = ['today', 'inbox', 'upcoming', 'lists'] as const
 export const isTab = (view: View) => (TABS as readonly string[]).includes(view.kind)
+
+// What the back button says: where it goes, as on iOS. A long list name is
+// "Back" rather than a name cut short in the bar.
+const PLACE: Partial<Record<View['kind'], string>> = {
+  today: 'Today',
+  inbox: 'Inbox',
+  upcoming: 'Upcoming',
+  lists: 'Lists',
+  mine: 'Assigned',
+  notes: 'Notes',
+  board: 'Board',
+  timeline: 'Timeline',
+  focus: 'Focus',
+  timesheet: 'Time sheet',
+  completed: 'Completed',
+  settings: 'Settings',
+  notifications: 'Notifications',
+}
+function backLabel(to: View | undefined, projects: { id: number; name: string }[]): string {
+  if (!to) return 'Lists'
+  const name = to.kind === 'project' ? projects.find((p) => p.id === to.id)?.name : PLACE[to.kind]
+  return name && name.length <= 12 ? name : 'Back'
+}
 
 // The navigation bar and large title. The bar is always there, holding the
 // way back; its background and its small title appear once the large title
 // has scrolled up under it, as in Mail, Notes and Reminders.
 export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
-  const { ui, openView, closeAll } = useApp()
+  const { ui, shown, back, closeAll } = useApp()
   const bar = useRef<HTMLDivElement>(null)
   const big = useRef<HTMLHeadingElement>(null)
   // 0: at the top. 1: the page is under the bar. 2: the large title is gone.
@@ -80,15 +104,17 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
             under > 0 ? 'border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150' : 'border-b border-transparent',
           )}
         >
-          <div className="relative flex h-11 items-center px-2">
+          {/* Its background runs edge to edge; what is on it stays clear of
+              the notch when the phone is turned sideways. */}
+          <div className="relative flex h-11 items-center pr-[max(0.5rem,env(safe-area-inset-right))] pl-[max(0.5rem,env(safe-area-inset-left))]">
             {pushed && (
               <button
                 type="button"
-                onClick={() => openView({ kind: 'lists' })}
+                onClick={back}
                 className="relative z-10 -ml-1 flex items-center text-body text-primary active:opacity-40"
               >
                 <ChevronLeftIcon className="size-7" strokeWidth={2.4} />
-                Lists
+                {backLabel(ui.history[ui.history.length - 1], shown.projects)}
               </button>
             )}
             {menu && (
@@ -126,7 +152,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
           (actions || ui.confirmDelete) &&
           createPortal(
             <div
-              className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+              className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pr-[max(0.5rem,env(safe-area-inset-right))] pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pl-[max(0.5rem,env(safe-area-inset-left))]"
               onClick={() => {
                 // Asking to delete keeps the sheet up, now asking to confirm.
                 setActions(false)
@@ -184,9 +210,10 @@ export function TabBar() {
   }
 
   return (
+    // Edge to edge, with its tabs inside the safe area on every side.
     <nav
       aria-label="Views"
-      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+env(safe-area-inset-bottom))] items-start border-t border-border bg-background/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl backdrop-saturate-150"
+      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+env(safe-area-inset-bottom))] items-start border-t border-border bg-background/80 pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] backdrop-blur-xl backdrop-saturate-150"
     >
       {tab('today', 'Today', CalendarIcon, late)}
       {tab('inbox', 'Inbox', InboxIcon)}
@@ -207,7 +234,7 @@ export function NewTaskButton() {
     <button
       type="button"
       onClick={add}
-      className="fixed bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+0.5rem)] left-3 z-30 flex items-center gap-2 rounded-full bg-background/80 py-2 pr-4 pl-2 text-body font-semibold text-primary backdrop-blur-xl active:opacity-40"
+      className="fixed bottom-[calc(3.0625rem+env(safe-area-inset-bottom)+0.5rem)] left-[max(0.75rem,env(safe-area-inset-left))] z-30 flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
     >
       <span className="flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <PlusIcon className="size-4.5" strokeWidth={3} />
@@ -256,8 +283,11 @@ function Card({ icon: Icon, name, count, color, onClick }: { icon: LucideIcon; n
 
 // Everything that is not a tab: the lists, the projects and the other views.
 export function ListsScreen() {
-  const { shown, keep, openView, search, newProject } = useApp()
+  const { shown, keep, openView, search, newProject, me } = useApp()
   const count = counts(shown.tasks, TODAY, keep)
+  // Assigned to me had no way in on a phone but search (23 Nov audit).
+  const mine = me === null ? null : openTasks(shown.tasks).filter((t) => (t.assignees ?? []).includes(me)).length
+  const doneToday = shown.tasks.filter((t) => t.done && t.doneDay === TODAY && !isSubtask(t)).length
   const go = (view: View) => {
     tick()
     openView(view)
@@ -288,7 +318,7 @@ export function ListsScreen() {
         <Card icon={CalendarIcon} name="Today" count={count.today} color="bg-primary" onClick={() => go({ kind: 'today' })} />
         <Card icon={CalendarDaysIcon} name="Upcoming" count={count.upcoming} color="bg-overdue" onClick={() => go({ kind: 'upcoming' })} />
         <Card icon={InboxIcon} name="Inbox" count={count.inbox} color="bg-tertiary" onClick={() => go({ kind: 'inbox' })} />
-        <Card icon={CheckIcon} name="Completed" color="bg-foreground/70" onClick={() => go({ kind: 'completed' })} />
+        <Card icon={CheckIcon} name="Completed" count={doneToday} color="bg-foreground/70" onClick={() => go({ kind: 'completed' })} />
       </div>
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">My Lists</h2>
@@ -312,6 +342,9 @@ export function ListsScreen() {
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">More</h2>
         <Group>
+          {mine !== null && (
+            <GroupRow icon={<UserCheckIcon className="size-4" strokeWidth={2.4} />} name="Assigned to me" count={mine} color="bg-project-3" onClick={() => go({ kind: 'mine' })} />
+          )}
           {more.map(([kind, name, Icon, color]) => (
             <GroupRow
               key={kind}
@@ -331,7 +364,7 @@ export function ListsScreen() {
   )
 }
 
-// Back to Lists with a swipe from the left edge of the screen, as anywhere in
+// Back with a swipe from the left edge of the screen, as anywhere in
 // iOS. The page follows the finger; letting go past a third of the width, or
 // with a flick, goes back.
 export function useEdgeSwipeBack(active: boolean, back: () => void, page: RefObject<HTMLElement | null>) {

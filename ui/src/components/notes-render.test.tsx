@@ -80,6 +80,11 @@ describe('a note with mentions', () => {
     expect(draw(`[Call the bank](done:task/${BANK})`)).toContain(DESCRIPTION)
   })
 
+  it('holds a long description to three lines, so the card never buries the note', () => {
+    const html = draw(`[Call the bank](done:task/${BANK})`)
+    expect(html).toMatch(/<span[^>]*class="[^"]*line-clamp-3[^"]*"[^>]*>Ask about the loan terms/)
+  })
+
   it('shows the subtasks, each with its own check, once they are opened', () => {
     const closed = draw(`[Call the bank](done:task/${BANK})`)
     expect(closed).toContain('1/2')

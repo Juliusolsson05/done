@@ -203,7 +203,7 @@ export function FilterButton() {
             // The sheet would focus the words field as it opens, and the phone's
             // keyboard would then cover half the choices. A tap on it is enough.
             onOpenAutoFocus={(event) => event.preventDefault()}
-            className="max-h-[85svh] overflow-y-auto rounded-t-2xl pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+            className="max-h-[85svh] overflow-y-auto rounded-t-2xl pr-[env(safe-area-inset-right)] pb-[calc(env(safe-area-inset-bottom)+1rem)] pl-[env(safe-area-inset-left)]"
           >
             <SheetHeader>
               <SheetTitle>Filter</SheetTitle>

@@ -139,8 +139,10 @@ export function TaskMention({ id, fallback }: { id: number; fallback: ReactNode 
             ),
           )}
         </span>
-        {/* The whole description, as written, with its web links clickable. */}
-        {task.notes.trim() && <NotesText notes={task.notes.trim()} onEdit={() => goTo(task)} className="mt-0.5 whitespace-pre-wrap" />}
+        {/* The description, as written, with its web links clickable; held to
+            three lines so a long one never buries the note around it. A tap
+            opens the task, where it is read whole. */}
+        {task.notes.trim() && <NotesText notes={task.notes.trim()} onEdit={() => goTo(task)} className="mt-0.5 line-clamp-3 whitespace-pre-wrap" />}
         {open && subtasks.length > 0 && (
           <span className="mt-1 flex flex-col gap-1" aria-label={`Subtasks of ${task.title}`}>
             {subtasks.map((sub) => (

@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, deleteAccount, isDesktop, MAC_DOWNLOAD, restart, signIn, signOut } from '@/lib/backend'
+import { canSignIn, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, restart, signIn, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -116,6 +116,11 @@ function AccountPane() {
   )
 }
 
+// The iPhone and iPad app has a tasks file of its own like the Mac app
+// (`isDesktop`), but no terminal for the MCP server, no ⌘ for text size and no
+// self-update (the updater is the Mac's; 23 Nov audit showed all three there).
+const onIos = isIosApp
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
@@ -134,7 +139,7 @@ export function Settings() {
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
             too; in the web app there is no file here to read. */}
-        {(!account || isDesktop) && (
+        {(!account || isDesktop) && !onIos && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
@@ -163,7 +168,7 @@ export function Settings() {
 
         {/* A browser has its own zoom and nothing to update, so these two
             are for the desktop app only. */}
-        {isDesktop && (
+        {isDesktop && !onIos && (
           <>
             <Pane title="Text size">
               <div className="flex items-center gap-2">

@@ -117,7 +117,7 @@ export function Bell() {
         }}
       >
         <PopoverTrigger asChild>
-          <SidebarMenuButton className="max-md:h-11 max-md:text-base" aria-label={count ? `Notifications, ${count} new` : 'Notifications'}>
+          <SidebarMenuButton className="touch:h-11 touch:text-base" aria-label={count ? `Notifications, ${count} new` : 'Notifications'}>
             <BellIcon className="!size-[15px] text-muted-foreground opacity-75" />
             <span>Notifications</span>
           </SidebarMenuButton>
@@ -130,7 +130,7 @@ export function Bell() {
         </PopoverContent>
       </Popover>
       {count > 0 && (
-        <SidebarMenuBadge className="top-1.5 rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground max-md:top-3">
+        <SidebarMenuBadge className="top-1.5 rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground touch:top-3">
           {count}
         </SidebarMenuBadge>
       )}

@@ -5,6 +5,7 @@ import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
+import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
@@ -32,6 +33,13 @@ declare global {
 const tauri = window.__TAURI__
 
 export const isDesktop = tauri !== undefined
+
+// The same app runs on a Mac and on an iPhone or iPad, and `isDesktop` is true
+// on all three: these two tell them apart, for what only one of them has (the
+// Mac's text size, its menu bar, connecting an agent). See lib/platform.ts.
+const ios = typeof navigator !== 'undefined' && isIosAgent(navigator.userAgent, navigator.maxTouchPoints ?? 0)
+export const isIosApp = isDesktop && ios
+export const isMacApp = isDesktop && !ios && typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
 
 // The Mac app as a disk image, signed with a Developer ID and notarized so it
 // opens with one double-click: made on a Mac by done-infra's notarize-mac.sh
