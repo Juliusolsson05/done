@@ -41,6 +41,32 @@ const ios = typeof navigator !== 'undefined' && isIosAgent(navigator.userAgent, 
 export const isIosApp = isDesktop && ios
 export const isMacApp = isDesktop && !ios && typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
 
+// Today for the Home and Lock Screen widgets (lib/widget-snapshot.ts); the app
+// stores it where the widget extension reads it, or removes it for `null`
+// (signed out). iPhone and iPad only. The same snapshot is not sent twice:
+// App renders build new task arrays often, and each send rewrites the file and
+// reloads every widget (review of #74).
+let lastSnapshot: string | null = null
+// Signed out or deleted: the widgets must not keep showing the account's
+// tasks on the Home Screen (review of #74). The app removes their file.
+const clearWidgets = async (): Promise<void> => {
+  lastSnapshot = null
+  if (isIosApp) await tauri?.core.invoke('widget_snapshot', { snapshot: null }).catch(() => {})
+}
+export const sendWidgetSnapshot = (snapshot: unknown): void => {
+  if (!isIosApp) return
+  const json = JSON.stringify(snapshot)
+  if (json === lastSnapshot) return
+  lastSnapshot = json
+  void tauri?.core.invoke('widget_snapshot', { snapshot })
+}
+
+// The window's safe area as the iPhone or iPad app reads it natively, in
+// points: [top, right, bottom, left]. Null anywhere else, or if the app could
+// not tell. See lib/safe-area.ts for why this exists alongside env().
+export const nativeSafeArea = async (): Promise<[number, number, number, number] | null> =>
+  isIosApp && tauri ? ((await tauri.core.invoke<[number, number, number, number] | null>('safe_area')) ?? null) : null
+
 // The Mac app as a disk image, signed with a Developer ID and notarized so it
 // opens with one double-click: made on a Mac by done-infra's notarize-mac.sh
 // and kept on the release `mac`, a pre-release that is never "latest" (the
@@ -175,11 +201,13 @@ export const signOut = async (): Promise<void> => {
   // without an account.
   if (hosted) forgetCloudSession()
   else await post<unknown>('/auth/signout', {})
+  await clearWidgets()
   location.reload()
 }
 export const deleteAccount = async (): Promise<void> => {
   await post<unknown>('/api/account/delete', {})
   if (hosted) forgetCloudSession()
+  await clearWidgets()
   location.reload()
 }
 
@@ -229,6 +257,8 @@ export interface MenuBarTimes {
   reminderAt: number | null
   // A reminder is showing: the menu bar rings and brings the window forward.
   reminding: boolean
+  // What is being worked on: the Dynamic Island shows it on a phone.
+  title?: string
 }
 export const showInMenuBar = (session: MenuBarTimes | null): void => {
   void tauri?.core.invoke('focus_set', { session })

@@ -189,7 +189,7 @@ function Sheet({ task }: { task: Task }) {
         aria-label="Details"
         style={{ transform: pull ? `translateY(${pull}px)` : undefined }}
         className={cn(
-          'absolute inset-x-0 top-[calc(env(safe-area-inset-top)+0.75rem)] bottom-0 flex flex-col overflow-hidden rounded-t-2xl bg-grouped shadow-2xl',
+          'absolute inset-x-0 top-[calc(var(--safe-top)+0.75rem)] bottom-0 flex flex-col overflow-hidden rounded-t-2xl bg-grouped shadow-2xl',
           leaving ? 'translate-y-full transition-transform duration-200 ease-in' : !pull && 'animate-rise',
         )}
       >
@@ -215,13 +215,13 @@ function Sheet({ task }: { task: Task }) {
           </div>
         </div>
         {choosing && (
-          <div className="flex flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+          <div className="flex flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-[calc(var(--safe-bottom)+2rem)]">
             <AssigneePage task={task} onBack={() => setChoosing(false)} />
           </div>
         )}
         {/* Each group keeps its height and the sheet scrolls: as flex items they
             would otherwise shrink to fit, clipping the last rows (24 Nov). */}
-        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+2rem)] [&>*]:shrink-0', choosing && 'hidden')}>
+        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(var(--safe-bottom)+2rem)] [&>*]:shrink-0', choosing && 'hidden')}>
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <textarea
               value={title}

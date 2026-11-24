@@ -115,7 +115,7 @@ export function FindBar() {
       ref={bar}
       role="search"
       // Below the status bar and clear of the notch wherever it is (all 0 on a Mac).
-      className="fixed top-[calc(env(safe-area-inset-top)+0.75rem)] right-[calc(env(safe-area-inset-right)+1.25rem)] z-50 flex items-center gap-1 rounded-xl border bg-popover py-1 pr-1 pl-3 text-popover-foreground shadow-lg max-md:top-[calc(env(safe-area-inset-top)+0.5rem)] max-md:right-[max(0.75rem,env(safe-area-inset-right))] max-md:left-[max(0.75rem,env(safe-area-inset-left))]"
+      className="fixed top-[calc(var(--safe-top)+0.75rem)] right-[calc(var(--safe-right)+1.25rem)] z-50 flex items-center gap-1 rounded-xl border bg-popover py-1 pr-1 pl-3 text-popover-foreground shadow-lg max-md:top-[calc(var(--safe-top)+0.5rem)] max-md:right-[max(0.75rem,var(--safe-right))] max-md:left-[max(0.75rem,var(--safe-left))]"
     >
       <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
       <Input

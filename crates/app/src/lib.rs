@@ -47,6 +47,10 @@ struct Session {
     /// A reminder is showing in the window, which waits to be dismissed.
     #[serde(default)]
     reminding: bool,
+    /// What is being worked on, for the Dynamic Island on a phone.
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    title: Option<String>,
     /// Set once the end has been announced, so it is announced only once.
     #[serde(skip)]
     rang: bool,
@@ -71,9 +75,111 @@ const RINGS: u32 = 20;
 #[derive(Default)]
 struct Focus(Mutex<Option<Session>>);
 
+/// The window's safe area in points, `[top, right, bottom, left]`, as UIKit
+/// knows it. iPhone and iPad only; `None` elsewhere.
+///
+/// WHY: in this web view `env(safe-area-inset-*)` keeps the portrait values
+/// when the iPhone is held sideways, so the Dynamic Island covered the start of
+/// every view (#70). The window reports the same portrait values (measured on
+/// the iPhone 17 simulator: [62, 0, 34, 0] at 874×402 pt), so the page turns
+/// them for landscape itself (ui/src/lib/safe-area.ts `insetsFor`); what this
+/// answer gives it is the island's real size on each model.
+///
+/// UIKit must be touched on the main thread: `with_webview` runs the closure
+/// there, and the answer comes back over a channel. The command is async so it
+/// runs off the main thread and can wait without blocking the closure it
+/// waits for.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn safe_area(window: tauri::WebviewWindow) -> Option<[f64; 4]> {
+    use objc2::encode::{Encode, Encoding};
+    use objc2::runtime::AnyObject;
+
+    // UIEdgeInsets, field for field, so UIKit's struct can be returned by value.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct EdgeInsets {
+        top: f64,
+        left: f64,
+        bottom: f64,
+        right: f64,
+    }
+    unsafe impl Encode for EdgeInsets {
+        const ENCODING: Encoding =
+            Encoding::Struct("UIEdgeInsets", &[f64::ENCODING, f64::ENCODING, f64::ENCODING, f64::ENCODING]);
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| unsafe {
+            let view = webview.inner() as *mut AnyObject;
+            // The web view's own window: its insets are the screen's, whatever
+            // the web view and its scroll view were told.
+            let window: *mut AnyObject = objc2::msg_send![view, window];
+            let insets = if window.is_null() {
+                None
+            } else {
+                let i: EdgeInsets = objc2::msg_send![window, safeAreaInsets];
+                Some([i.top, i.right, i.bottom, i.left])
+            };
+            let _ = tx.send(insets);
+        })
+        .ok()?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten()).await.ok().flatten()
+}
+
+// Elsewhere WebKit's own env() values are right; the page treats `None` as
+// "nothing to add".
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn safe_area() -> Option<[f64; 4]> {
+    None
+}
+
+// The app's own Swift, linked into the same binary (gen/apple/Sources/done-app/
+// DoneNative.swift, `@_cdecl`): the Live Activity and the widgets' data.
+// WHY a C call and not a Tauri plugin: this crate is a static library linked
+// into that app, so the linker joins the two by name; the only contract is a
+// JSON string, copied by Swift before the call returns.
+#[cfg(target_os = "ios")]
+extern "C" {
+    fn done_focus(json: *const std::os::raw::c_char);
+    fn done_widget_snapshot(json: *const std::os::raw::c_char);
+}
+
+/// Hands a JSON value to one of the Swift functions above.
+#[cfg(target_os = "ios")]
+fn to_swift(call: unsafe extern "C" fn(*const std::os::raw::c_char), value: &serde_json::Value) {
+    if let Ok(text) = std::ffi::CString::new(value.to_string()) {
+        unsafe { call(text.as_ptr()) }
+    }
+}
+
 #[tauri::command]
 fn focus_set(focus: tauri::State<Focus>, session: Option<Session>) {
+    // On a phone the countdown lives in the Dynamic Island and on the Lock
+    // Screen (a Live Activity), told every time the window's session changes;
+    // the system counts it down by itself while the app is suspended.
+    #[cfg(target_os = "ios")]
+    to_swift(
+        done_focus,
+        &match &session {
+            Some(s) => serde_json::json!({ "title": s.title, "endsAt": s.ends_at, "remaining": s.remaining }),
+            None => serde_json::Value::Null,
+        },
+    );
     *focus.0.lock().unwrap() = session;
+}
+
+/// Today as the widgets show it (ui/src/lib/widget-snapshot.ts), stored where
+/// the widget extension can read it. Phones only; elsewhere there are no
+/// widgets and it is ignored.
+#[tauri::command]
+fn widget_snapshot(snapshot: serde_json::Value) {
+    #[cfg(target_os = "ios")]
+    to_swift(done_widget_snapshot, &snapshot);
+    #[cfg(not(target_os = "ios"))]
+    let _ = snapshot;
 }
 
 /// 24:59, or 1:04:59 from an hour up.
@@ -338,7 +444,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]

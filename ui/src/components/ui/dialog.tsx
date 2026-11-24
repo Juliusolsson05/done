@@ -62,8 +62,8 @@ function DialogContent({
           // done: kept inside the safe area, clear of the notch and the home
           // indicator, and scrolled rather than cut off when it is taller than
           // the screen (a phone turned sideways is about 400 points tall).
-          "max-h-[calc(100svh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto",
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem-env(safe-area-inset-left)-env(safe-area-inset-right))] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "max-h-[calc(100svh-2rem-var(--safe-top)-var(--safe-bottom))] overflow-y-auto",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem-var(--safe-left)-var(--safe-right))] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}

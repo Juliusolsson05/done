@@ -21,7 +21,8 @@ import { SearchDialog } from '@/components/search'
 import { TimeSheet } from '@/components/time-sheet'
 import { Timeline } from '@/components/timeline'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
-import { isDesktop, onMenuBarCommand, setWebviewZoom } from '@/lib/backend'
+import { isDesktop, isIosApp, onMenuBarCommand, sendWidgetSnapshot, setWebviewZoom } from '@/lib/backend'
+import { widgetSnapshot } from '@/lib/widget-snapshot'
 import { addDays, dayOf, TODAY } from '@/lib/days'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
@@ -445,6 +446,21 @@ export default function App() {
     }
   }, [])
 
+  // The Home and Lock Screen widgets show Today as this window does
+  // (lib/widget-snapshot.ts); they are told when it changes. Held back a
+  // moment, so a burst of edits or a sync writes the widgets' file once.
+  // iPhone and iPad only: nowhere else has widgets.
+  useEffect(() => {
+    if (!isIosApp || !ready) return
+    const timer = setTimeout(() => {
+      const running = focus && { title: focus.title, endsAt: focus.endsAt, remaining: focus.remaining }
+      sendWidgetSnapshot(widgetSnapshot(shown.tasks, TODAY, me, running, Date.now(), app.keep))
+    }, 800)
+    return () => clearTimeout(timer)
+    // The tasks, the scope and the focus are what the widgets show.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, shown.tasks, scope, me, focus])
+
   if (failed !== null) return <p className="p-10">done could not open its tasks: {failed}</p>
   if (!ready) return null
 
@@ -493,7 +509,7 @@ export default function App() {
                 // phone's bars keep clear of those themselves). The page's own
                 // margin then starts at the safe edge, as in iOS's own apps.
                 // All 0 on a Mac. The background reaches the edges.
-                'bg-background pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] md:pt-[env(safe-area-inset-top)] md:pb-[env(safe-area-inset-bottom)]',
+                'bg-background pr-[var(--safe-right)] pl-[var(--safe-left)] md:pt-[var(--safe-top)] md:pb-[var(--safe-bottom)]',
                 view.kind === 'lists' && 'max-md:bg-grouped',
               )}
               defaultOpen={sidebarWasOpen()}
@@ -512,7 +528,7 @@ export default function App() {
                   'min-w-0 md:overflow-y-auto',
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
-                  'max-md:px-4 max-md:pt-[calc(env(safe-area-inset-top)+2.75rem)] max-md:pb-[calc(env(safe-area-inset-bottom)+8rem)]',
+                  'max-md:px-4 max-md:pt-[calc(var(--safe-top)+2.75rem)] max-md:pb-[calc(var(--safe-bottom)+8rem)]',
                   // Lists is a grouped screen: white groups on grey.
                   view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',

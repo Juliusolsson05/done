@@ -236,10 +236,10 @@ function Sidebar({
           // page beside it is pushed over by the same inset (App.tsx), so the
           // two still meet. All of these are 0 on a Mac. (The same variants
           // as the line above, so these replace its width and offset.)
-          "bg-sidebar pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
+          "bg-sidebar pt-[var(--safe-top)] pb-[var(--safe-bottom)]",
           side === "left"
-            ? "w-[calc(var(--sidebar-width)+env(safe-area-inset-left))] pl-[env(safe-area-inset-left)] data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc((var(--sidebar-width)+env(safe-area-inset-left))*-1)]"
-            : "w-[calc(var(--sidebar-width)+env(safe-area-inset-right))] pr-[env(safe-area-inset-right)] data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc((var(--sidebar-width)+env(safe-area-inset-right))*-1)]",
+            ? "w-[calc(var(--sidebar-width)+var(--safe-left))] pl-[var(--safe-left)] data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc((var(--sidebar-width)+var(--safe-left))*-1)]"
+            : "w-[calc(var(--sidebar-width)+var(--safe-right))] pr-[var(--safe-right)] data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc((var(--sidebar-width)+var(--safe-right))*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"

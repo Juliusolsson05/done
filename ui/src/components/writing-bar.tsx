@@ -110,8 +110,8 @@ export function WritingBar({ view, viewport }: { view: EditorView; viewport: Vie
   const style = viewport
     ? viewport.inset > 0
       ? { top: viewport.top + viewport.height - BAR_HEIGHT, left: viewport.left, width: viewport.width }
-      : { bottom: 'env(safe-area-inset-bottom)', left: viewport.left, width: viewport.width }
-    : { bottom: 'env(safe-area-inset-bottom)', left: 0, right: 0 }
+      : { bottom: 'var(--safe-bottom)', left: viewport.left, width: viewport.width }
+    : { bottom: 'var(--safe-bottom)', left: 0, right: 0 }
   const button = (label: string, icon: ReactNode, act: () => void) => (
     <button
       type="button"

@@ -315,7 +315,7 @@ export function MobileQuickAdd() {
   const isMobile = useIsMobile()
   if (!isMobile || !ui.adding) return null
   return (
-    <div className="fixed inset-0 z-50 animate-in bg-black/40 px-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] fade-in" onClick={closeAll}>
+    <div className="fixed inset-0 z-50 animate-in bg-black/40 px-2 pt-[calc(var(--safe-top)+0.5rem)] fade-in" onClick={closeAll}>
       <div onClick={(event) => event.stopPropagation()}>
         <QuickAdd />
       </div>
