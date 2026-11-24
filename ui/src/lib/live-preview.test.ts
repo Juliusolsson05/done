@@ -63,9 +63,10 @@ describe('live preview: what is hidden', () => {
     expect(lines.find((l) => l.line === 3)?.depth).toBe(2)
   })
 
-  it('shows a web link as its words, and leaves a task mention to its own widget', () => {
+  it('shows a web link as its words, and leaves a task mention or note link to its own widget', () => {
     expect(hidden('T\nSee [the site](https://example.com) now')).toEqual(['hide:[', 'hide:](https://example.com)'])
     expect(hidden('T\nCall [the bank](done:task/12) now')).toEqual([])
+    expect(hidden('T\nSee [the plan](done:note/12) now')).toEqual([])
   })
 
   it('marks the first line as the title, headings by level, and ticked items as done', () => {

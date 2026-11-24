@@ -35,6 +35,26 @@ export const mentionLink = (task: Pick<Task, 'id' | 'title'>): string => `[${esc
 // A mention as it is written: the label (escaped brackets allowed) and the id.
 const MENTION = /\[((?:\\.|[^\]\\\n])*)\]\(done:task\/(\d{1,20})\)/g
 
+// A link to another note is the same kind of link with done:note/<id>:
+// [Seed round](done:note/1795306779859023). Its own scheme rather than a flag
+// on the task one, so everything that reads task mentions (the read view's
+// cards, the refs above a note, agents) keeps reading tasks only.
+const NOTE_SCHEME = 'done:note/'
+const NOTE_LINK = /\[((?:\\.|[^\]\\\n])*)\]\(done:note\/(\d{1,20})\)/g
+// Either kind, for what treats both alike: the editor's atoms, a title read
+// as words.
+const ANY_LINK = /\[((?:\\.|[^\]\\\n])*)\]\(done:(task|note)\/(\d{1,20})\)/g
+
+export const noteLinkHref = (id: number): string => NOTE_SCHEME + id
+
+// The note a link points at, or null for any other link.
+export function noteLinkId(href: string | undefined): number | null {
+  const match = href ? /^done:note\/(\d{1,20})$/.exec(href) : null
+  return match ? Number(match[1]) : null
+}
+
+export const noteLink = (note: { id: number; title: string }): string => `[${escapeLabel(note.title)}](${noteLinkHref(note.id)})`
+
 // Code is shown as written, so a mention inside it is text, not a task: the
 // same rule the Markdown parser follows when it draws the note.
 // Fences may be indented (inside a list item, say), and a code span may use
@@ -52,13 +72,31 @@ export function mentionsIn(text: string): number[] {
   return ids
 }
 
-// Where each mention is in the text, for the editor to draw it as one piece
-// ("@Call the bank") that the cursor steps over and Backspace takes whole:
-// half a link would leave text that is neither a mention nor readable.
-export function mentionRanges(text: string): { from: number; to: number; id: number; label: string }[] {
-  const ranges: { from: number; to: number; id: number; label: string }[] = []
-  for (const match of text.matchAll(MENTION)) {
-    ranges.push({ from: match.index, to: match.index + match[0].length, id: Number(match[2]), label: unescapeLabel(match[1]) })
+// The notes a note links to, in the order they first appear, once each.
+export function noteLinksIn(text: string): number[] {
+  const ids: number[] = []
+  for (const match of withoutCode(text).matchAll(NOTE_LINK)) {
+    const id = Number(match[2])
+    if (!ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
+
+export interface LinkRange {
+  from: number
+  to: number
+  kind: 'task' | 'note'
+  id: number
+  label: string
+}
+
+// Where each mention or note link is in the text, for the editor to draw it
+// as one piece ("@Call the bank") that the cursor steps over and Backspace
+// takes whole: half a link would leave text that is neither a link nor readable.
+export function mentionRanges(text: string): LinkRange[] {
+  const ranges: LinkRange[] = []
+  for (const match of text.matchAll(ANY_LINK)) {
+    ranges.push({ from: match.index, to: match.index + match[0].length, kind: match[2] as 'task' | 'note', id: Number(match[3]), label: unescapeLabel(match[1]) })
   }
   return ranges
 }
@@ -84,9 +122,9 @@ export function markInline(text: string): string {
     .join('\n')
 }
 
-// A mention read as its words alone, for a note's title in the list: "Call
-// the bank" rather than the link around it.
-export const withoutMentionSyntax = (text: string): string => text.replace(MENTION, (_, label: string) => unescapeLabel(label))
+// A mention or note link read as its words alone, for a note's title in the
+// list: "Call the bank" rather than the link around it.
+export const withoutMentionSyntax = (text: string): string => text.replace(ANY_LINK, (_, label: string) => unescapeLabel(label))
 
 // The @ being typed just before the caret, if any: where it starts and what
 // follows it. Only at the start of a line or after a space or an opening
@@ -107,9 +145,9 @@ export function atQuery(text: string, caret: number): { start: number; query: st
 }
 
 // The note with the @ being typed (from `start` to the caret) replaced by a
-// mention, and where the caret goes after it: past one space.
-export function insertMention(text: string, start: number, caret: number, task: Pick<Task, 'id' | 'title'>): { text: string; caret: number } {
-  const link = mentionLink(task)
+// link (a task's mentionLink or a note's noteLink), and where the caret goes
+// after it: past one space.
+export function insertMention(text: string, start: number, caret: number, link: string): { text: string; caret: number } {
   const after = text.slice(caret)
   const space = after.startsWith(' ') || after.startsWith('\n') ? '' : ' '
   const next = text.slice(0, start) + link + space + after
@@ -138,6 +176,37 @@ export function suggestions(tasks: Task[], query: string, limit = 8): Task[] {
   return open
     .filter((t) => words.every((w) => t.title.toLowerCase().includes(w)))
     .sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
+    .slice(0, limit)
+}
+
+// One row of the @ list: a task to mention or a note to link.
+export type Offer = { kind: 'task'; task: Task } | { kind: 'note'; id: number; title: string }
+
+// The notes that fit what has been typed after the @, matched by title as
+// tasks are: one that starts with it first, then one with a word that does,
+// then any that holds every word; within each, the newest. Nothing typed
+// yet: the newest. Never the note being written (a link to itself goes
+// nowhere) and never a blank one (it has no title to show).
+export function noteSuggestions<N extends { id: number; title: string; updatedAt: number; blank?: boolean }>(
+  notes: N[],
+  query: string,
+  current: number | null,
+  limit = 3,
+): N[] {
+  const candidates = notes.filter((n) => n.id !== current && !n.blank).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id)
+  const q = query.trim().toLowerCase()
+  if (!q) return candidates.slice(0, limit)
+  const words = q.split(/\s+/)
+  const rank = (n: N): number => {
+    const title = n.title.toLowerCase()
+    if (title.startsWith(q)) return 0
+    if (title.split(/\s+/).some((w) => w.startsWith(words[0]))) return 1
+    return 2
+  }
+  // A stable sort keeps the newest first within each rank.
+  return candidates
+    .filter((n) => words.every((w) => n.title.toLowerCase().includes(w)))
+    .sort((a, b) => rank(a) - rank(b))
     .slice(0, limit)
 }
 

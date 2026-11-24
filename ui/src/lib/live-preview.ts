@@ -26,7 +26,9 @@ export interface LineLook {
   depth?: number
 }
 
-const MENTION_URL = /^done:task\//
+// A task mention or a note link is drawn whole by its own atom
+// (components/mention-atoms), so its markers are not hidden piece by piece.
+const MENTION_URL = /^done:(?:task|note)\//
 
 // What the preview hides and how each line looks, for a document. `active`
 // holds the lines the selection is on: nothing is hidden there.
