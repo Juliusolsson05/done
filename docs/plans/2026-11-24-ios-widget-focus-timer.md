@@ -55,7 +55,7 @@ target, the App Group entitlement on both targets, `NSSupportsLiveActivities`, a
 `FocusAttributes` source (compiled into both targets) are declared there, and the project is
 regenerated with `xcodegen generate` (2.45: an app-extension target with `info:` needs a `path:`).
 
-App Group: `group.dev.done.app`. Extension bundle id: `dev.done.app.widgets`. Extension
+App Group: `group.app.thedone`. Extension bundle id: `dev.done.app.widgets`. Extension
 deployment target iOS 16.1 (Live Activities); the app stays at 15.0 with availability checks.
 
 ## Verification

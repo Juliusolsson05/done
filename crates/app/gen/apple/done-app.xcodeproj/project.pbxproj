@@ -230,14 +230,14 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_2E03B87C-CBBE-4548-A11C-BECA79A6EE1C" /* x86_64 */ = {
+		"TEMP_916F388B-FA8D-4378-B0B7-3ABD65EF5E07" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
 			sourceTree = "<group>";
 		};
-		"TEMP_8A2796FB-1D18-43D1-B096-E769F25FBA18" /* arm64 */ = {
+		"TEMP_EC883E12-2E29-41AE-9C58-FB9CD288DA97" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -430,7 +430,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app.widgets;
+				PRODUCT_BUNDLE_IDENTIFIER = app.thedone.ios.widgets;
 				PRODUCT_NAME = "done-widgets";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -527,7 +527,7 @@
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app;
+				PRODUCT_BUNDLE_IDENTIFIER = app.thedone.ios;
 				PRODUCT_NAME = done;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -560,7 +560,7 @@
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app;
+				PRODUCT_BUNDLE_IDENTIFIER = app.thedone.ios;
 				PRODUCT_NAME = done;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -643,7 +643,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.done.app.widgets;
+				PRODUCT_BUNDLE_IDENTIFIER = app.thedone.ios.widgets;
 				PRODUCT_NAME = "done-widgets";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;

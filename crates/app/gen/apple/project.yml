@@ -1,6 +1,10 @@
 name: done-app
 options:
-  bundleIdPrefix: dev.done.app
+  # WHY app.thedone.ios and not dev.done.app (the Mac app's id): dev.done.app is
+  # registered to another developer account, so Apple refuses it for Julius's
+  # team (99MUK5B6TA). This id is what App Store Connect keys the iPhone/iPad
+  # app to, so it must not change once the app is submitted.
+  bundleIdPrefix: app.thedone.ios
   deploymentTarget:
     iOS: 15.0
 fileGroups: [../../src]
@@ -19,7 +23,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: done
-      PRODUCT_BUNDLE_IDENTIFIER: dev.done.app
+      PRODUCT_BUNDLE_IDENTIFIER: app.thedone.ios
 targetTemplates:
   app:
     type: application
@@ -84,7 +88,7 @@ targets:
       path: done-app_iOS/done-app_iOS.entitlements
       # The app writes the widgets' data where the extension can read it.
       properties:
-        com.apple.security.application-groups: [group.dev.done.app]
+        com.apple.security.application-groups: [group.app.thedone]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -155,11 +159,11 @@ targets:
     entitlements:
       path: Widgets/done-widgets.entitlements
       properties:
-        com.apple.security.application-groups: [group.dev.done.app]
+        com.apple.security.application-groups: [group.app.thedone]
     settings:
       base:
         PRODUCT_NAME: done-widgets
-        PRODUCT_BUNDLE_IDENTIFIER: dev.done.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: app.thedone.ios.widgets
         SWIFT_VERSION: "5.0"
         ARCHS: [arm64]
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
