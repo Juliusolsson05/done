@@ -211,6 +211,14 @@ describe('a link to another note', () => {
     expect(mentionsIn(note)).toEqual([1])
   })
 
+  it('is text, not a piece, inside code, as the read view shows it; positions after code still hold', () => {
+    const text = ['`[a](done:note/1)` then [Plan](done:note/2)', '```', '[b](done:note/3) [c](done:task/4)', '```', '[Bank `x`](done:task/5)'].join('\n')
+    expect(mentionRanges(text).map((r) => [r.kind, r.id, r.label, text.slice(r.from, r.to)])).toEqual([
+      ['note', 2, 'Plan', '[Plan](done:note/2)'],
+      ['task', 5, 'Bank `x`', '[Bank `x`](done:task/5)'],
+    ])
+  })
+
   it('is one piece in the editor, told apart from a task mention', () => {
     const text = 'Do [Bank](done:task/1) after [Plan](done:note/2)'
     expect(mentionRanges(text).map((r) => [r.kind, r.id, r.label, text.slice(r.from, r.to)])).toEqual([

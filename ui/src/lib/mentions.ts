@@ -59,8 +59,11 @@ export const noteLink = (note: { id: number; title: string }): string => `[${esc
 // same rule the Markdown parser follows when it draws the note.
 // Fences may be indented (inside a list item, say), and a code span may use
 // more than one backtick (``a `b` c``).
+// Code is blanked to spaces rather than cut out, so every other position in
+// the text stays where it was: the editor draws links at those positions.
+const blank = (code: string): string => code.replace(/[^\n]/g, ' ')
 const withoutCode = (text: string): string =>
-  text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?(^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, '').replace(/(`+)[^\n]*?\1/g, '')
+  text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?(^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, blank).replace(/(`+)[^\n]*?\1/g, blank)
 
 // The tasks a note mentions, in the order they first appear, once each.
 export function mentionsIn(text: string): number[] {
@@ -93,10 +96,13 @@ export interface LinkRange {
 // Where each mention or note link is in the text, for the editor to draw it
 // as one piece ("@Call the bank") that the cursor steps over and Backspace
 // takes whole: half a link would leave text that is neither a link nor readable.
+// One written inside code stays text, as the read view shows it.
 export function mentionRanges(text: string): LinkRange[] {
   const ranges: LinkRange[] = []
-  for (const match of text.matchAll(ANY_LINK)) {
-    ranges.push({ from: match.index, to: match.index + match[0].length, kind: match[2] as 'task' | 'note', id: Number(match[3]), label: unescapeLabel(match[1]) })
+  for (const match of withoutCode(text).matchAll(ANY_LINK)) {
+    // The label from the text itself: code inside a label is blanked above.
+    const label = text.slice(match.index + 1, match.index + 1 + match[1].length)
+    ranges.push({ from: match.index, to: match.index + match[0].length, kind: match[2] as 'task' | 'note', id: Number(match[3]), label: unescapeLabel(label) })
   }
   return ranges
 }

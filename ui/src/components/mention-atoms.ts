@@ -102,11 +102,11 @@ class NoteChip extends WidgetType {
 function draw(view: EditorView, notes: () => LinkedNotes): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   const linked = notes()
-  for (const { from, to } of view.visibleRanges) {
-    for (const r of mentionRanges(view.state.doc.sliceString(from, to))) {
-      const widget = r.kind === 'note' ? new NoteChip(r.id, r.label, linked.title(r.id), linked.open) : new Mention(r.label)
-      builder.add(from + r.from, from + r.to, Decoration.replace({ widget }))
-    }
+  // The whole note, not only what is on screen: a code fence opened above
+  // the screen still makes the links below it text. A note is short enough.
+  for (const r of mentionRanges(view.state.doc.toString())) {
+    const widget = r.kind === 'note' ? new NoteChip(r.id, r.label, linked.title(r.id), linked.open) : new Mention(r.label)
+    builder.add(r.from, r.to, Decoration.replace({ widget }))
   }
   return builder.finish()
 }
@@ -119,7 +119,7 @@ function atoms(notes: () => LinkedNotes) {
         this.decorations = draw(view, notes)
       }
       update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged || update.transactions.some((t) => t.effects.some((e) => e.is(notesChanged))))
+        if (update.docChanged || update.transactions.some((t) => t.effects.some((e) => e.is(notesChanged))))
           this.decorations = draw(update.view, notes)
       }
     },
