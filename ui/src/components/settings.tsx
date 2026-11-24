@@ -1,13 +1,14 @@
 import { Avatar } from '@/components/avatars'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, restart, signIn, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -55,6 +56,38 @@ function Sounds() {
   )
 }
 
+// The App Review login: a username and password Apple's reviewers are given
+// with the submission, since they have no Google account for done. Folded
+// away behind a quiet link; nobody else has a password to type.
+function PasswordSignIn() {
+  const { say } = useApp()
+  const [open, setOpen] = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  if (!open)
+    return (
+      <button type="button" className="self-start text-sm text-muted-foreground underline underline-offset-2" onClick={() => setOpen(true)}>
+        Sign in with a password
+      </button>
+    )
+  const submit = () => void signInWithReviewPassword(username, password).catch((e: Error) => say(e.message))
+  return (
+    <form
+      className="flex max-w-xs flex-col gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        submit()
+      }}
+    >
+      <Input placeholder="Username" autoCapitalize="none" autoCorrect="off" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+      <Input placeholder="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <Button size="sm" type="submit" className="self-start" disabled={!username || !password}>
+        Sign in
+      </Button>
+    </form>
+  )
+}
+
 // Only where there are accounts: the hosted web app.
 function AccountPane() {
   const account = useAccount()
@@ -71,9 +104,20 @@ function AccountPane() {
           Your tasks are kept on this device. Sign in to have the same tasks here, at thedone.app and on your phone. Everything on this device
           goes up to your account, and it keeps working without a connection.
         </p>
-        <Button size="sm" className="self-start" onClick={() => void signIn().catch(() => say('Your browser could not be opened.'))}>
-          Sign in with Google
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Apple's sign-in first and no smaller than Google's: the App
+              Store's rule for apps that offer both (guideline 4.8), and
+              Apple's own button style, black with the Apple logo. */}
+          {canSignInWithApple && (
+            <Button size="sm" className="bg-black text-white hover:bg-black/85" onClick={() => void signInWithApple().catch((e: Error) => say(e.message))}>
+              <span aria-hidden>{'\uF8FF'}</span> Sign in with Apple
+            </Button>
+          )}
+          <Button size="sm" variant={canSignInWithApple ? 'outline' : 'default'} onClick={() => void signIn().catch(() => say('Your browser could not be opened.'))}>
+            Sign in with Google
+          </Button>
+        </div>
+        <PasswordSignIn />
       </Pane>
     )
   }
@@ -89,7 +133,13 @@ function AccountPane() {
         </div>
       </div>
       <p className="text-muted-foreground">
-        {account.picture ? 'Signed in with Google.' : 'Signed in with Google. Your Google account has no picture, so your initials stand in for it; add one there and sign in again to use it here.'}
+        {account.id?.startsWith('apple')
+          ? 'Signed in with Apple.'
+          : account.id === 'review'
+            ? 'Signed in to the App Review account.'
+            : account.picture
+              ? 'Signed in with Google.'
+              : 'Signed in with Google. Your Google account has no picture, so your initials stand in for it; add one there and sign in again to use it here.'}
         {isDesktop && ' Your tasks stay on this device too and sync every few seconds when there is a connection. Signing out keeps them here.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">

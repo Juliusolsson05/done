@@ -87,8 +87,10 @@ targets:
     entitlements:
       path: done-app_iOS/done-app_iOS.entitlements
       # The app writes the widgets' data where the extension can read it.
+      # Sign in with Apple: the native sheet (DoneNative.swift) needs it.
       properties:
         com.apple.security.application-groups: [group.app.thedone]
+        com.apple.developer.applesignin: [Default]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full

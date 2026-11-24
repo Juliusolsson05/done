@@ -3,7 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
-import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession } from '@/lib/cloud'
+import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
@@ -215,6 +215,28 @@ export const deleteAccount = async (): Promise<void> => {
 // a hosted server and is not signed in yet.
 export const canSignIn = tauri !== undefined && CLOUD_URL !== null && hosted === null
 export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url }))
+
+// Sign in with Apple: the iPhone and iPad app only, where the App Store asks
+// for it next to Google. The sheet is native (DoneNative.swift); the token it
+// gives goes to the server, and the app starts over signed in, as after Google.
+// Resolves false when the person closed the sheet.
+export const canSignInWithApple = canSignIn && isIosApp
+export const signInWithApple = async (): Promise<boolean> => {
+  const answer = await tauri!.core.invoke<{ token?: string; name?: string; error?: string }>('apple_sign_in')
+  if (answer.error === 'cancelled') return false
+  if (!answer.token) throw new Error('Signing in with Apple did not work. Try again.')
+  await signInWithAppleToken(answer.token, answer.name ?? '')
+  location.reload()
+  return true
+}
+
+// The App Review login (a username and password the server holds). Shown in
+// the apps behind a small link: it is for Apple's reviewers, who have no
+// Google account for done.
+export const signInWithReviewPassword = async (username: string, password: string): Promise<void> => {
+  await signInWithPassword(username, password)
+  location.reload()
+}
 
 // A link in a task's notes. The apps open it in the person's own browser:
 // inside the app's window it would replace the task list.

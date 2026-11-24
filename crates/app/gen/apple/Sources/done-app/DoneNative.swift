@@ -10,7 +10,9 @@
 // Both functions copy the string at once (Rust frees it when the call returns)
 // and do their work on the main thread, where ActivityKit and WidgetKit expect
 // to be called from.
+import AuthenticationServices
 import Foundation
+import UIKit
 import WidgetKit
 #if canImport(ActivityKit)
 import ActivityKit
@@ -93,5 +95,70 @@ enum FocusActivity {
         for activity in Activity<FocusAttributes>.activities {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
+    }
+}
+
+// MARK: Sign in with Apple
+
+/// Called from Rust (`apple_sign_in` in crates/app/src/lib.rs) with a C
+/// function to answer through, once: `{"token", "name"}` on success, or
+/// `{"error"}` (`"cancelled"` when the person closed the sheet).
+///
+/// WHY native and not Apple's web sign-in: the iPhone app must offer Sign in
+/// with Apple next to Google (App Store guideline 4.8), and the native sheet
+/// is what Apple expects there: Face ID, no password, and a token made out to
+/// this app's bundle id, which the server checks without any Apple secret.
+public typealias DoneAnswer = @convention(c) (UnsafePointer<CChar>) -> Void
+
+@_cdecl("done_apple_sign_in")
+public func doneAppleSignIn(_ answer: DoneAnswer) {
+    DispatchQueue.main.async { AppleSignIn.start(answer) }
+}
+
+final class AppleSignIn: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    // The controller keeps its delegate weakly: this holds the one sign-in
+    // under way until it has answered.
+    private static var current: AppleSignIn?
+    private let answer: DoneAnswer
+
+    private init(_ answer: DoneAnswer) { self.answer = answer }
+
+    static func start(_ answer: DoneAnswer) {
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        let signIn = AppleSignIn(answer)
+        current = signIn
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        controller.delegate = signIn
+        controller.presentationContextProvider = signIn
+        controller.performRequests()
+    }
+
+    private func finish(_ value: [String: String]) {
+        let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{\"error\":\"failed\"}".utf8)
+        String(decoding: data, as: UTF8.self).withCString { answer($0) }
+        AppleSignIn.current = nil
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let token = String(data: tokenData, encoding: .utf8) else {
+            finish(["error": "no token"])
+            return
+        }
+        // Apple gives the name on the first sign-in only; the server keeps it.
+        let name = [credential.fullName?.givenName, credential.fullName?.familyName].compactMap { $0 }.joined(separator: " ")
+        finish(["token": token, "name": name])
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        let cancelled = (error as? ASAuthorizationError)?.code == .canceled
+        finish(["error": cancelled ? "cancelled" : error.localizedDescription])
     }
 }

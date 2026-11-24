@@ -145,6 +145,41 @@ async fn safe_area() -> Option<[f64; 4]> {
 extern "C" {
     fn done_focus(json: *const std::os::raw::c_char);
     fn done_widget_snapshot(json: *const std::os::raw::c_char);
+    fn done_apple_sign_in(answer: extern "C" fn(*const std::os::raw::c_char));
+}
+
+/// Where the one Sign in with Apple under way is waiting for Swift's answer.
+#[cfg(target_os = "ios")]
+static APPLE_ANSWER: Mutex<Option<std::sync::mpsc::Sender<String>>> = Mutex::new(None);
+
+#[cfg(target_os = "ios")]
+extern "C" fn apple_answered(json: *const std::os::raw::c_char) {
+    // Copied now: Swift frees the string when this returns.
+    let text = unsafe { std::ffi::CStr::from_ptr(json) }.to_string_lossy().into_owned();
+    if let Some(waiting) = APPLE_ANSWER.lock().unwrap().take() {
+        let _ = waiting.send(text);
+    }
+}
+
+/// Shows Apple's sign-in sheet and returns what it gave: `{"token", "name"}`
+/// or `{"error"}`. The window sends the token on to the server
+/// (ui/src/lib/cloud.ts). iPhone and iPad only.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn apple_sign_in() -> serde_json::Value {
+    let (tell, answer) = std::sync::mpsc::channel();
+    // A second tap while the sheet is up replaces the first; the first then
+    // answers nobody, which is what a tap on a sheet already showing should do.
+    *APPLE_ANSWER.lock().unwrap() = Some(tell);
+    unsafe { done_apple_sign_in(apple_answered) };
+    let text = tauri::async_runtime::spawn_blocking(move || answer.recv().unwrap_or_default()).await.unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "error": "failed" }))
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn apple_sign_in() -> serde_json::Value {
+    serde_json::json!({ "error": "Sign in with Apple is only in the iPhone and iPad app." })
 }
 
 /// Hands a JSON value to one of the Swift functions above.
@@ -444,7 +479,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]
