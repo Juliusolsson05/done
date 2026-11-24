@@ -328,28 +328,6 @@ fn keep_updated(app: tauri::AppHandle) {
 }
 
 /// Starts the app. On an iPhone this is where the system enters.
-/// Lets the page see the whole safe area, so it keeps clear of the notch and
-/// the Dynamic Island itself (`env(safe-area-inset-*)` in the interface).
-///
-/// WHY: the web view's scroll view adjusts its content insets automatically
-/// by default, and then the page is told the left and right safe areas are 0:
-/// held sideways, the Dynamic Island covered the start of every view (iPhone 17
-/// simulator, 24 Nov 2026; Safari on the same simulator reported 62 pt on each
-/// side). With the adjustment off, the page gets the real insets on all four
-/// sides and places itself, as it already does at the top in portrait.
-#[cfg(target_os = "ios")]
-fn keep_clear_of_the_notch(app: &tauri::AppHandle) {
-    use objc2::runtime::AnyObject;
-    use tauri::Manager;
-    let Some(window) = app.get_webview_window("main") else { return };
-    let _ = window.with_webview(|webview| unsafe {
-        let view = webview.inner() as *mut AnyObject;
-        let scroll: *mut AnyObject = objc2::msg_send![view, scrollView];
-        // UIScrollViewContentInsetAdjustmentBehavior.never
-        let _: () = objc2::msg_send![scroll, setContentInsetAdjustmentBehavior: 2isize];
-    });
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let store = Store::open(&done_core::default_path()).expect("open the tasks file");
@@ -392,8 +370,6 @@ pub fn run() {
                     show_window(&handle);
                 });
             }
-            #[cfg(target_os = "ios")]
-            keep_clear_of_the_notch(app.handle());
             #[cfg(desktop)]
             {
                 run_menu_bar(app.handle())?;

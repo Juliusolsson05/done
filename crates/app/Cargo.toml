@@ -33,8 +33,3 @@ tauri-plugin-updater = "2.14.1"
 # no Taptic Engine for an app to use.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-haptics = "2.4.2"
-
-# One setting on the iPhone and iPad web view (`keep_clear_of_the_notch` in
-# lib.rs). Already in the build through Tauri; named here to call it directly.
-[target.'cfg(target_os = "ios")'.dependencies]
-objc2 = "0.6"
