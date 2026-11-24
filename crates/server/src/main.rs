@@ -321,6 +321,8 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/auth/google/callback", get(auth::back))
         .route("/auth/signout", post(auth::sign_out))
         .route("/auth/exchange", post(auth::exchange))
+        .route("/auth/apple", post(auth::apple))
+        .route("/auth/review", post(auth::review))
         .route("/auth/dev", get(auth::dev))
         .route("/api/me", get(auth::me))
         .route("/api/account/delete", post(auth::delete_account))
@@ -503,6 +505,23 @@ mod tests {
     use std::sync::Mutex;
 
     const CLIENT: &str = "done-test-client";
+    const REVIEW_PASSWORD: &str = "a-long-review-password";
+
+    // A key made for these tests only (openssl genrsa 2048), standing in for
+    // the one Apple signs its tokens with. It signs nothing anywhere else.
+    const APPLE_TEST_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCtTWzJthBTEMrX\nKg5wWLGj4c9O6zk61kYZydQuPsmHRMtZIhDviCzQJ1/DXbUCqpuuZ1K3sS0grbFk\nf7Q20z1VqmyDzQoiqWRx4IndjyF3pfs85i6TRx1p78V65Ht7zQJzuqPkFxc/pKhj\nW40PsTMLZW7wZ00+vdBOkgNwfVuxDMXn4Y58hs5IZk6ms2zuRSaM8NL9rtkuVOXW\nPg5mdR6KthfVYB772USFlNXtngkqBPVH9jAyi9l0q2AQ1IEBxvTmIShzZAqLkgTz\nrCXPeGIuC5PSZP3D+Nx3Z7Q0nOX/o4u7lMM7TYKZwchMBO/Qo4FYHM8rObbm3VSZ\n5ocuWMNBAgMBAAECggEAHRfUXYB8+RTmmHxs9BtPpw1vefYvI1t5ZTbmseTEfDrm\nUE5RvYSE0WTqxKdkjdAKVprt3fyWcNf34cE2hcWslEcJ9I5lVzBMtnlVa6ZtneJ1\nbOHPi9XycChaZKkaucvOz5LTlKTzuDFyO0vRQIMk6JLcrusIorHG2InWnfnNfMk7\nN71D4FvuaVIcI3Qv7cZ7/1tDExRwBKm7vK72bG3z6b0ltGysDaQI+jsdu+msdttI\nCZuNfIrVqS5jCSt4k9FCe8W2FAOiDtQ06BvkKx+4JfWziO5tSr9UtnB+j8UQbfSN\nKCzpKs9XdGKp03F0Nyg73lYzswmliOctBswNyLxV4QKBgQDj2n16nk2JLhdepUg+\nvvv+tWZRVRSSXSO5wDIVnj7Simm/Q2WUBaNlptR8ZeDEMbJQkkAp33avwJoia4Nh\nBbXsZbaoc1DrQniokQpE3/UrSTO6Umd+4C/UnZscEFYb0Vai/hEveJK5IkEaAngN\naywbIHss4xMikILqbrZ5BguflQKBgQDCtdf2srdSGp859oV8+QOWjqKCcRhpsb0l\na/ASBO8iQ8CP0dGUQwp71U1bjc2McEEr1SIO4phkeq+lzk3fjCYbguDBBNQEMLUg\nWGApdpDGDJbZZGUJB+IsV1Pydr+wMILpp3QwUU6g/GjZVOAloMplvRkMCBWgbJTR\n/k0IyYyZ/QKBgDGrGRs3ktNKdtGs2djDrQ7S4CDumPNm1jjRiplny239uht1R5lC\nuWGZQkxzsNFTu/kQSGhYS/j31SGXqiXmJsgHTA/gQ01lSgQEyeZFo53x8RK2j9T6\nbbK9QGiXrw2VTnttQrXEZMdyjhprW1whdpXbOL6KKUupkMAlriUnijUZAoGAJfgo\nASegsBYY7siwB0rX9EgkUKOVSycp515BFoJ3z4q+xkz4PZ1FMhjKWQwyBSzuyIlr\ndtOhPBbgoci1Tt6Zn8vJ4Fn8rkSBTaluNyez26sgz4vQWA59gIAXErUtdEJBhSbu\ndW2lk6clGxx+CVhtn6FcfQgmj34dF0Yr54bGMFECgYByla1WkYoL4G54OBi0/Ys8\nK0l90ZcZrIOXP3SJAywoFlh059/BOSv1ue4LVw+k6i/eTmADRbSHgrE+8YHIbgkf\n4YCaivn5P0N4S0TrQHukFYdnTrkBjTYmQ5unO6swe5YtO1hRfWFkaQxpWFpHXrHD\nhzcBJtA359XghW/6UaXt3A==\n-----END PRIVATE KEY-----";
+    const APPLE_TEST_N: &str = "rU1sybYQUxDK1yoOcFixo-HPTus5OtZGGcnULj7Jh0TLWSIQ74gs0Cdfw121AqqbrmdSt7EtIK2xZH-0NtM9Vapsg80KIqlkceCJ3Y8hd6X7POYuk0cdae_FeuR7e80Cc7qj5BcXP6SoY1uND7EzC2Vu8GdNPr3QTpIDcH1bsQzF5-GOfIbOSGZOprNs7kUmjPDS_a7ZLlTl1j4OZnUeirYX1WAe-9lEhZTV7Z4JKgT1R_YwMovZdKtgENSBAcb05iEoc2QKi5IE86wlz3hiLguT0mT9w_jcd2e0NJzl_6OLu5TDO02CmcHITATv0KOBWBzPKzm25t1UmeaHLljDQQ";
+
+    /// A token as Apple would give the iPhone app, signed with `kid`.
+    fn apple_token(claims: serde_json::Value, kid: &str) -> String {
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+        header.kid = Some(kid.into());
+        jsonwebtoken::encode(&header, &claims, &jsonwebtoken::EncodingKey::from_rsa_pem(APPLE_TEST_KEY.as_bytes()).unwrap()).unwrap()
+    }
+
+    fn apple_claims(aud: &str, exp: u64) -> serde_json::Value {
+        serde_json::json!({ "iss": "https://appleid.apple.com", "aud": aud, "exp": exp, "iat": 1, "sub": "001234.abcdef0123456789.1234", "email": "x@privaterelay.appleid.com" })
+    }
 
     async fn serve(app: Router) -> String {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -523,7 +542,9 @@ mod tests {
                 let body = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
                 Json(serde_json::json!({ "id_token": format!("header.{body}.signature") }))
             };
-            let at = serve(Router::new().route("/token", post(token)).with_state(google.clone())).await;
+            // Apple's published keys, here: the one the tests sign with.
+            let keys = || async { Json(serde_json::json!({ "keys": [{ "kty": "RSA", "kid": "test", "alg": "RS256", "use": "sig", "n": APPLE_TEST_N, "e": "AQAB" }] })) };
+            let at = serve(Router::new().route("/token", post(token)).route("/keys", get(keys)).with_state(google.clone())).await;
             (google, at)
         }
 
@@ -553,6 +574,9 @@ mod tests {
             token_url: format!("{google_at}/token"),
             dev: false,
             collab_url: None,
+            apple_audience: "app.thedone.ios".into(),
+            apple_keys_url: format!("{google_at}/keys"),
+            review_password: Some(REVIEW_PASSWORD.into()),
         };
         let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
@@ -890,5 +914,45 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let local_at = serve(local(Arc::new(Store::open(&dir.path().join("done.db")).unwrap()))).await;
         assert_eq!(http.get(format!("{local_at}/privacy")).send().await.unwrap().status(), 404);
+    }
+
+    #[tokio::test]
+    async fn apple_sign_in_holds_apple_to_its_token() {
+        let (at, _google, _kept) = hosted(7).await;
+        let mut b = Browser::new(&at);
+        let sign_in = |token: String, name: &str| serde_json::json!({ "identity_token": token, "name": name });
+        // Made out to another app, out of date, or signed with a key Apple
+        // does not list: each is refused.
+        for (token, why) in [
+            (apple_token(apple_claims("com.someone.else", 4102444800), "test"), "another app"),
+            (apple_token(apple_claims("app.thedone.ios", 1000), "test"), "expired"),
+            (apple_token(apple_claims("app.thedone.ios", 4102444800), "unknown"), "unlisted key"),
+        ] {
+            assert_eq!(b.post("/auth/apple", sign_in(token, "")).await.status(), 401, "{why}");
+        }
+        let first: serde_json::Value = b.post("/auth/apple", sign_in(apple_token(apple_claims("app.thedone.ios", 4102444800), "test"), "Ana Lind")).await.json().await.unwrap();
+        assert_eq!(first["account"]["name"], "Ana Lind");
+        let id = first["account"]["id"].as_str().unwrap();
+        assert!(id.starts_with("apple") && id.bytes().all(|b| b.is_ascii_alphanumeric()), "{id}");
+        // The token is a working session: the account is written down on its first call.
+        let state = b.http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(first["token"].as_str().unwrap()).send().await.unwrap();
+        assert_eq!(state.status(), 200);
+        // Apple sends the name the first time only; the second sign-in keeps it.
+        let again: serde_json::Value = b.post("/auth/apple", sign_in(apple_token(apple_claims("app.thedone.ios", 4102444800), "test"), "")).await.json().await.unwrap();
+        assert_eq!(again["account"]["id"], first["account"]["id"]);
+        assert_eq!(again["account"]["name"], "Ana Lind");
+    }
+
+    #[tokio::test]
+    async fn the_review_login_needs_its_password() {
+        let (at, _google, _kept) = hosted(8).await;
+        let mut b = Browser::new(&at);
+        for (username, password) in [("review", "wrong"), ("someone", REVIEW_PASSWORD), ("review", "")] {
+            assert_eq!(b.post("/auth/review", serde_json::json!({ "username": username, "password": password })).await.status(), 401, "{username}/{password}");
+        }
+        let signed: serde_json::Value = b.post("/auth/review", serde_json::json!({ "username": "review", "password": REVIEW_PASSWORD })).await.json().await.unwrap();
+        assert_eq!(signed["account"]["email"], "review@thedone.app");
+        let state = b.http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(signed["token"].as_str().unwrap()).send().await.unwrap();
+        assert_eq!(state.status(), 200);
     }
 }

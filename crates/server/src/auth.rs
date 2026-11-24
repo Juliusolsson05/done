@@ -38,6 +38,15 @@ pub struct Config {
     /// Where the live notes service is (`done-server collab`), for windows to
     /// connect to: DONE_COLLAB_URL. Without it notes are not written live.
     pub collab_url: Option<String>,
+    /// Sign in with Apple: the iPhone app's bundle id, which Apple's tokens
+    /// are made out to (DONE_APPLE_AUDIENCE, by default `app.thedone.ios`),
+    /// and where Apple publishes the keys it signs them with. A setting so a
+    /// test can stand in for Apple.
+    pub apple_audience: String,
+    pub apple_keys_url: String,
+    /// The App Review login's password (DONE_REVIEW_PASSWORD). None: the
+    /// login is off and answers as if it did not exist.
+    pub review_password: Option<String>,
 }
 
 fn need(name: &str) -> String {
@@ -66,9 +75,21 @@ impl Config {
             std::process::exit(2);
         }
         let collab_url = std::env::var("DONE_COLLAB_URL").ok().map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| !u.is_empty());
+        // WHY a password login at all: App Review must be able to sign in, and
+        // its reviewers have no Google account for done. An email login would
+        // need an email provider, which done does not have. One fixed account,
+        // a long password kept only in the server's settings.
+        let review_password = std::env::var("DONE_REVIEW_PASSWORD").ok().map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        if review_password.as_ref().is_some_and(|p| p.len() < 16) {
+            eprintln!("DONE_REVIEW_PASSWORD must be at least 16 characters.");
+            std::process::exit(2);
+        }
         Self {
             dev,
             collab_url,
+            review_password,
+            apple_audience: std::env::var("DONE_APPLE_AUDIENCE").ok().filter(|a| !a.trim().is_empty()).unwrap_or_else(|| "app.thedone.ios".into()),
+            apple_keys_url: "https://appleid.apple.com/auth/keys".into(),
             public_url,
             client_id: need("DONE_GOOGLE_CLIENT_ID"),
             client_secret: need("DONE_GOOGLE_CLIENT_SECRET"),
@@ -486,4 +507,126 @@ pub async fn dev(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Que
     let session = Session { sub: sub.into(), email: email.into(), name: name.into(), picture: String::new(), exp: now() + THIRTY_DAYS };
     let value = serde_json::to_string(&session).expect("plain text fields");
     (jar.add(cookie(SESSION, value, &cloud.config, THIRTY_DAYS)), Redirect::to("/")).into_response()
+}
+
+/// What an app is handed when it signs in: the token it sends from then on,
+/// and the account, the same as `exchange` answers.
+fn app_session(key: &Key, session: &Session) -> Response {
+    let account = serde_json::json!({ "id": session.sub, "email": session.email, "name": session.name, "picture": session.picture });
+    let token = seal(key, serde_json::to_string(session).expect("plain text fields"));
+    Json(serde_json::json!({ "token": token, "account": account })).into_response()
+}
+
+fn not_signed_in(message: &str) -> Response {
+    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": message }))).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct AppleSignIn {
+    identity_token: String,
+    /// The person's name as the device gave it. Apple hands it over on the
+    /// first sign-in only, and never puts it in the token.
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct AppleClaims {
+    sub: String,
+    #[serde(default)]
+    email: String,
+}
+
+#[derive(Deserialize)]
+struct AppleKeys {
+    keys: Vec<AppleKey>,
+}
+
+#[derive(Deserialize)]
+struct AppleKey {
+    kid: String,
+    n: String,
+    e: String,
+}
+
+/// The id an Apple account is kept under. Apple's ids have dots in them and
+/// ids become file names (letters and digits only), so it is a hash; the
+/// prefix keeps it apart from Google's ids, which are digits.
+pub(crate) fn apple_id(sub: &str) -> String {
+    let hex: String = Sha256::digest(sub.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("apple{}", &hex[..40])
+}
+
+/// The iPhone app signed in with Apple on the device and sends the token
+/// Apple gave it. Unlike Google's, this token reaches the server through the
+/// app, not straight from Apple, so its signature is checked against the keys
+/// Apple publishes, along with who made it, for which app, and until when.
+pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Response {
+    let config = &cloud.config;
+    let refused = |why: &str| {
+        eprintln!("apple sign-in refused: {why}");
+        not_signed_in("Signing in with Apple did not work. Try again.")
+    };
+    let Ok(header) = jsonwebtoken::decode_header(&q.identity_token) else {
+        return refused("not a token");
+    };
+    let keys: AppleKeys = match cloud.http.get(&config.apple_keys_url).send().await.and_then(|r| r.error_for_status()) {
+        Ok(response) => match response.json().await {
+            Ok(keys) => keys,
+            Err(_) => return refused("Apple's keys could not be read"),
+        },
+        Err(e) => return refused(&format!("Apple's keys could not be fetched: {e}")),
+    };
+    let Some(key) = keys.keys.iter().find(|k| Some(&k.kid) == header.kid.as_ref()) else {
+        return refused("signed with a key Apple does not list");
+    };
+    let Ok(decoding) = jsonwebtoken::DecodingKey::from_rsa_components(&key.n, &key.e) else {
+        return refused("Apple's key could not be used");
+    };
+    let mut rules = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+    rules.set_issuer(&["https://appleid.apple.com"]);
+    rules.set_audience(&[config.apple_audience.as_str()]);
+    let claims = match jsonwebtoken::decode::<AppleClaims>(&q.identity_token, &decoding, &rules) {
+        Ok(data) => data.claims,
+        Err(e) => return refused(&format!("the token does not hold: {e}")),
+    };
+    if claims.sub.is_empty() {
+        return refused("the token names nobody");
+    }
+    let id = apple_id(&claims.sub);
+    let mut name = q.name.trim().to_string();
+    // Only the first sign-in comes with a name. Signing in again must not
+    // turn a named account into a nameless one.
+    if name.is_empty() {
+        name = cloud.db.name_of(&id).await.ok().flatten().unwrap_or_default();
+    }
+    let session = Session { sub: id, email: claims.email, name, picture: String::new(), exp: now() + THIRTY_DAYS };
+    app_session(&config.key, &session)
+}
+
+#[derive(Deserialize)]
+pub struct ReviewSignIn {
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: String,
+}
+
+/// The App Review account, with the username and password given to Apple
+/// with the submission. Off (not found) unless the server has a password.
+pub async fn review(State(cloud): State<Cloud>, jar: SignedCookieJar, Json(q): Json<ReviewSignIn>) -> Response {
+    let config = &cloud.config;
+    let Some(password) = &config.review_password else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    // Compared as hashes, so how long the comparison takes says nothing about
+    // how much of the password was right.
+    let right = Sha256::digest(password.as_bytes()) == Sha256::digest(q.password.trim().as_bytes());
+    if q.username.trim() != "review" || !right {
+        return not_signed_in("That username and password do not match.");
+    }
+    let session = Session { sub: "review".into(), email: "review@thedone.app".into(), name: "App Review".into(), picture: String::new(), exp: now() + THIRTY_DAYS };
+    // The cookie too, so the same login works on the web app.
+    let value = serde_json::to_string(&session).expect("plain text fields");
+    (jar.add(cookie(SESSION, value, config, THIRTY_DAYS)), app_session(&config.key, &session)).into_response()
 }

@@ -776,6 +776,12 @@ impl Db {
         Ok(db)
     }
 
+    /// The name an account is kept under, if it is known.
+    pub async fn name_of(&self, id: &str) -> Result<Option<String>, Fail> {
+        let client = self.pool.get().await?;
+        Ok(client.query_opt("SELECT name FROM account WHERE id = $1", &[&id]).await?.map(|r| r.get::<_, String>(0)).filter(|n| !n.is_empty()))
+    }
+
     /// The person, written down (or brought up to date) and with their own
     /// space. Called with what their sign-in says on every request.
     pub async fn me(&self, id: &str, email: &str, name: &str, picture: &str) -> Result<Me, Fail> {
