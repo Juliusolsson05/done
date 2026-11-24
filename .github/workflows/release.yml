@@ -81,9 +81,16 @@ jobs:
         env:
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
-          # For people: a zip of the app. For installed apps: the signed
+          # For people: a disk image with the app beside a shortcut to
+          # Applications (drag one onto the other), always named Done.dmg so
+          # .../releases/latest/download/Done.dmg is the newest (Settings links
+          # to it), and a zip of the app. For installed apps: the signed
           # archive, and latest.json telling them which version it is.
           ditto -c -k --keepParent done.app done-mac-arm64.zip
+          staging="$(mktemp -d)"
+          ditto done.app "$staging/done.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname done -srcfolder "$staging" -fs HFS+ -format UDZO -ov Done.dmg
           jq -n \
             --arg version "$VERSION" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -92,4 +99,4 @@ jobs:
             '{version: $version, pub_date: $date, platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' \
             > latest.json
           gh release create "v$VERSION" --title "done $VERSION" --generate-notes \
-            done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig latest.json
+            Done.dmg done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig latest.json

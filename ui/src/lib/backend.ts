@@ -33,6 +33,10 @@ const tauri = window.__TAURI__
 
 export const isDesktop = tauri !== undefined
 
+// The newest Mac app as a disk image: every release publishes Done.dmg under
+// that name (.github/workflows/release.yml), so this always means the newest.
+export const MAC_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/latest/download/Done.dmg'
+
 // An app that has signed in to a hosted account. Looked at once, when the
 // window loads: signing in or out reloads the window, so it cannot go stale.
 const hosted = tauri ? cloudSession() : null
