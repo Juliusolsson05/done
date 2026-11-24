@@ -105,12 +105,12 @@ export function projectSpan(text: string, projects: Project[]): { start: number;
   return null
 }
 
-// Where in the line the priority was written ("p1" to "p4"), for marking it
+// Where in the line the priority was written ("p0" to "p4"), for marking it
 // in the field as the date and the project are (Julius, 24 Nov: "p1 is blue
 // like other references"). The first one only, as parseQuickAdd takes only
 // the first; one inside the date phrase is not a priority.
 export function prioritySpan(text: string, date?: { start: number; end: number } | null): { start: number; end: number } | null {
-  for (const m of text.matchAll(/(?<=^|\s)p[1-4](?=\s|$)/gi)) {
+  for (const m of text.matchAll(/(?<=^|\s)p[0-4](?=\s|$)/gi)) {
     if (date && m.index >= date.start && m.index < date.end) continue
     return { start: m.index, end: m.index + m[0].length }
   }
@@ -163,7 +163,7 @@ export function parseQuickAdd(text: string, projects: Project[], today: Day, dis
       if (!assignees.includes(person.id)) assignees.push(person.id)
       continue
     }
-    const p: RegExpExecArray | null = priority === null ? /^p([1-4])$/.exec(w) : null
+    const p: RegExpExecArray | null = priority === null ? /^p([0-4])$/.exec(w) : null
     if (p) {
       priority = Number(p[1])
       continue

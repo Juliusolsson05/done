@@ -35,6 +35,8 @@ export function useFinish(id: number): [leaving: boolean, finish: () => void] {
 }
 
 const CHECK_TONE: Record<number, string> = {
+  // P0 is filled more strongly than P1 so it stands out at a glance (#75).
+  0: 'border-priority-0 border-2 bg-priority-0/20',
   1: 'border-priority-1 bg-priority-1/10',
   2: 'border-priority-2 bg-priority-2/10',
   3: 'border-priority-3 bg-priority-3/10',

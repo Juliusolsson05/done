@@ -11,7 +11,7 @@ export type When = 'any' | 'late' | 'today' | 'week' | 'fortnight' | 'none'
 export interface ViewFilter {
   // Chosen projects; null is the Inbox. Empty: every project.
   projects: (number | null)[]
-  // Chosen priorities, 1 to 4 (4 is none). Empty: every priority.
+  // Chosen priorities, 0 to 4 (0 is P0, 4 is none). Empty: every priority.
   priorities: number[]
   when: When
   // Every word must appear in the title or the notes, case ignored.
@@ -31,7 +31,7 @@ export const WHEN_NAMES: Record<When, string> = {
   none: 'No date',
 }
 
-export const PRIORITY_SHORT: Record<number, string> = { 1: 'P1', 2: 'P2', 3: 'P3', 4: 'No priority' }
+export const PRIORITY_SHORT: Record<number, string> = { 0: 'P0', 1: 'P1', 2: 'P2', 3: 'P3', 4: 'No priority' }
 
 export const isFiltering = (filter: ViewFilter): boolean =>
   filter.projects.length > 0 || filter.priorities.length > 0 || filter.when !== 'any' || filter.words.trim() !== '' || filter.people.length > 0

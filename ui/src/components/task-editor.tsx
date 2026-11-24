@@ -75,7 +75,7 @@ function EditorForm({ task }: { task: Task }) {
           // Pressing the chosen one again would leave no priority at all.
           onValueChange={(value) => value && setPriority(Number(value))}
         >
-          {[1, 2, 3, 4].map((p) => (
+          {[0, 1, 2, 3, 4].map((p) => (
             <ToggleGroupItem key={p} value={String(p)} title={PRIORITY_NAME[p]}>
               <PriorityDot priority={p} />
               {p < 4 ? p : 'None'}
@@ -249,7 +249,7 @@ function Sheet({ task }: { task: Task }) {
             <label className={row}>
               <span className="text-body">Priority</span>
               <select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className={cn(value, priority === 4 && 'text-tertiary')} dir="rtl">
-                {[4, 3, 2, 1].map((p) => (
+                {[4, 3, 2, 1, 0].map((p) => (
                   <option key={p} value={p}>
                     {p === 4 ? 'None' : PRIORITY_NAME[p]}
                   </option>

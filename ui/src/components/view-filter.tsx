@@ -137,7 +137,7 @@ function FilterChoices() {
           aria-label="Priority"
           className="flex-wrap"
         >
-          {[1, 2, 3, 4].map((p) => (
+          {[0, 1, 2, 3, 4].map((p) => (
             <ToggleGroupItem key={p} value={String(p)} className={CHOSEN}>
               {PRIORITY_SHORT[p]}
             </ToggleGroupItem>

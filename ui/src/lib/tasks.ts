@@ -56,7 +56,9 @@ export type View =
   | { kind: 'notes'; id?: number }
   | { kind: 'project'; id: number }
 
-export const PRIORITY_NAME: Record<number, string> = { 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }
+// 0 is P0: only for what must happen right away (#75). Lower is more urgent,
+// so it sorts first everywhere `byPriority` is used.
+export const PRIORITY_NAME: Record<number, string> = { 0: 'Priority 0', 1: 'Priority 1', 2: 'Priority 2', 3: 'Priority 3', 4: 'No priority' }
 
 export const byPriority = (a: Task, b: Task): number => a.priority - b.priority || a.id - b.id
 // Subtasks are left out here, and every list, count, board column, timeline
