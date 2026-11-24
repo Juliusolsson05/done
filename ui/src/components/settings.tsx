@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -185,6 +185,19 @@ export function Settings() {
         <AccountPane />
 
         <WorkspacesPane onOpen={setSpace} />
+
+        {/* The MCP server on the internet: works from any device, for apps
+            like Claude that add a server by its address. It signs in to the
+            same account, so it is shown wherever there is one. */}
+        {account && REMOTE_MCP && (
+          <Pane title="Connect Claude">
+            <p className="text-muted-foreground">
+              Let Claude read your tasks and notes and add, change and finish them, in the Claude app on any device. In Claude, open Settings →
+              Connectors → Add custom connector, paste this address, and sign in to done when it asks.
+            </p>
+            <Snippet label="Connector address" text={REMOTE_MCP} />
+          </Pane>
+        )}
 
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
