@@ -19,9 +19,9 @@ describe('widgetSnapshot', () => {
     ]
     const s = widgetSnapshot(tasks, today, null, null, 1_000_000)
     expect(s.tasks).toEqual([
-      { title: 'The goal', mark: 'goal' },
-      { title: 'Late thing', mark: 'overdue' },
-      { title: 'Today thing', mark: 'today' },
+      { id: 4, title: 'The goal', mark: 'goal' },
+      { id: 2, title: 'Late thing', mark: 'overdue' },
+      { id: 1, title: 'Today thing', mark: 'today' },
     ])
     expect(s.left).toBe(3)
     expect(s.at).toBe(1000)

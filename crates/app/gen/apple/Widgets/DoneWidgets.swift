@@ -27,9 +27,9 @@ struct TodayEntry: TimelineEntry {
 struct TodayProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodayEntry {
         TodayEntry(date: .now, snapshot: DoneSnapshot(left: 3, tasks: [
-            .init(title: "Write the plan", mark: "goal"),
-            .init(title: "Call the bank", mark: "today"),
-            .init(title: "Reply to Sam", mark: "overdue"),
+            .init(id: 1, title: "Write the plan", mark: "goal"),
+            .init(id: 2, title: "Call the bank", mark: "today"),
+            .init(id: 3, title: "Reply to Sam", mark: "overdue"),
         ], focus: nil, at: Date.now.timeIntervalSince1970))
     }
 
@@ -84,7 +84,7 @@ struct TodayView: View {
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
                 Text(snapshot.map { "\($0.left) left today" } ?? "done").font(.headline)
-                ForEach((snapshot?.tasks ?? []).prefix(2), id: \.self) { Text($0.title).lineLimit(1) }
+                ForEach((snapshot?.tasks ?? []).prefix(2), id: \.id) { Text($0.title).lineLimit(1) }
             }
         default:
             list
@@ -108,7 +108,7 @@ struct TodayView: View {
             }
             if let focus = snapshot?.focus { FocusLine(focus: focus) }
             if let snapshot, !snapshot.tasks.isEmpty {
-                ForEach(snapshot.tasks.prefix(rows), id: \.self) { task in
+                ForEach(snapshot.tasks.prefix(rows), id: \.id) { task in
                     HStack(spacing: 6) {
                         Circle()
                             .strokeBorder(task.mark == "overdue" ? Color.red : Color.secondary.opacity(0.6), lineWidth: 1.5)
@@ -177,10 +177,11 @@ struct FocusLiveActivity: Widget {
                 Image(systemName: "timer").foregroundStyle(.blue)
             } compactTrailing: {
                 // A fixed width: a countdown's text otherwise shrinks and
-                // grows the island every second as its digits change.
-                TimeLeft(state: context.state).frame(width: 46)
+                // grows the island every second as its digits change. Wider
+                // for an hour or more, so "1:04:59" is not cut.
+                TimeLeft(state: context.state).frame(width: context.state.atLeastAnHour ? 64 : 46)
             } minimal: {
-                TimeLeft(state: context.state, short: true)
+                TimeLeft(state: context.state)
             }
         }
     }
@@ -190,13 +191,12 @@ struct FocusLiveActivity: Widget {
 /// with the app suspended); still while paused.
 struct TimeLeft: View {
     let state: FocusAttributes.ContentState
-    var short = false
     var body: some View {
         Group {
             if let ends = state.endsAt, ends > .now {
                 Text(timerInterval: Date.now...ends, countsDown: true)
             } else if let left = state.remaining {
-                Text(Duration.seconds(left).formatted(.time(pattern: short ? .minuteSecond : .minuteSecond)))
+                Text(Duration.seconds(left).formatted(.time(pattern: left >= 3600 ? .hourMinuteSecond : .minuteSecond)))
             } else {
                 Text("0:00")
             }
@@ -204,6 +204,14 @@ struct TimeLeft: View {
         .monospacedDigit()
         .multilineTextAlignment(.trailing)
         .foregroundStyle(.blue)
+    }
+}
+
+extension FocusAttributes.ContentState {
+    /// Whether the time left needs hours: wider room in the compact island.
+    var atLeastAnHour: Bool {
+        if let endsAt { return endsAt.timeIntervalSinceNow >= 3600 }
+        return (remaining ?? 0) >= 3600
     }
 }
 

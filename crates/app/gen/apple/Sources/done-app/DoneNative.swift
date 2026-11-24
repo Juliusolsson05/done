@@ -24,11 +24,19 @@ public func doneFocus(_ json: UnsafePointer<CChar>?) {
     DispatchQueue.main.async { FocusActivity.apply(text) }
 }
 
-/// The widgets' data changed: `json` is a `DoneSnapshot`.
+/// The widgets' data changed: `json` is a `DoneSnapshot`, or `null` when
+/// there is nothing to show any more (signed out): the file is removed, so the
+/// widgets say "open done" instead of keeping another account's tasks.
 @_cdecl("done_widget_snapshot")
 public func doneWidgetSnapshot(_ json: UnsafePointer<CChar>) {
-    let data = Data(String(cString: json).utf8)
+    let text = String(cString: json)
+    let data = Data(text.utf8)
     DispatchQueue.main.async {
+        if text == "null" {
+            if let url = doneSnapshotURL() { try? FileManager.default.removeItem(at: url) }
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
         // Checked before it is stored: a snapshot the extension could not
         // decode would leave every widget blank until the next change.
         guard (try? JSONDecoder().decode(DoneSnapshot.self, from: data)) != nil,
@@ -64,10 +72,16 @@ enum FocusActivity {
         // never left behind by itself.
         let stale = state.endsAt.map { $0.addingTimeInterval(60) }
         let content = ActivityContent(state: state, staleDate: stale)
-        if let running = Activity<FocusAttributes>.activities.first {
+        // Only a live activity is updated: `activities` also lists ones iOS has
+        // ended (after its 8-hour limit, say) that still sit on the Lock
+        // Screen, and updating one of those does nothing, so every later
+        // focus would go unseen until the app restarted (review of #74).
+        let all = Activity<FocusAttributes>.activities
+        if let running = all.first(where: { $0.activityState == .active || $0.activityState == .stale }) {
             Task { await running.update(content) }
             return
         }
+        for ended in all { Task { await ended.end(nil, dismissalPolicy: .immediate) } }
         // Not allowed (the user switched Live Activities off for done): the
         // in-app timer still runs; nothing to report.
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }

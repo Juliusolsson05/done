@@ -27,6 +27,8 @@ func doneSnapshotURL() -> URL? {
 /// What the interface sends (ui/src/lib/widget-snapshot.ts), as stored.
 struct DoneSnapshot: Codable {
     struct Task: Codable, Hashable {
+        /// The task's id, so two tasks with the same title are two rows.
+        let id: Int
         let title: String
         /// "overdue", "today" or "goal": how the row is marked.
         let mark: String

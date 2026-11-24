@@ -35,6 +35,9 @@ describe('insetsFor', () => {
     expect(insetsFor([62, 0, 34, 0], phone(402, 874))).toEqual([62, 0, 34, 0])
     expect(insetsFor([0, 62, 21, 62], phone(874, 402))).toEqual([0, 62, 21, 62])
   })
+  it('leaves an iPhone without a home indicator alone (iPhone SE)', () => {
+    expect(insetsFor([20, 0, 0, 0], phone(667, 375))).toEqual([20, 0, 0, 0])
+  })
   it('leaves an iPad alone in landscape', () => {
     expect(insetsFor([24, 0, 20, 0], { width: 1180, height: 820, iPhone: false })).toEqual([24, 0, 20, 0])
   })

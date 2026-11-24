@@ -44,7 +44,10 @@ export function insetsFor(
   if (!reported || reported.length !== 4) return reported ? [...reported] : null
   const [top, right, bottom, left] = reported
   const sideways = view.width > view.height
-  if (view.iPhone && sideways && right === 0 && left === 0 && top > 0) return [0, top, Math.min(bottom, LANDSCAPE_BOTTOM), top]
+  // `bottom > 0`: only an iPhone with a home indicator has an island or notch
+  // strip to move; an iPhone SE reports [20, 0, 0, 0] (the status bar) and has
+  // no side insets in landscape (review of #74).
+  if (view.iPhone && sideways && right === 0 && left === 0 && top > 0 && bottom > 0) return [0, top, Math.min(bottom, LANDSCAPE_BOTTOM), top]
   return [top, right, bottom, left]
 }
 

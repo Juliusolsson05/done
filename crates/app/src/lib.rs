@@ -49,6 +49,7 @@ struct Session {
     reminding: bool,
     /// What is being worked on, for the Dynamic Island on a phone.
     #[serde(default)]
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     title: Option<String>,
     /// Set once the end has been announced, so it is announced only once.
     #[serde(skip)]

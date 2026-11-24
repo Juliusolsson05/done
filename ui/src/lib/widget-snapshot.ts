@@ -14,7 +14,7 @@ import type { Day } from '@/lib/days'
 
 export interface WidgetSnapshot {
   left: number
-  tasks: { title: string; mark: 'goal' | 'overdue' | 'today' }[]
+  tasks: { id: number; title: string; mark: 'goal' | 'overdue' | 'today' }[]
   focus: { title: string; endsAt: number | null; remaining: number | null } | null
   at: number
 }
@@ -33,9 +33,9 @@ export function widgetSnapshot(
   // As Today draws it: the goal on top, then overdue, then today.
   const goal = goalTask(tasks, today, me)
   const listed = sections({ kind: 'today' }, tasks, today, keep).flatMap((s) =>
-    s.tasks.map((t) => ({ title: t.title, mark: (s.late ? 'overdue' : 'today') as 'overdue' | 'today' })),
+    s.tasks.map((t) => ({ id: t.id, title: t.title, mark: (s.late ? 'overdue' : 'today') as 'overdue' | 'today' })),
   )
-  const rows = [...(goal && !goal.done ? [{ title: goal.title, mark: 'goal' as const }] : []), ...listed]
+  const rows = [...(goal && !goal.done ? [{ id: goal.id, title: goal.title, mark: 'goal' as const }] : []), ...listed]
   return {
     left: rows.length,
     tasks: rows.slice(0, ROWS),

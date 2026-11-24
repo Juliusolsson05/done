@@ -160,3 +160,16 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
       - sdk: ActivityKit.framework
+    # The extension's version must equal the app's, or Xcode warns and App
+    # Store Connect refuses the upload (ITMS-90473). Tauri writes the app's
+    # version into done-app_iOS/Info.plist at each build, so the built
+    # extension's Info.plist is stamped from it here, before signing.
+    postBuildScripts:
+      - name: Use the app's version
+        basedOnDependencyAnalysis: false
+        script: |
+          app="$SRCROOT/done-app_iOS/Info.plist"
+          out="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          short=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app")
+          build=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$app")
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short" -c "Set :CFBundleVersion $build" "$out"
