@@ -44,6 +44,12 @@ export const isMacApp = isDesktop && !ios && typeof navigator !== 'undefined' &&
 // The window's safe area as the iPhone or iPad app reads it natively, in
 // points: [top, right, bottom, left]. Null anywhere else, or if the app could
 // not tell. See lib/safe-area.ts for why this exists alongside env().
+// Today for the Home and Lock Screen widgets (lib/widget-snapshot.ts); the app
+// stores it where the widget extension reads it. iPhone and iPad only.
+export const sendWidgetSnapshot = (snapshot: unknown): void => {
+  if (isIosApp) void tauri?.core.invoke('widget_snapshot', { snapshot })
+}
+
 export const nativeSafeArea = async (): Promise<[number, number, number, number] | null> =>
   isIosApp && tauri ? ((await tauri.core.invoke<[number, number, number, number] | null>('safe_area')) ?? null) : null
 
@@ -235,6 +241,8 @@ export interface MenuBarTimes {
   reminderAt: number | null
   // A reminder is showing: the menu bar rings and brings the window forward.
   reminding: boolean
+  // What is being worked on: the Dynamic Island shows it on a phone.
+  title?: string
 }
 export const showInMenuBar = (session: MenuBarTimes | null): void => {
   void tauri?.core.invoke('focus_set', { session })

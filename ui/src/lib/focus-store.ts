@@ -217,6 +217,8 @@ export const handOff = (): void =>
       remaining: session.remaining,
       reminderAt: nextReminderAt(session, Date.now()),
       reminding: session.reminding !== null,
+      // For the Dynamic Island on a phone (the Mac's menu bar shows only time).
+      title: session.title,
     },
   )
 

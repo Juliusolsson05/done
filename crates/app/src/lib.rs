@@ -47,6 +47,9 @@ struct Session {
     /// A reminder is showing in the window, which waits to be dismissed.
     #[serde(default)]
     reminding: bool,
+    /// What is being worked on, for the Dynamic Island on a phone.
+    #[serde(default)]
+    title: Option<String>,
     /// Set once the end has been announced, so it is announced only once.
     #[serde(skip)]
     rang: bool,
@@ -132,9 +135,50 @@ async fn safe_area() -> Option<[f64; 4]> {
     None
 }
 
+// The app's own Swift, linked into the same binary (gen/apple/Sources/done-app/
+// DoneNative.swift, `@_cdecl`): the Live Activity and the widgets' data.
+// WHY a C call and not a Tauri plugin: this crate is a static library linked
+// into that app, so the linker joins the two by name; the only contract is a
+// JSON string, copied by Swift before the call returns.
+#[cfg(target_os = "ios")]
+extern "C" {
+    fn done_focus(json: *const std::os::raw::c_char);
+    fn done_widget_snapshot(json: *const std::os::raw::c_char);
+}
+
+/// Hands a JSON value to one of the Swift functions above.
+#[cfg(target_os = "ios")]
+fn to_swift(call: unsafe extern "C" fn(*const std::os::raw::c_char), value: &serde_json::Value) {
+    if let Ok(text) = std::ffi::CString::new(value.to_string()) {
+        unsafe { call(text.as_ptr()) }
+    }
+}
+
 #[tauri::command]
 fn focus_set(focus: tauri::State<Focus>, session: Option<Session>) {
+    // On a phone the countdown lives in the Dynamic Island and on the Lock
+    // Screen (a Live Activity), told every time the window's session changes;
+    // the system counts it down by itself while the app is suspended.
+    #[cfg(target_os = "ios")]
+    to_swift(
+        done_focus,
+        &match &session {
+            Some(s) => serde_json::json!({ "title": s.title, "endsAt": s.ends_at, "remaining": s.remaining }),
+            None => serde_json::Value::Null,
+        },
+    );
     *focus.0.lock().unwrap() = session;
+}
+
+/// Today as the widgets show it (ui/src/lib/widget-snapshot.ts), stored where
+/// the widget extension can read it. Phones only; elsewhere there are no
+/// widgets and it is ignored.
+#[tauri::command]
+fn widget_snapshot(snapshot: serde_json::Value) {
+    #[cfg(target_os = "ios")]
+    to_swift(done_widget_snapshot, &snapshot);
+    #[cfg(not(target_os = "ios"))]
+    let _ = snapshot;
 }
 
 /// 24:59, or 1:04:59 from an hour up.
@@ -399,7 +443,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]
