@@ -1,7 +1,7 @@
 # Notes: write like Apple Notes on iPhone and iPad
 
 Branch `fix/mobile-notes-apple` · Worktree `../done-wt/mobile-notes-apple` · Base `origin/main` @ 946002b (2026-11-23)
-Status: building. Size: standard plan. Not pushed; the owner sees it before it merges.
+Status: built, typecheck and tests green; not yet seen on a device. Size: standard plan. Not pushed; the owner sees it before it merges.
 
 ## Outcome
 
@@ -38,7 +38,8 @@ layout.
    circle's tap (an ordinary transaction, so it syncs through Yjs and undoes with Cmd+Z).
 2. **Title** — the first line is always the title (28 px bold), whether or not it starts with `#`, as in
    Apple Notes. The date line ("23 November 2026 at 22:44", from the note's `updatedAt`) is a block widget
-   under it, so it moves with the text and is never part of it.
+   under it, so it moves with the text and is never part of it. An empty note shows only its placeholder
+   ("New note", with "Type @ to add a task." under it) and no date until something is typed.
 3. **Links** — a web link shows its text (brackets and address hidden off the cursor line); Cmd-click
    still opens it. Task mentions keep their existing atom widget (`mention-atoms.ts`) and are skipped by the
    preview so the two never overlap.
@@ -53,7 +54,9 @@ layout.
    note has ‹ back to its list and ⋯ (an action sheet: Folder, Project, Read/Edit, Delete). New note is a
    compose button (square-pen) bottom right, above the tab bar.
 7. **List rows** — title 17 px semibold, then date and the first line of the body in grey on one line,
-   hairlines between rows. Folder/project are left off the phone row (the row says what Apple's says).
+   hairlines between rows; under All notes or a search a third grey line names the folder and project,
+   as Apple Notes names the folder under All notes. Used on phones and on a wide screen showing the list
+   alone; the Mac's side-by-side list keeps its rows.
 8. **Read view** — kept; a mention card's description is clamped to 3 lines.
 9. **Wide screens** — the Notes page measures its own width: when list (256) + gap (24) + editor (420)
    do not fit, it shows the list or the note (with ‹ back), not both. Otherwise unchanged (Mac).
@@ -72,6 +75,16 @@ editor, pinned notes, swipe to delete, share sheet.
 3. Accessory bar + keyboard avoidance in `note-editor.tsx`.
 4. `notes.tsx`: phone nav bar, ⋯ sheet, compose button, Apple list rows, narrow wide-screen mode.
 5. Read view clamp in `task-mention.tsx`.
+
+## Built
+
+- `ui/src/lib/live-preview.ts` (+ tests): `previewRanges`, `taskToggle`, `toggleChecklist`, `toggleBullet`,
+  `cycleHeading`, `minimalChange`, `toggleBold`, `dateLine`, `notesLayout`, `keyboardInset`.
+- `ui/src/components/live-preview.ts`: ViewPlugin (line classes + replace widgets), date StateField, theme.
+- `ui/src/components/writing-bar.tsx`: the keyboard bar, `useVisualViewport`, `useCoarsePointer`.
+- `ui/src/components/notes-phone.tsx`: `NotesBar`, `MoreButton`, `ComposeButton`, `NoteSheet`.
+- `ui/src/lib/notes.ts` `snippetOf` (+ tests); `notes.tsx` phone screens, stacked wide mode, Apple rows.
+- `task-mention.tsx`: description `line-clamp-3` (+ render test).
 
 ## Verification
 
