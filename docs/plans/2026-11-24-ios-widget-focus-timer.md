@@ -73,3 +73,28 @@ deployment target iOS 16.1 (Live Activities); the app stays at 15.0 with availab
 
 Interactive widget buttons (App Intents), push updates for the Live Activity from the server,
 Android equivalents, App Store distribution profiles.
+
+## What building it found (24 Nov)
+
+- **The window itself reports portrait insets in landscape.** A readout in the app showed
+  `[62, 0, 34, 0]` from `window.safeAreaInsets` at 874×402 pt, and `env()` the same, while Safari
+  gets `[0, 62, 20, 62]`. So asking UIKit alone does not fix #70. The page turns the portrait
+  values for an iPhone laid out wider than tall (`insetsFor` in `ui/src/lib/safe-area.ts`), and
+  on iOS the native values win over `env()` (zeros included), which also removes the empty band
+  that `env()`'s top inset left at the top in landscape. Changed from the plan's `max()`.
+- **`done://` lived only in Info.plist.** Regenerating from `project.yml` dropped the URL scheme
+  that `tauri ios init` had written into Info.plist once, which would have stopped sign-in from
+  returning to the app. It is declared in `project.yml` now.
+- **The iOS cdylib.** The crate is also built as a cdylib (Tauri's template), linked without
+  the Swift code; `build.rs` leaves the two Swift symbols undefined there (`-Wl,-U`).
+- **Entitlements rewritten during the build.** Tauri's "Build Rust Code" step writes the
+  entitlements file (same content); `CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION` lets the build
+  go on.
+- **First Live Activity asks.** iOS shows "Allow Live Activities from done?" on the Lock Screen
+  the first time; until allowed, the Lock Screen card shows the time redacted.
+
+Seen on the iPhone 17 simulator: content clear of the Dynamic Island held sideways; the
+countdown in the Dynamic Island with the app in the background and on the Lock Screen; the
+Today widget in the gallery and on the Home Screen with the real snapshot (1 overdue task and
+the running focus). Not seen: the expanded Dynamic Island (a simulated long press did not open
+it), the activity ending when focus ends, a real device.
