@@ -20,11 +20,12 @@ import { FindBar } from '@/components/find-bar'
 import { SearchDialog } from '@/components/search'
 import { TimeSheet } from '@/components/time-sheet'
 import { Timeline } from '@/components/timeline'
+import { TimelineDesktop } from '@/components/timeline-desktop'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
 import { isDesktop, isIosApp, onMenuBarCommand, sendWidgetSnapshot, setWebviewZoom } from '@/lib/backend'
 import { widgetSnapshot } from '@/lib/widget-snapshot'
 import { addDays, dayOf, TODAY } from '@/lib/days'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsMobile, useLayout } from '@/hooks/use-mobile'
 import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
@@ -546,7 +547,7 @@ export default function App() {
                   )}
                 >
                   {view.kind === 'lists' && <ListsScreen />}
-                  {view.kind === 'timeline' && <Timeline />}
+                  {view.kind === 'timeline' && <TimelineView />}
                   {view.kind === 'board' && <Board />}
                   {view.kind === 'focus' && <FocusView />}
                   {view.kind === 'timesheet' && <TimeSheet />}
@@ -588,4 +589,10 @@ export default function App() {
       <Toaster theme="light" position={isMobile ? 'top-center' : 'bottom-center'} />
     </AppContext.Provider>
   )
+}
+
+// The Mac keeps the Timeline approved on 23 Nov; the iPhone and iPad get the
+// touch rebuild. Why two: docs/plans/2026-11-25-timeline-desktop-back.md.
+function TimelineView() {
+  return useLayout() === 'desktop' ? <TimelineDesktop /> : <Timeline />
 }
