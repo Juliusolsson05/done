@@ -218,7 +218,15 @@ export const canSignIn = tauri !== undefined && CLOUD_URL !== null && hosted ===
 // done's MCP server on the internet, for apps that connect by address
 // (Claude's custom connectors): the hosted server's /mcp. In a browser that
 // is this same site; in an app, the server it signs in to.
-export const REMOTE_MCP: string | null = tauri ? (CLOUD_URL ? `${CLOUD_URL}/mcp` : null) : `${location.origin}/mcp`
+// A test has no page and no location; it gets no address rather than a crash
+// on import (which broke CI and the release builds after #82).
+export const REMOTE_MCP: string | null = tauri
+  ? CLOUD_URL
+    ? `${CLOUD_URL}/mcp`
+    : null
+  : typeof location === 'undefined'
+    ? null
+    : `${location.origin}/mcp`
 export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url }))
 
 // Sign in with Apple: the iPhone and iPad app only, where the App Store asks
