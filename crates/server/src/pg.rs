@@ -2031,6 +2031,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_sprint_change_reaches_the_server_and_the_other_device_past_old_style_renames() {
+        let db = testing::db().await;
+        let (owner, _) = people(&db).await;
+        let (mac, phone) = (device(), device());
+        let sprint = |enabled, deadline: Option<&str>, completed| Some(done_core::Sprint { enabled, deadline: deadline.map(Into::into), completed });
+        let id = next(&mac);
+        change(&mac, |c| c.projects.push(Project { id, name: "Launch".into(), color: 3, space_id: None, sprint: None }));
+        round(&mac, &db, &owner).await;
+        round(&phone, &db, &owner).await;
+        for (step, s) in [
+            ("set", sprint(true, Some("2026-12-04"), false)),
+            ("change the deadline", sprint(true, Some("2026-12-11"), false)),
+            ("complete", sprint(true, Some("2026-12-11"), true)),
+            ("clear the deadline", sprint(true, None, true)),
+            ("turn off", sprint(false, None, false)),
+            ("turn on again", sprint(true, Some("2027-01-01"), false)),
+        ] {
+            let project = Project { sprint: s.clone(), ..mac.state(TODAY).unwrap().projects[0].clone() };
+            change(&mac, |c| c.projects.push(project));
+            round(&mac, &db, &owner).await;
+            assert_eq!(db.state(&owner, TODAY).await.unwrap().projects[0].sprint, s, "server after {step}");
+            round(&phone, &db, &owner).await;
+            assert_eq!(phone.state(TODAY).unwrap().projects[0].sprint, s, "phone after {step}");
+
+            // An older app renames it, as it sends a project: no sprint key.
+            let mut legacy = serde_json::to_value(Stamped { row: phone.state(TODAY).unwrap().projects[0].clone(), changed: now_ms() + 1_000 }).unwrap();
+            legacy["name"] = format!("Renamed after {step}").into();
+            legacy.as_object_mut().unwrap().remove("sprint");
+            let rows = Rows { projects: vec![serde_json::from_value(legacy).unwrap()], ..Default::default() };
+            db.exchange(&owner, &Outbox { rows, ..Default::default() }).await.unwrap();
+            assert_eq!(db.state(&owner, TODAY).await.unwrap().projects[0].sprint, s, "server after the rename past {step}");
+            round(&phone, &db, &owner).await;
+            round(&mac, &db, &owner).await;
+            for (who, d) in [("phone", &phone), ("mac", &mac)] {
+                let p = d.state(TODAY).unwrap().projects[0].clone();
+                assert_eq!((p.name.as_str(), &p.sprint), (format!("Renamed after {step}").as_str(), &s), "{who} after the rename past {step}");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn a_project_moved_into_a_workspace_reaches_the_other_member_whole() {
         let db = testing::db().await;
         let (julius, geart) = people(&db).await;

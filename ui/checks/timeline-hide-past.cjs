@@ -85,7 +85,18 @@ const read = (page) =>
     // The axis: the day drawn at the very left of the chart's header.
     const header = [...document.querySelectorAll('.sticky.top-0')].find((h) => h.closest('.overflow-auto'))
     const first = [...header.querySelectorAll('div')].find((d) => d.style.left === '0px' && /bottom-/.test(d.className))
-    return { titles, groups, bar: bar?.textContent ?? null, firstDate: first ? Number([...first.querySelectorAll('span')].pop().textContent) : null }
+    // The Website project's bar against its only open task's bar.
+    const edges = (e) => (e ? [e.getBoundingClientRect().left, e.getBoundingClientRect().right] : null)
+    const websiteSpan = edges(document.querySelector('[role="img"][aria-label^="Website spans "]'))
+    const websiteTask = edges(document.querySelector('[data-timeline-bar][data-task="3"]') ?? document.querySelector('[data-task="3"]'))
+    return {
+      titles,
+      groups,
+      bar: bar?.textContent ?? null,
+      firstDate: first ? Number([...first.querySelectorAll('span')].pop().textContent) : null,
+      websiteSpan,
+      websiteTask,
+    }
   })
 
 async function check() {
@@ -97,6 +108,7 @@ async function check() {
       const { name, ...options } = size
       const context = await browser.newContext(options)
       const syncs = []
+      let finishedReads = 0
       // Grouped by project, so every group's count can be read.
       await context.addInitScript(() => {
         if (!sessionStorage.getItem('seeded')) {
@@ -110,7 +122,10 @@ async function check() {
         const pathname = new URL(request.url()).pathname
         if (pathname === '/api/me') return route.fulfill({ json: { mode: 'local' } })
         if (pathname === '/api/state') return route.fulfill({ json: state })
-        if (pathname === '/api/finished') return route.fulfill({ json: history })
+        if (pathname === '/api/finished') {
+          finishedReads++
+          return route.fulfill({ json: history })
+        }
         if (pathname === '/api/sync') {
           syncs.push(request.postDataJSON())
           return route.fulfill({ json: { rev: 1 + syncs.length } })
@@ -125,7 +140,20 @@ async function check() {
         await page.locator('[data-timeline-completed="6"]').waitFor()
         await page.waitForTimeout(400)
       }
-      await ready()
+      await page.goto('http://done.test/timeline')
+      await page.locator('[data-task="3"]').first().waitFor()
+      const menu = page.getByRole('button', { name: 'More timeline options' })
+      const completed = page.getByRole('checkbox', { name: 'Show completed' })
+      await menu.click()
+      const defaultsToOff = !(await completed.isChecked())
+      expect(defaultsToOff, `${name}: Show completed should start off`)
+      expect((await page.locator('[data-timeline-completed]').count()) === 0, `${name}: no completed rows should show by default`)
+      expect(finishedReads === 0, `${name}: history should only be fetched after enabling it`)
+      if (shots) await page.screenshot({ path: path.join(shots, `${name}-completed-default.png`) })
+      if (defaultsToOff) await completed.check()
+      await page.keyboard.press('Escape')
+      await page.locator('[data-timeline-completed="6"]').waitFor()
+      await page.waitForTimeout(400)
       const off = await read(page)
       if (shots) await page.screenshot({ path: path.join(shots, `${name}-off.png`) })
       expect(off.titles.includes('Old landing page copy'), `${name}: with the option off the long-ago task should be on the chart`)
@@ -134,9 +162,15 @@ async function check() {
         `${name}: with the option off the Archive group should show`,
       )
       expect(off.bar === null, `${name}: with the option off there should be no hint under the header (${off.bar})`)
+      // A project's bar covers its open tasks' days and no more: Website's
+      // completed task is not counted, so its bar ends with task 3's.
+      expect(
+        off.websiteSpan && off.websiteTask && Math.abs(off.websiteSpan[0] - off.websiteTask[0]) <= 2 && Math.abs(off.websiteSpan[1] - off.websiteTask[1]) <= 2,
+        `${name}: the Website bar should match its task's bar within 2px (${off.websiteSpan}, ${off.websiteTask})`,
+      )
 
       // Turned on in the Timeline's menu.
-      await page.getByRole('button', { name: 'More timeline options' }).click()
+      await menu.click()
       const option = page.getByRole('checkbox', { name: 'Hide past tasks' })
       expect(!(await option.isChecked()), `${name}: Hide past tasks should start off`)
       await option.click()
@@ -174,6 +208,7 @@ async function check() {
       // Remembered on this device.
       await ready()
       const again = await read(page)
+      expect(again.titles.includes('Write the press kit'), `${name}: Show completed should stay on after reload`)
       expect(
         !again.titles.includes('Old landing page copy') && /Past hidden/.test(again.bar ?? ''),
         `${name}: the choice was not kept across a reload`,

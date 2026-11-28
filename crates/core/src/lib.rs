@@ -802,11 +802,14 @@ impl Store {
         // same change.
         for p in &change.projects {
             // A project's space is said once, when it is made; it moves only
-            // when the server moves it.
+            // when the server moves it. A changed sprint is a local edit. A
+            // rename carrying the same cached value still needs confirmation.
             tx.execute(
                 "INSERT INTO project (id, name, color, space_id, sprint) VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color,
-                   sprint = coalesce(excluded.sprint, project.sprint)",
+                   sprint = coalesce(excluded.sprint, project.sprint),
+                   sprint_needs_refresh = CASE WHEN excluded.sprint IS NOT NULL AND excluded.sprint IS NOT project.sprint
+                     THEN 0 ELSE project.sprint_needs_refresh END",
                 params![p.id, p.name.trim(), p.color, p.space_id, p.sprint.as_ref().map(Sprint::stored)],
             )?;
         }

@@ -13,11 +13,11 @@ const COMPLETED_KEY = 'done.timeline.completed'
 // Off unless chosen: tasks wholly in the past are hidden (lib/timeline-past).
 const PAST_KEY = 'done.timeline.past'
 
-function savedPreference() {
+function savedCompleted() {
   try {
-    return localStorage.getItem(COMPLETED_KEY) !== 'hidden'
+    return localStorage.getItem(COMPLETED_KEY) === 'shown'
   } catch {
-    return true
+    return false
   }
 }
 function savedPast() {
@@ -30,7 +30,7 @@ function savedPast() {
 
 export function useTimelineCompletion() {
   const { data, me, scope, team } = useApp()
-  const [showCompleted, setShow] = useState(savedPreference)
+  const [showCompleted, setShow] = useState(savedCompleted)
   const [hidePast, setHide] = useState(savedPast)
   const [history, setHistory] = useState<{ account: string | null; tasks: Task[] }>()
   useEffect(() => {
