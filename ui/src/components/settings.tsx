@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -141,9 +141,15 @@ function AccountPane() {
             : account.picture
               ? 'Signed in with Google.'
               : 'Signed in with Google. Your Google account has no picture, so your initials stand in for it; add one there and sign in again to use it here.'}
+        {needsAppleVerification && ' Verify this account once so done can sign you out when you disconnect it from Apple.'}
         {isDesktop && ' Your tasks stay on this device too and sync every few seconds when there is a connection. Signing out keeps them here.'}
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        {needsAppleVerification && (
+          <Button variant="outline" size="sm" onClick={() => void signInWithApple().catch((e: Error) => say(e.message))}>
+            Verify Apple Account
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={() => void signOut()}>
           Sign out
         </Button>

@@ -9,6 +9,7 @@ export const CLOUD_URL: string | null = ((import.meta.env?.VITE_DONE_CLOUD_URL a
 export interface CloudSession {
   token: string
   account: Account
+  appleUser?: string
 }
 
 const SESSION = 'done-cloud-session'
@@ -49,6 +50,24 @@ export const forgetCloudSession = () => write(SESSION, null)
 export async function challengeOf(secret: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+// The server identifies Apple accounts by the first 40 hex digits of the
+// subject's SHA-256. Keep the native subject only with that verified session.
+export async function appleSession(session: CloudSession, user: string): Promise<CloudSession> {
+  if (!user || session.account.id !== 'apple' + (await challengeOf(user)).slice(0, 40)) {
+    throw new Error('Choose the Apple Account you used to sign in to done.')
+  }
+  return { ...session, appleUser: user }
+}
+
+export const sameAppleSession = (current: CloudSession | null, watched: CloudSession): boolean =>
+  Boolean(watched.appleUser && current?.token === watched.token && current.appleUser === watched.appleUser && current.account.id === watched.account.id)
+
+export async function rememberAppleUser(expected: CloudSession, user: string): Promise<void> {
+  const bound = await appleSession(expected, user)
+  if (cloudSession()?.token !== expected.token) throw new Error('Your account changed. Try again.')
+  write(SESSION, JSON.stringify(bound))
 }
 
 // The code in a link the browser handed back, or null for any other link.
@@ -95,7 +114,7 @@ export async function finishSignIn(link: string): Promise<boolean> {
 // browser: Apple's (the iPhone app hands over the token Apple gave it) and
 // the App Review login. Both answer `{token, account}`, like `/auth/exchange`.
 // Throws with the server's own words when it says no.
-async function signInWith(path: string, body: unknown): Promise<void> {
+async function signInWith(path: string, body: unknown, appleUser?: string): Promise<void> {
   if (!CLOUD_URL) throw new Error('This app has no account to sign in to.')
   const response = await fetch(`${CLOUD_URL}${path}`, {
     method: 'POST',
@@ -104,9 +123,10 @@ async function signInWith(path: string, body: unknown): Promise<void> {
   })
   const data = (await response.json().catch(() => ({}))) as { error?: string }
   if (!response.ok) throw new Error(data.error || 'Signing in did not work. Try again.')
-  write(SESSION, JSON.stringify(data))
+  const session = data as CloudSession
+  write(SESSION, JSON.stringify(appleUser ? await appleSession(session, appleUser) : session))
   if (cloudSession() === null) throw new Error('Signing in did not work. Try again.')
 }
 
-export const signInWithAppleToken = (token: string, name: string) => signInWith('/auth/apple', { identity_token: token, name })
+export const signInWithAppleToken = (token: string, name: string, user: string) => signInWith('/auth/apple', { identity_token: token, name }, user)
 export const signInWithPassword = (username: string, password: string) => signInWith('/auth/review', { username, password })

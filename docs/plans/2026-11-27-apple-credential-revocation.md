@@ -1,0 +1,7 @@
+# Apple credential revocation
+
+Issue #94. Apple's TN3194 describes manual revocation when the app has no Apple access or refresh token. AuthenticationServices sends a generic revocation notification. Query the active Apple credential on that notification, on foreground and at startup. Hold the provider subject alongside its own verified cloud session; guard asynchronous answers against account changes. An existing session from an earlier app can bind its subject by verifying the same Apple account once. End only that native session and keep local tasks. Validate the Swift APIs against the iOS SDK and exercise stale and mismatched session responses in tests.
+
+Apple's SDK exposes a generic revoked notification and per-user asynchronous lookup. The app registers for the notification and UIApplication.didBecomeActiveNotification and checks immediately on startup. Each registration has its own ID, and the UI compares the active session again before clearing it. Lookup errors alone do not disconnect the user. The prior app kept only a one-way hash; existing Apple users can verify the same account once in Settings.
+
+Verified both Swift files typecheck against the iPhoneOS SDK with deployment target iOS 15. The UI typecheck, production build, subject binding checks and simulated end-to-end bridge notification passed. No developer or user credentials were revoked during testing. The release operator verifies the resulting signed binary.

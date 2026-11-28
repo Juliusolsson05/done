@@ -154,11 +154,48 @@ final class AppleSignIn: NSObject, ASAuthorizationControllerDelegate, ASAuthoriz
         }
         // Apple gives the name on the first sign-in only; the server keeps it.
         let name = [credential.fullName?.givenName, credential.fullName?.familyName].compactMap { $0 }.joined(separator: " ")
-        finish(["token": token, "name": name])
+        finish(["token": token, "name": name, "user": credential.user])
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         let cancelled = (error as? ASAuthorizationError)?.code == .canceled
         finish(["error": cancelled ? "cancelled" : error.localizedDescription])
+    }
+}
+
+/// Apple's notification identifies no user. Check the account this window is
+/// signed in to, including when a revocation happened while the app was closed.
+private final class AppleCredentialMonitor: NSObject {
+    static let shared = AppleCredentialMonitor()
+    var watch: (user: String, id: String, ended: DoneAnswer)?
+
+    override init() {
+        super.init()
+        for name in [ASAuthorizationAppleIDProvider.credentialRevokedNotification, UIApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(check), name: name, object: nil)
+        }
+    }
+
+    @objc func check() {
+        guard let current = watch else { return }
+        ASAuthorizationAppleIDProvider().getCredentialState(forUserID: current.user) { state, error in
+            // A failed lookup (including a network error) does not prove revocation.
+            guard state == .revoked || (state == .notFound && error == nil) else { return }
+            DispatchQueue.main.async {
+                guard self.watch?.id == current.id else { return }
+                current.id.withCString { current.ended($0) }
+            }
+        }
+    }
+}
+
+@_cdecl("done_watch_apple_user")
+public func doneWatchAppleUser(_ user: UnsafePointer<CChar>, _ id: UnsafePointer<CChar>, _ ended: DoneAnswer) {
+    let subject = String(cString: user)
+    let watchID = String(cString: id)
+    DispatchQueue.main.async {
+        let monitor = AppleCredentialMonitor.shared
+        monitor.watch = subject.isEmpty ? nil : (subject, watchID, ended)
+        monitor.check()
     }
 }
