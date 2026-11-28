@@ -236,7 +236,12 @@ export interface TimelineGroup {
 
 const firstDay = (t: Task): string => t.start ?? t.due ?? ''
 
-export function timelineGroups(projects: Project[], all: Task[], order: TimelineOrder = 'project'): TimelineGroup[] {
+export function timelineGroups(
+  projects: Project[],
+  all: Task[],
+  order: TimelineOrder = 'project',
+  includeProjects?: ReadonlySet<number>,
+): TimelineGroup[] {
   const open = openTasks(all)
   const groups: TimelineGroup[] =
     order === 'project'
@@ -261,7 +266,7 @@ export function timelineGroups(projects: Project[], all: Task[], order: Timeline
             { key: 'undated', name: 'No date', tasks: open.filter((t) => !t.due).sort(byProject) },
           ]
         })()
-  return groups.filter((g) => g.tasks.length > 0)
+  return groups.filter((g) => g.tasks.length > 0 || (g.id != null && includeProjects?.has(g.id)))
 }
 
 // ---------- Changes ----------

@@ -15,7 +15,7 @@ import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
-import { ProjectTimelineRows } from '@/components/timeline-project-rows'
+import { ProjectTimelineMarks, ProjectTimelineRows, SprintCaption } from '@/components/timeline-project-rows'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { projectStyle, useApp } from '@/lib/app-context'
@@ -147,10 +147,11 @@ export function Timeline() {
 
   const filter = useTaskFilter()
   const visible = filter.apply(inScope.tasks)
-  const groups = timelineGroups(inScope.projects, visible, 'project')
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
   const projectRows = projectTimelines(inScope.projects, visible, filter.filter)
+  const projectSpans = new Map(projectRows.map((row) => [row.project.id, row]))
+  const groups = timelineGroups(inScope.projects, visible, 'project', new Set(projectSpans.keys()))
   const timelineDates = [...dated, ...timelineProjectDates(projectRows, TODAY)]
   const undated = open.filter((t) => !t.due && !t.start)
   const shown = open.length
@@ -544,13 +545,14 @@ export function Timeline() {
     : groups.map((group) => {
         const key = String(group.id ?? 'inbox')
         const items = placedAll(group.tasks)
-        // A project with nothing dated is only in No date.
-        if (!items.length) return null
+        const projectSpan = group.id != null ? projectSpans.get(group.id) : undefined
+        if (!items.length && !projectSpan) return null
         const isFolded = folded.has(key)
         return (
           <div key={key} className="border-b border-border/60">
             {/* The project name and how many of its tasks are on the chart. */}
-            <div className="relative h-12" style={{ width }} {...dropTarget}>
+            <div className={cn('relative', projectSpan ? 'h-14' : 'h-12')} style={{ width }} {...dropTarget}>
+              {projectSpan && <ProjectTimelineMarks row={projectSpan} start={span.start} dayWidth={px} width={width} />}
               <div className="pointer-events-none absolute inset-0">
                 <button
                   type="button"
@@ -561,7 +563,10 @@ export function Timeline() {
                 >
                   <ChevronRightIcon className={cn('size-4 shrink-0 text-faint transition-transform', !isFolded && 'rotate-90')} />
                   {group.id !== undefined && <ProjectDot id={group.id} className="shrink-0" />}
-                  <span className="min-w-0 truncate">{group.name}</span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{group.name}</span>
+                    {projectSpan && <SprintCaption row={projectSpan} />}
+                  </span>
                   <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{items.length}</span>
                 </button>
               </div>
@@ -722,7 +727,7 @@ export function Timeline() {
               {header}
               <div className="relative">
                 {columns}
-                <ProjectTimelineRows rows={projectRows} start={span.start} dayWidth={px} width={width} />
+                {!byProject && <ProjectTimelineRows rows={projectRows} start={span.start} dayWidth={px} width={width} />}
                 {rows}
               </div>
               {undatedSection}

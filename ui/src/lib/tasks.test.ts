@@ -134,6 +134,12 @@ describe('timelineGroups', () => {
     expect(ids(groups[0].tasks)).toEqual([3, 2, 1])
   })
 
+  it('keeps the header of a deadline-only sprint in project order', () => {
+    const projects = [{ id: 8, name: 'Sprint' }, { id: 9, name: 'Home' }, { id: 10, name: 'Empty' }]
+    const groups = timelineGroups(projects, [task(1, { projectId: 9 })], 'project', new Set([8]))
+    expect(groups.map((group) => [group.id, group.tasks.length])).toEqual([[8, 0], [9, 1]])
+  })
+
   it('by date, lists every project in one list by day, a tie by project then priority, undated last', () => {
     const projects = [
       { id: 8, name: 'Hop' },

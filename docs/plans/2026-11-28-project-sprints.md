@@ -18,3 +18,5 @@ Project maintenance actions use the desktop More menu and the phone's existing a
 Timeline shows project-coloured spans for scheduled work in both layouts. A span covers the earliest and latest visible scheduled task dates and includes the sprint deadline when set. A sprint with a deadline alone shows a marker on its deadline. Labels connect the chart back to the project. Completed sprints stay folded in project navigation and remain visible on Timeline for historical context.
 
 Verified the More menu hides Rename and Delete until opened, focuses the rename field, and retains the delete confirmation. Desktop and phone browser checks confirmed always-visible project ranges, sprint deadlines and links from the Timeline to the project. The final frontend suite passed all 824 tests.
+
+With grouping on, each span and deadline sit in that project's collapsible header. The separate overview appears in the ungrouped view. Desktop and phone browser checks confirmed one span per project, a header for a sprint with only a deadline, and intact markers when a group is collapsed. All 825 frontend tests passed.
