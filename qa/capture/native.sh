@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 mkdir -p qa/output
-app=$(find crates/app/gen/apple/build "$HOME/Library/Developer/Xcode/DerivedData" -type d -name done.app -print 2>/dev/null | head -1)
+app=$(find crates/app/gen/apple/build -type d -name done.app -print -quit)
+if [[ -z "$app" ]]; then app=$(find "$HOME/Library/Developer/Xcode/DerivedData" -type d -name done.app -print -quit); fi
 test -n "$app"
+ditto -c -k --keepParent "$app" qa/output/done-simulator.zip
 /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist"
 for family in iPhone iPad; do
   device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; f=sys.argv[1]; ds=[d for k,ds in sorted(json.load(sys.stdin)["devices"].items(),reverse=True) if "iOS" in k for d in ds if d["isAvailable"] and (("Pro Max" in d["name"]) if f=="iPhone" else ("iPad Pro 13-inch" in d["name"]))]; print(ds[0]["udid"])' "$family")
