@@ -38,8 +38,8 @@ import { forMe, shownFor, validScope } from '@/lib/team'
 import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
-import { setFilterOpen } from '@/lib/view-filter-store'
 import { offered } from '@/lib/view-filter'
+import { setFilterOpen } from '@/lib/view-filter-store'
 import { back, opened } from '@/lib/view-history'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }

@@ -159,3 +159,10 @@ As built, per view (person is also fixed wherever the scope has nobody to choose
 - A browser run on a faked API with a workspace, at 1440x900 (mouse and keys), 820x1180 and 390x844 (touch), 147 checks: every task view has the Filter and no bar with no filter; F opens it with the caret in the words; Escape closes it and focus goes back to the button; words + Wedding + P2 set on Today show the right chips and "x of y" on all eight views, "1 hidden here" on Inbox and the project; "No tasks match the filter" on Assigned to me; quick add on Today (Wedding, P2, today) and on Inbox (P2, no project) stays on the page; reload keeps the filter, a new browser context starts with none; Clear and "Clear the filter" clear it; a Hop launch filter on Board is dropped when switching to one's own space; panel rows and choices are 44 px on touch, the phone sheet keeps 16 px margins; localStorage holds no filter.
 - Board and Timeline with no filter: screenshots byte-identical to main at all three sizes.
 - Not verified: arrow keys do not move between the priority or when choices in the panel (Tab does); the same on main's Board, so not changed here. The Tauri app and a real iPhone were not run.
+
+### Navigation integration
+
+The filter shortcut and route handling in #128 share `App.tsx`. Keeping
+the filter imports together lets Git combine the two changes cleanly.
+The combined UI passed all 820 unit tests plus the routing and filter
+browser checks at desktop and phone sizes.
