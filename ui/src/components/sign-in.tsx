@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { loadMe, onSignedIn, watchAppleSession } from '@/lib/backend'
+import { signOutChecked } from '@/lib/leave'
 import type { Account, Me } from '@/lib/me'
 
 // The signed-in account, or null where there are no accounts (the desktop
@@ -45,7 +46,9 @@ function SignIn({ failed }: { failed: boolean }) {
 // shown, so it is only shown once there is someone to load them for.
 export function Gate({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null)
-  useEffect(watchAppleSession, [])
+  // When Apple ends the credential, the window's own sign-out: it also ends
+  // a focus session on a workspace task (lib/leave.ts).
+  useEffect(() => watchAppleSession(() => signOutChecked(true, 'ended')), [])
   useEffect(() => {
     // If the question cannot be asked at all the app is shown anyway, and
     // says what is wrong in its own words when its first load fails.

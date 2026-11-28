@@ -31,3 +31,15 @@ describe('widgetSnapshot', () => {
     expect(s.focus).toEqual({ title: 'Write', endsAt: 2000, remaining: null })
   })
 })
+
+// Issue #120, E: after a session ended, unsent workspace tasks stay on the
+// device (so they can be sent), but the Home Screen shows none of them.
+describe('widgetSnapshot while signed out', () => {
+  const today = '2026-11-24'
+  it('leaves out the workspace tasks the device keeps only to send them', () => {
+    const tasks = [task(1, 'My own', today), task(2, 'Ship the site', today, { spaceId: 77 }), task(3, 'Its subtask', today, { spaceId: 77, parentId: 2 })]
+    const s = widgetSnapshot(tasks, today, null, null, 0, () => true, [2, 3])
+    expect(s.tasks.map((t) => t.title)).toEqual(['My own'])
+    expect(s.left).toBe(1)
+  })
+})

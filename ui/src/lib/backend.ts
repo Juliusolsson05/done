@@ -100,7 +100,7 @@ async function answer<T>(response: Response): Promise<T> {
     // out, so nothing unsent is taken off the device: marked "ended" first,
     // finished on the next load (`settled`), and the person is told.
     if (hosted) {
-      await markLeaving('ended')
+      await markLeaving('ended').catch(() => {})
       forgetCloudSession()
     }
     location.reload()
@@ -124,16 +124,66 @@ export const loadMe = async (): Promise<Me> => {
 
 // The account leaving this device: marked in the file before the session is
 // forgotten or the account deleted, done after (crates/core/src/account.rs).
-type Leaving = 'ended' | 'signed-out' | 'deleted'
-const markLeaving = (how: Leaving | null): Promise<unknown> => tauri?.core.invoke('mark_leaving', { how }).catch(() => {}) ?? Promise.resolve()
-const finishLeaving = (): Promise<Left | null> => tauri?.core.invoke<Left | null>('finish_leaving').catch(() => null) ?? Promise.resolve(null)
+// 'deleting' is written before the server is asked to delete, 'deleted'
+// once it said yes: only that one is finished as a deletion.
+type Leaving = 'ended' | 'deleting' | 'signed-out' | 'deleted'
 
-// An app that is not signed in first finishes a leaving that was marked and
-// not done: a reload or a crash came between (the 401 above reloads at
-// once). Without a mark it changes nothing: the "done next" preview app is
-// never signed in and runs on the real file. Once per window.
+// Which app wrote a mark: an id in this app's own web storage. The "done
+// next" preview has storage of its own, so it never finishes the real app's
+// mark (issue #120). Null where storage is refused: such a mark is anyone's.
+const OWNER = 'done-app-owner'
+function owner(): string | null {
+  try {
+    let id = localStorage.getItem(OWNER)
+    if (!id) {
+      id = crypto.randomUUID()
+      localStorage.setItem(OWNER, id)
+    }
+    return id
+  } catch {
+    return null
+  }
+}
+
+// A write to the file that must not be lost to a moment's lock: tried three
+// times, and the last error is not swallowed.
+async function tries<T>(step: () => Promise<T>, times = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await step()
+    } catch (error) {
+      if (attempt >= times) throw error
+    }
+  }
+}
+const markLeaving = (how: Leaving | null): Promise<unknown> =>
+  tauri ? tries(() => tauri.core.invoke('mark_leaving', { how, by: owner() })) : Promise.resolve()
+const finishLeaving = (): Promise<Left | null> => tauri?.core.invoke<Left | null>('finish_leaving', { by: owner() }).catch(() => null) ?? Promise.resolve(null)
+
+// An app that is not signed in first finishes a leaving it marked and did
+// not finish: a reload or a crash came between (the 401 above reloads at
+// once). Without a mark of its own it changes nothing: the "done next"
+// preview app is never signed in and runs on the real file. A signed-in app
+// that finds its own mark (a crash before the session was forgotten)
+// completes it: what the person chose, or a session already gone; a
+// deletion the server never confirmed is taken back by core. Once per window.
 let leftOver: Promise<Left | null> | null = null
-const settled = (): Promise<Left | null> => (tauri && !hosted ? (leftOver ??= finishLeaving()) : Promise.resolve(null))
+const settled = (): Promise<Left | null> => {
+  if (!tauri) return Promise.resolve(null)
+  if (!hosted) return (leftOver ??= finishLeaving())
+  return (leftOver ??= tauri.core
+    .invoke<Leaving | null>('own_mark', { by: owner() })
+    .catch(() => null)
+    .then(async (mark) => {
+      if (!mark) return null
+      forgetCloudSession()
+      await finishLeaving()
+      await clearWidgets()
+      location.reload()
+      // The window is starting over; nothing more is loaded.
+      return new Promise<never>(() => {})
+    }))
+}
 // What that did, for the window to say (a session that ended).
 export const leftOnLoad = settled
 
@@ -243,7 +293,9 @@ export const signOut = async (how: 'signed-out' | 'ended' = 'signed-out'): Promi
   // without an account; shared workspaces leave the device. Marked first, so
   // a reload or a crash from here on still ends in the clean-up.
   if (hosted) {
-    await markLeaving(how)
+    // Not marked (the file would not take it three times): signed out all
+    // the same; the shared workspaces then stay until a round or a sign-out.
+    await markLeaving(how).catch(() => {})
     forgetCloudSession()
     await finishLeaving()
   } else await post<unknown>('/auth/signout', {})
@@ -251,17 +303,26 @@ export const signOut = async (how: 'signed-out' | 'ended' = 'signed-out'): Promi
   location.reload()
 }
 export const deleteAccount = async (): Promise<void> => {
-  // Marked before the server is asked: a round answered 401 once the account
-  // is gone reloads at once, and the next load must finish a deletion, not
-  // a session that ended. A refusal takes the mark back; a 401 keeps it.
-  if (hosted) await markLeaving('deleted')
+  // Marked 'deleting' before the server is asked, so a round answered 401
+  // meanwhile (which reloads at once) still ends in the clean-up; finished
+  // as a session that ended, since the server has not said yes. Not marked,
+  // not asked. A refusal takes the mark back, tried until it holds or said;
+  // a 401 keeps it. 'deleted' only once the server confirmed.
+  if (hosted) await markLeaving('deleting')
   try {
     await post<unknown>('/api/account/delete', {})
   } catch (error) {
-    if (hosted && !(error instanceof Error && error.message === 'signed out')) await markLeaving(null)
+    if (hosted && !(error instanceof Error && error.message === 'signed out')) {
+      await markLeaving(null).catch(() => {
+        throw new Error('Your account was not deleted, and done could not tidy up after it. Try again.')
+      })
+    }
     throw error
   }
   if (hosted) {
+    // If this cannot be written, 'deleting' stays, and is finished as a
+    // session that ended: less is taken off, nothing is lost.
+    await markLeaving('deleted').catch(() => {})
     forgetCloudSession()
     // The account is gone: what stays is plain local data.
     await finishLeaving()
@@ -342,7 +403,10 @@ export const openLink = (url: string): void => {
 }
 // A notification may arrive after another sign-in or a window reload. Only
 // the current watch can sign out the exact session it was started for.
-export const watchAppleSession = (): (() => void) | undefined => {
+// `onEnded`: the window's own sign-out (lib/leave.ts), which also stops
+// syncing and ends a focus session on a workspace task; without one, signs
+// out as a session that ended.
+export const watchAppleSession = (onEnded?: () => Promise<unknown>): (() => void) | undefined => {
   if (!isIosApp || !tauri) return
   if (!hosted?.appleUser || !hosted.account.id?.startsWith('apple')) {
     void tauri.core.invoke('watch_apple_user', { user: '', id: '' })
@@ -351,7 +415,7 @@ export const watchAppleSession = (): (() => void) | undefined => {
   const id = crypto.randomUUID()
   let active = true
   const listening = tauri.event.listen<string>('apple-credential-ended', ({ payload }) => {
-    if (active && payload === id && sameAppleSession(cloudSession(), hosted)) void signOut('ended')
+    if (active && payload === id && sameAppleSession(cloudSession(), hosted)) void (onEnded ? onEnded() : signOut('ended'))
   })
   void listening.then(() => {
     if (active) return tauri.core.invoke('watch_apple_user', { user: hosted.appleUser, id })

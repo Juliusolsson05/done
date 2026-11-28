@@ -22,11 +22,11 @@ Each item has a test written first and run on origin/main (34d2745). All of them
 
 ## Decisions
 
-A. **Refused twice: kept here, released at the next sign-in.** The second refusal still clears the row's space and stops sending it. It is now also listed in `kv 'local_only'`. That list is released, meaning the rows become unsent again and the refused record is cleared, at two points:
-   - when leaving finishes, as when a session ends;
-   - at the first round of a sign-in, which is a round with no space cursors (leaving removes them, and a new file has none).
+A. **Refused twice: kept here, released at the next sign-in.** The second refusal still clears the row's space and stops sending it. It is now also listed in `kv 'local_only'`. That list is released when leaving finishes (a session ending, a sign-out): the rows become unsent again and the refused record is cleared, so the next sign-in sends them. Every sign-in follows a leaving (a 401 ends in one too) or starts from an empty file, so this is "on sign-in" as well.
 
-   Each release allows at most two more sends, so there is no loop: once per sign-in. `State.localOnly` lists the tasks in that list. The task editor says "Only on this device. It was not accepted by your account." (`ui/src/lib/on-device.ts`).
+   Each release allows at most two more sends, so there is no loop: once per sign-in.
+
+   Ruling: no second release point at the first round of a sign-in. Rounds without space cursors are not a reliable sign of a sign-in (a reply without `spaces` leaves the cursors empty, and a release there looped in the test). Cost if wrong: a row refused twice within one session waits for the next sign-out or session end, and is marked "Only on this device" meanwhile. `State.localOnly` lists the tasks in that list. The task editor says "Only on this device. It was not accepted by your account." (`ui/src/lib/on-device.ts`).
 
 B. **Marks have an owner.** `kv 'leaving'` holds `{how, by}`, where `by` is an id kept in the app's own web storage (`done-app-owner`). The "done next" preview has its own web storage, so it has a different id.
    - `finish_leaving(by)` finishes only its own mark.
@@ -69,5 +69,5 @@ On the UI side:
 
 ## Verified / not verified
 
-- Verified: see the PR.
+- Verified (28 Nov): the probes under Evidence fail on origin/main 34d2745 and pass here, and the eight new UI tests fail against main's `backend.ts` and `widget-snapshot.ts`. `cargo test -p done-core -p done-mcp -p done-server` passes (48, 13, 54). Both `cargo check -p done-app` runs pass (Mac and iOS). `npm run typecheck`, `npm test` (719) and `npm run build` pass.
 - Not verified: a real device. That covers the Live Activity ending, the widgets after a session ends, and "done next" next to the real app.

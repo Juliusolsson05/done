@@ -472,12 +472,12 @@ export default function App() {
     if (!isIosApp || !ready) return
     const timer = setTimeout(() => {
       const running = focus && { title: focus.title, endsAt: focus.endsAt, remaining: focus.remaining }
-      sendWidgetSnapshot(widgetSnapshot(shown.tasks, TODAY, me, running, Date.now(), app.keep))
+      sendWidgetSnapshot(widgetSnapshot(shown.tasks, TODAY, me, running, Date.now(), app.keep, data.withheld))
     }, 800)
     return () => clearTimeout(timer)
     // The tasks, the scope and the focus are what the widgets show.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, shown.tasks, scope, me, focus])
+  }, [ready, shown.tasks, scope, me, focus, data.withheld])
 
   if (failed !== null) return <p className="p-10">done could not open its tasks: {failed}</p>
   if (!ready) return null
