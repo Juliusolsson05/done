@@ -118,11 +118,11 @@ export function NoteListMenu({ view, touch = false }: { view: EditorView | null;
       disabled={disabled}
       className="flex min-h-9 w-full items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent focus-visible:bg-accent disabled:opacity-40 pointer-coarse:min-h-11 [&_svg]:size-4"
       onMouseDown={(e) => e.preventDefault()}
-      onPointerDown={(e) => { if (touch) e.preventDefault() }}
       onClick={() => {
         if (!view || view.state.readOnly) return
         chosen.current = true
         run(view)
+        view.focus()
         setOpen(false)
       }}
     >
@@ -142,7 +142,6 @@ export function NoteListMenu({ view, touch = false }: { view: EditorView | null;
             ? 'flex size-11 shrink-0 items-center justify-center rounded-lg active:bg-accent [&_svg]:size-5.5'
             : 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent focus-visible:bg-accent pointer-coarse:hidden'}
           onMouseDown={(e) => e.preventDefault()}
-          onPointerDown={(e) => { if (touch) e.preventDefault() }}
         >
           <ListIcon className="size-4" />{!touch && 'Lists'}
         </button>
@@ -154,10 +153,7 @@ export function NoteListMenu({ view, touch = false }: { view: EditorView | null;
         className="w-48 p-1"
         onOpenAutoFocus={(e) => { if (touch) e.preventDefault() }}
         onCloseAutoFocus={(e) => {
-          if (chosen.current) {
-            e.preventDefault()
-            view?.focus()
-          }
+          if (chosen.current) e.preventDefault()
           chosen.current = false
         }}
       >
@@ -187,8 +183,7 @@ export function WritingBar({ view, viewport }: { view: EditorView; viewport: Vie
       type="button"
       tabIndex={-1}
       aria-label={label}
-      // The note keeps its focus, so the keyboard stays up.
-      onPointerDown={(event) => event.preventDefault()}
+      // Keep the selection without cancelling the tap-generated click in WebKit.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => {
         act()
@@ -214,7 +209,6 @@ export function WritingBar({ view, viewport }: { view: EditorView; viewport: Vie
       <button
         type="button"
         tabIndex={-1}
-        onPointerDown={(event) => event.preventDefault()}
         onMouseDown={(event) => event.preventDefault()}
         // Done puts the keyboard away.
         onClick={() => view.contentDOM.blur()}
