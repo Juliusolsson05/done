@@ -4,9 +4,10 @@ import {
   applyFilter,
   cleanFilter,
   filterChips,
+  fixedHere,
+  hiddenHere,
   fixedFor,
   isFiltering,
-  matchesFilter,
   matchTask,
   NO_FILTER,
   offered,
@@ -35,7 +36,7 @@ const projects = [
   { id: CATCH_UP, name: 'Catch Up' },
 ]
 const filter = (fields: Partial<ViewFilter>): ViewFilter => ({ ...NO_FILTER, ...fields })
-const ids = (tasks: Task[], f: ViewFilter) => tasks.filter((t) => matchesFilter(t, f, today)).map((t) => t.id)
+const ids = (tasks: Task[], f: ViewFilter, me: string | null = null) => applyFilter(tasks, f, { today, me, projects, fixed: [] }).map((t) => t.id)
 
 describe('the Board and Timeline filter', () => {
   const tasks = [
@@ -67,7 +68,9 @@ describe('the Board and Timeline filter', () => {
     expect(ids(tasks, filter({ when: 'today' }))).toEqual([2])
     // This week runs from today through six days on: the 29th is in, the 30th would not be.
     expect(ids(tasks, filter({ when: 'week' }))).toEqual([2, 3])
-    expect(ids(tasks, filter({ when: 'fortnight' }))).toEqual([2, 3, 4])
+    // "Next two weeks" left the panel; one saved before reads as this week.
+    expect(ids(tasks, filter({ when: 'fortnight' }))).toEqual([2, 3])
+    expect(cleanFilter({ when: 'fortnight' }, projects).when).toBe('week')
     expect(ids(tasks, filter({ when: 'none' }))).toEqual([5])
   })
 
@@ -127,7 +130,7 @@ describe('quick add on a filtered page', () => {
 describe('people', () => {
   const on = (id: number, assignees?: string[]) => ({ id, title: 't', notes: '', projectId: null, start: null, due: null, priority: 4, assignees })
   const all = [on(1), on(2, ['1001']), on(3, ['1002']), on(4, ['1001', '1002'])]
-  const shown = (people: string[], me: string | null = '1001') => all.filter((t) => matchesFilter(t, filter({ people }), today, me)).map((t) => t.id)
+  const shown = (people: string[], me: string | null = '1001') => ids(all, filter({ people }), me)
 
   it('keeps the tasks someone chosen is on', () => {
     expect(shown(['me'])).toEqual([2, 4])
@@ -289,5 +292,32 @@ describe('what each view offers', () => {
     const fixed = fixedFor(view)
     expect([...(wanted ?? []), ...fixed].sort()).toEqual(['people', 'priorities', 'projects', 'when', 'words'])
     expect(fixed.some((d) => wanted?.includes(d))).toBe(false)
+  })
+})
+
+describe('a view that decides a dimension itself', () => {
+  const f = filter({ words: 'angel', projects: [HOP], priorities: [1], when: 'today', people: ['me'] })
+
+  it('leaves its chips out and counts them as hidden here', () => {
+    expect(filterChips(f, projects, [], fixedFor({ kind: 'today' })).map((c) => c.label)).toEqual(['“angel”', 'Hop', 'P1', 'Me'])
+    expect(hiddenHere(f, fixedFor({ kind: 'today' }))).toBe(1)
+    expect(filterChips(f, projects, [], fixedFor({ kind: 'inbox' })).map((c) => c.label)).toEqual(['“angel”', 'P1', 'Due today'])
+    expect(hiddenHere(f, fixedFor({ kind: 'inbox' }))).toBe(2)
+    expect(hiddenHere(f, fixedFor({ kind: 'board' }))).toBe(0)
+    expect(hiddenHere(NO_FILTER, fixedFor({ kind: 'inbox' }))).toBe(0)
+  })
+
+  it('fixes the person where nobody can be chosen', () => {
+    expect(fixedHere({ kind: 'board' }, true)).toEqual([])
+    expect(fixedHere({ kind: 'board' }, false)).toEqual(['people'])
+    expect(fixedHere({ kind: 'inbox' }, false)).toEqual(fixedFor({ kind: 'inbox' }))
+  })
+
+  it('gives a new task only what the view does not decide', () => {
+    const add = filter({ projects: [HOP], priorities: [2], when: 'today' })
+    expect(addDefaults(add, today, fixedFor({ kind: 'inbox' }))).toEqual({ projectId: null, priority: 2, due: today })
+    expect(addDefaults(add, today, fixedFor({ kind: 'today' }))).toEqual({ projectId: HOP, priority: 2, due: null })
+    expect(addDefaults(add, today, fixedFor({ kind: 'project', id: CATCH_UP }))).toEqual({ projectId: null, priority: 2, due: today })
+    expect(addDefaults(add, today, fixedFor({ kind: 'upcoming' }))).toEqual({ projectId: HOP, priority: 2, due: null })
   })
 })

@@ -15,14 +15,13 @@ import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
-import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
+import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
-import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
+import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { DAY_PX, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
 import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
-import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { cn } from '@/lib/utils'
 
 // Measures a title, to know how wide its pill is: in a hidden element set
@@ -91,7 +90,7 @@ interface Drag {
 const UNSCHEDULED = 'application/x-done-task'
 
 export function TimelineDesktop() {
-  const { dragging, edit, update, shown: inScope, me } = useApp()
+  const { dragging, edit, update, shown: inScope } = useApp()
   const scroller = useRef<HTMLDivElement>(null)
   const label = useRef<HTMLDivElement>(null)
   const [zoom, setZoomState] = useState<Zoom>(storedZoom)
@@ -112,8 +111,8 @@ export function TimelineDesktop() {
   const [dropDay, setDropDay] = useState<Day | null>(null)
   const px = DAY_PX[zoom]
 
-  const filter = useViewFilter()
-  const visible = inScope.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY, me))
+  const filter = useTaskFilter()
+  const visible = filter.apply(inScope.tasks)
   const groups = timelineGroups(inScope.projects, visible, 'project')
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
@@ -423,7 +422,7 @@ export function TimelineDesktop() {
       </ViewHeader>
       <FilterBar shown={shown} total={total} />
 
-      {isFiltering(filter) && shown === 0 ? (
+      {filter.on && shown === 0 ? (
         <NothingMatches />
       ) : (
         <div className="flex min-h-0 flex-1">

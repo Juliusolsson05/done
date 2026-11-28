@@ -19,10 +19,9 @@ import { feel } from '@/lib/haptics'
 import { swallowClick } from '@/lib/swallow-click'
 import { play } from '@/lib/sounds'
 import { HOLD_MS, IDLE, SLOP, press, type PressState } from '@/lib/timeline-press'
-import { isSubtask, laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
-import { matchesFilter, isFiltering } from '@/lib/view-filter'
+import { laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
 import { setFilterOpen } from '@/lib/view-filter-store'
-import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
+import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { cn } from '@/lib/utils'
 
 const LANES: { key: LaneKey; name: string; hint: string; dot: string }[] = [
@@ -153,14 +152,11 @@ export function Board() {
   const [over, setOver] = useState<LaneKey | null>(null)
   const [lifted, setLifted] = useState<Lifted | null>(null)
   const board = useRef<HTMLDivElement>(null)
-  // The filter only changes what is drawn. Subtasks go through untouched:
-  // the board shows top-level tasks, and a subtask is judged with its task.
-  const filter = useViewFilter()
-  const { shown: { tasks: shownTasks }, me } = useApp()
-  const columns = lanes(
-    shownTasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY, me)),
-    TODAY,
-  )
+  // The filter only changes what is drawn. The board shows top-level tasks,
+  // and a subtask is judged with its task.
+  const filter = useTaskFilter()
+  const { shown: { tasks: shownTasks } } = useApp()
+  const columns = lanes(filter.apply(shownTasks), TODAY)
   const count = (c: Record<LaneKey, Task[]>) => c.todo.length + c.doing.length + c.done.length
   const shown = count(columns)
   const total = count(lanes(shownTasks, TODAY))
@@ -390,7 +386,7 @@ export function Board() {
         </ViewHeader>
       </div>
       <FilterBar shown={shown} total={total} />
-      {isFiltering(filter) && shown === 0 ? (
+      {filter.on && shown === 0 ? (
         <NothingMatches />
       ) : (
       <div
