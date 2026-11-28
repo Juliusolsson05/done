@@ -39,12 +39,23 @@ async function open(browser, viewport, touch) {
   return { context, page }
 }
 
-const heading = (page) => page.locator('h1').first().textContent({ timeout: 3000 }).catch(() => null)
+const heading = (page) =>
+  page
+    .locator('h1')
+    .first()
+    .textContent({ timeout: 3000 })
+    .catch(() => null)
 // A window edits the task in its row; a phone opens it in a sheet.
 const editorOpen = (page, phone) =>
   phone
-    ? page.locator('[role="dialog"][aria-label="Details"]').isVisible().catch(() => false)
-    : page.locator('input[value="Call the bank"]').count().then((n) => n > 0)
+    ? page
+        .locator('[role="dialog"][aria-label="Details"]')
+        .isVisible()
+        .catch(() => false)
+    : page
+        .locator('input[value="Call the bank"]')
+        .count()
+        .then((n) => n > 0)
 
 async function run(browser, where, viewport, touch) {
   const { context, page } = await open(browser, viewport, touch)
