@@ -44,6 +44,42 @@ panel is a 3/4-width side sheet, so queued titles truncate to "Write the la…".
   on touch those are 44 px. A list labelled "Queued blocks". The total
   ("1 h 25 min planned") stays.
 
+## Review fixes
+
+From the review of #122, after rebasing onto origin/main (ab2c64b):
+
+- **iPad**: on touch the panel is 448 px (`max-w-md`) instead of 384, and a
+  queued title wraps to two lines before it is cut.
+- **The picker's phone sheet is named for its place**: `FocusPicker` takes a
+  `title`; Up next's says "Add a block".
+- **Recent is read when a picker opens**, not when it mounts, and kept for
+  the next opening; it is read again once a block is written to the time
+  sheet (`onRecorded`), also while a picker is open. Checked: opening Up next
+  reads nothing; the first picker opening reads 7 days; a second reads none.
+- **Enter in Other's minutes field adds the block** when a task is chosen.
+  `Length` takes an optional `onEnter`, called from the field's own Enter
+  (not from Set). The Focus page passes none, so there Enter only sets the
+  length, as before.
+- **Ids without a secure context**: `newId` (`ui/src/lib/ids.ts`, tested)
+  uses `crypto.randomUUID` where the page has it and `getRandomValues`
+  otherwise. Used for reminders and blocks (`focus-store.ts`) and for the
+  window's owner id in `backend.ts` (that line only; the Apple session watch
+  there runs only in the app, which is always a secure context). Checked on
+  `http://done.test` (`isSecureContext` false): a block and a reminder add.
+- **Blocks whose task went away**: `blockTask` and `nextBlock` in
+  `lib/focus.ts` (tested). A queued block whose task was finished or deleted
+  meanwhile is struck through and says "Done · skipped" or "Deleted ·
+  skipped", and is left out of the planned total. Start next starts the first
+  block still to do and takes the skipped ones off the list, instead of
+  running a block on no task under its old title. They are judged against
+  every task (`data.tasks`), so a block is never skipped for being outside
+  the view on screen; Start next used the view's tasks before.
+
+Ruling: skip rather than ask — a block whose task is done has nothing left
+to do, and a question at the moment time runs out is one more thing to
+answer — cost if wrong: someone who wanted to keep working on a task they
+had ticked off starts it from the picker instead.
+
 ## Tests
 
 - `ui/src/lib/focus-picker.test.ts` already covers the order, matching and
@@ -67,7 +103,7 @@ answers every request.
 
 ## Verification
 
-- `npm run typecheck`, `npm test` (710), `npm run build` pass.
+- `npm run typecheck`, `npm test` (729), `npm run build` pass.
 - `ui/checks/up-next-picker.cjs` passes at 1280x800 and 390x844 (touch).
   Against origin/main's source it fails: no "Find a task" field (checked).
 - Driven in Chrome on a faked API with three queued blocks, at 1280x800,

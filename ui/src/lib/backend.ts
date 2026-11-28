@@ -4,6 +4,7 @@
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInFromApp, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
+import { newId } from '@/lib/ids'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
@@ -136,7 +137,7 @@ function owner(): string | null {
   try {
     let id = localStorage.getItem(OWNER)
     if (!id) {
-      id = crypto.randomUUID()
+      id = newId()
       localStorage.setItem(OWNER, id)
     }
     return id

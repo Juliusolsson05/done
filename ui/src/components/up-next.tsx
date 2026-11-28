@@ -12,9 +12,10 @@ import { Label } from '@/components/ui/label'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useApp } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
-import { chosenMinutes, focusTasks, type Block } from '@/lib/focus'
+import { blockTask, chosenMinutes, focusTasks, type Block } from '@/lib/focus'
 import { getUpNext, moveQueued, queueBlock, subscribeFocus, unqueueBlock } from '@/lib/focus-store'
 import { minutesText } from '@/lib/time-sheet'
+import { cn } from '@/lib/utils'
 
 const MINUTE = 60000
 // Small with a mouse, a finger's size (44 px) on touch.
@@ -45,9 +46,11 @@ function AddBlock() {
         <Label htmlFor="up-next-task" className="text-xs text-muted-foreground">
           Add a block
         </Label>
-        <FocusPicker id="up-next-task" chosen={chosen} onChoose={(task) => setTaskId(task?.id ?? null)} />
+        <FocusPicker id="up-next-task" title="Add a block" chosen={chosen} onChoose={(task) => setTaskId(task?.id ?? null)} />
       </div>
-      <Length labelId="up-next-length" typed={typed} setTyped={setTyped} length={length} onChoose={setMinutes} />
+      {/* Enter in Other's minutes field adds the block once a task is
+          chosen, so the keyboard need not go on to Add. */}
+      <Length labelId="up-next-length" typed={typed} setTyped={setTyped} length={length} onChoose={setMinutes} onEnter={chosen ? add : undefined} />
       <div>
         <Button className="touch:h-11 touch:px-5" onClick={add}>
           Add
@@ -57,16 +60,27 @@ function AddBlock() {
   )
 }
 
+// Said beside a block whose task was finished or deleted while it waited.
+// It is skipped when its turn comes (nextBlock), so it can only be removed.
+const GONE = { finished: 'Done', deleted: 'Deleted' } as const
+
 function Queued({ blocks }: { blocks: Block[] }) {
-  const planned = blocks.reduce((sum, b) => sum + b.minutes, 0)
+  const { data } = useApp()
+  // Skipped blocks are not part of the plan.
+  const planned = blocks.filter((b) => blockTask(b, data.tasks) === 'open').reduce((sum, b) => sum + b.minutes, 0)
   if (!blocks.length) return <p className="text-muted-foreground">Nothing queued yet. When a block ends, the first one here is offered next.</p>
   return (
     <div className="flex flex-col gap-1">
       <ol aria-label="Queued blocks" className="flex flex-col divide-y">
-        {blocks.map((block, i) => (
-          <li key={block.id} className="flex min-h-11 items-center gap-2 py-0.5">
+        {blocks.map((block, i) => {
+          const state = blockTask(block, data.tasks)
+          return (
+          <li key={block.id} className="flex min-h-11 items-center gap-2 py-1">
             <span className="w-4 shrink-0 text-right text-faint tabular-nums">{i + 1}</span>
-            <span className="min-w-0 flex-1 truncate">{block.title}</span>
+            {/* Two lines before it is cut: on a tablet the buttons leave a
+                title little room. */}
+            <span className={cn('line-clamp-2 min-w-0 flex-1 wrap-anywhere', state !== 'open' && 'text-muted-foreground line-through')}>{block.title}</span>
+            {state !== 'open' && <span className="shrink-0 text-xs text-muted-foreground">{GONE[state]} · skipped</span>}
             <span className="shrink-0 text-muted-foreground tabular-nums">{minutesText(block.minutes * MINUTE)}</span>
             <div className="flex shrink-0">
               <Button
@@ -94,7 +108,8 @@ function Queued({ blocks }: { blocks: Block[] }) {
               </Button>
             </div>
           </li>
-        ))}
+          )
+        })}
       </ol>
       <div className="pl-6 text-xs text-muted-foreground tabular-nums">{minutesText(planned * MINUTE)} planned</div>
     </div>
@@ -114,8 +129,9 @@ export function UpNext() {
         </Button>
       </SheetTrigger>
       {/* On a phone it takes the whole screen: a side panel there leaves the
-          titles a few letters wide. */}
-      <SheetContent showCloseButton={false} className="gap-0 phone:data-[side=right]:w-full phone:data-[side=right]:max-w-none phone:data-[side=right]:border-l-0">
+          titles a few letters wide. On a tablet it is wider than with a
+          mouse, for the 44 px buttons beside each title. */}
+      <SheetContent showCloseButton={false} className="gap-0 phone:data-[side=right]:w-full phone:data-[side=right]:max-w-none phone:data-[side=right]:border-l-0 touch:data-[side=right]:sm:max-w-md">
         <div className="flex items-center justify-between gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2">
           <SheetTitle className="text-base">Up next</SheetTitle>
           <SheetClose asChild>

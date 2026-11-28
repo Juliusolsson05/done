@@ -25,6 +25,7 @@ export function Length({
   setTyped,
   length,
   onChoose,
+  onEnter,
 }: {
   labelId: string
   label?: string
@@ -32,6 +33,10 @@ export function Length({
   setTyped: (typed: string) => void
   length: number
   onChoose: (minutes: number) => void
+  // Enter in the minutes field (not the Set button), after the length is
+  // taken: Up next adds the block with it. The Focus page passes none, so
+  // there Enter only sets the length, as Set does.
+  onEnter?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const other = !COMMON.includes(length)
@@ -106,6 +111,12 @@ export function Length({
                 aria-label="Minutes"
                 value={typed}
                 onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' || e.nativeEvent.isComposing || !onEnter) return
+                  e.preventDefault()
+                  close(false)
+                  onEnter()
+                }}
                 className="flex-1 text-base md:text-sm touch:h-11"
               />
               <Button type="submit" variant="outline" className="touch:h-11">

@@ -11,7 +11,7 @@ import { ViewHeader } from '@/components/list-view'
 import { UpNext } from '@/components/up-next'
 import { useApp } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
-import { chosenMinutes, clockText, focusTasks, MAX_MINUTES, optionsSummary, timeLeft, type Session } from '@/lib/focus'
+import { chosenMinutes, clockText, focusTasks, MAX_MINUTES, nextBlock, optionsSummary, timeLeft, type Session } from '@/lib/focus'
 import {
   addReminder,
   continueFocus,
@@ -113,11 +113,13 @@ function Reminders() {
   )
 }
 
-// Starts the first block in Up next, naming it and its length. Nothing
-// when the list is empty.
+// Starts the first block in Up next whose task is still to do, naming it and
+// its length. Nothing when there is none.
 function StartNext({ variant }: { variant: 'default' | 'outline' }) {
-  const { shown: { tasks } } = useApp()
-  const next = useSyncExternalStore(subscribeFocus, getUpNext)[0]
+  // Every task, not the view's: a block is skipped only when its task is
+  // finished or deleted, never for being outside the view.
+  const { data: { tasks } } = useApp()
+  const next = nextBlock(useSyncExternalStore(subscribeFocus, getUpNext), tasks).block
   if (!next) return null
   return (
     <Button variant={variant} className="max-w-full" onClick={() => startNext(tasks)}>
@@ -213,7 +215,7 @@ function Running({ session }: { session: Session }) {
     // It may have been deleted, or finished elsewhere, while the clock ran.
     if (id !== null && data.tasks.some((t) => t.id === id)) complete(id)
   }
-  const queued = useSyncExternalStore(subscribeFocus, getUpNext).length > 0
+  const queued = nextBlock(useSyncExternalStore(subscribeFocus, getUpNext), data.tasks).block !== null
   // When something is queued, starting it is the main thing to do at the end,
   // so finishing the task steps back beside it.
   const finish = session.taskId !== null && (
