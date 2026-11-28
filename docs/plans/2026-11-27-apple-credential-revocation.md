@@ -1,0 +1,3 @@
+# Apple credential revocation
+
+Issue #94. Apple's TN3194 describes manual revocation when the app has no Apple access or refresh token. AuthenticationServices sends a generic revocation notification. Query the active Apple credential on that notification, on foreground and at startup. Hold the provider subject alongside its own verified cloud session; guard asynchronous answers against account changes. An existing session from an earlier app can bind its subject by verifying the same Apple account once. End only that native session and keep local tasks. Validate the Swift APIs against the iOS SDK and exercise stale and mismatched session responses in tests.
