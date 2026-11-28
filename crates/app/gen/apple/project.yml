@@ -6,7 +6,7 @@ options:
   # app to, so it must not change once the app is submitted.
   bundleIdPrefix: app.thedone.ios
   deploymentTarget:
-    iOS: 15.0
+    iOS: 16.4
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -152,11 +152,12 @@ targets:
   # Today on the Home and Lock Screen, and the focus countdown in the Dynamic
   # Island. Declared here, not added in Xcode: the project is generated from
   # this file, so a target added by hand disappears at the next
-  # `xcodegen generate`. iOS 16.1 is the first with Live Activities.
+  # `xcodegen generate`. iOS 16.1 is the first with Live Activities;
+  # the whole app needs 16.4 (AbortSignal.timeout, color-mix in the web view).
   done-widgets:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.1"
+    deploymentTarget: "16.4"
     sources:
       - path: Widgets
       - path: Shared
