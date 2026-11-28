@@ -1,0 +1,60 @@
+name: Archive the iOS App Store build
+on:
+  push:
+    branches: [qa/store-device-1-0]
+permissions:
+  contents: read
+jobs:
+  device:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ef43e53b3b3dc9ef9d8c5070177c641e48b0538f
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the production interface
+        working-directory: ui
+        env:
+          VITE_DONE_CLOUD_URL: https://thedone.app
+        run: |
+          npm ci
+          npm run build
+      - name: Archive for iPhone and iPad
+        working-directory: crates/app
+        env:
+          APPLE_DEVELOPMENT_TEAM: 99MUK5B6TA
+          VITE_DONE_CLOUD_URL: https://thedone.app
+        run: |
+          set -eu
+          xcodebuild -version
+          command -v xcodegen || brew install xcodegen
+          mkdir -p gen/apple/assets gen/apple/Externals/arm64/release
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          /usr/bin/plutil -create xml1 "$RUNNER_TEMP/StoreInfo.plist"
+          /usr/bin/plutil -insert CFBundleShortVersionString -string 1.0 "$RUNNER_TEMP/StoreInfo.plist"
+          CFG=$(node -e 'console.log(JSON.stringify({version:"1.0.0",bundle:{iOS:{bundleVersion:process.argv[1],infoPlist:process.argv[2]}},build:{beforeBuildCommand:""}}))' "$BUILD_NUMBER" "$RUNNER_TEMP/StoreInfo.plist")
+          npx --yes @tauri-apps/cli@2 ios build --target aarch64 --ci --no-sign --archive-only --config "$CFG"
+          ARCHIVE=gen/apple/build/done-app_iOS.xcarchive
+          APP="$ARCHIVE/Products/Applications/done.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist")" = "$BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")" = 1.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/PlugIns/done-widgets.appex/Info.plist")" = "$BUILD_NUMBER"
+          test -s "$APP/PrivacyInfo.xcprivacy"
+          otool -L "$APP/done" | grep '/usr/lib/libsqlite3'
+          if nm -u "$APP/done" | grep -E '^_(f)?statfs$'; then exit 1; fi
+          ditto -c -k --keepParent "$ARCHIVE" "$RUNNER_TEMP/done-1.0-$BUILD_NUMBER.xcarchive.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-archive
+          path: ${{ runner.temp }}/done-*.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 5
