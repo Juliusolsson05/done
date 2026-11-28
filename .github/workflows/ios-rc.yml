@@ -1,0 +1,214 @@
+# The App Store release candidate for iPhone and iPad, from the commit named
+# in qa/ios-rc/SOURCE_SHA. Pushed by qa/ios-rc/release.sh, which then signs
+# and exports the unsigned archive on the owner's Mac (no signing secrets
+# live in GitHub). Three things come out of one run of one commit:
+#   device:     the unsigned App Store archive (release, arm64) and its build proof
+#   simulator:  a simulator build of the same commit, for the smoke test
+#   smoke:      that build on an iPhone and an iPad simulator, with screenshots
+name: iOS release candidate
+on:
+  push:
+    branches: [qa/ios-rc-1-0]
+permissions:
+  contents: read
+jobs:
+  device:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: rc, persist-credentials: false}
+      - id: source
+        run: echo "sha=$(tr -d '[:space:]' < rc/qa/ios-rc/SOURCE_SHA)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          path: src
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {targets: aarch64-apple-ios}
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: src}
+      - name: Build the production interface
+        working-directory: src/ui
+        env:
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
+        run: |
+          set -eu
+          test -n "$VITE_DONE_CLOUD_URL" || { echo "DONE_CLOUD_URL repository variable is empty"; exit 1; }
+          echo "VITE_DONE_CLOUD_URL=$VITE_DONE_CLOUD_URL"
+          npm ci
+          npm run build
+          proof="$RUNNER_TEMP/proof"; mkdir -p "$proof"
+          {
+            echo "source=${{ steps.source.outputs.sha }}"
+            echo "VITE_DONE_CLOUD_URL=$VITE_DONE_CLOUD_URL"
+            echo "ui/dist/index.html sha256=$(shasum -a 256 dist/index.html | cut -d' ' -f1)"
+            for s in "$VITE_DONE_CLOUD_URL" 'Sign in with Apple' 'Sign in with Google' 'Sign in with a password' 'Your tasks are kept on this device'; do
+              echo "ui/dist/index.html count[$s]=$(grep -o -F "$s" dist/index.html | wc -l | tr -d ' ')"
+            done
+          } | tee "$proof/build-proof.txt"
+          grep -q -F "$VITE_DONE_CLOUD_URL" dist/index.html
+          grep -q -F 'Sign in with a password' dist/index.html
+      - name: Archive for iPhone and iPad
+        working-directory: src/crates/app
+        env:
+          APPLE_DEVELOPMENT_TEAM: 99MUK5B6TA
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
+        run: |
+          set -euo pipefail
+          xcodebuild -version | tee -a "$RUNNER_TEMP/proof/build-proof.txt"
+          command -v xcodegen || brew install xcodegen
+          mkdir -p gen/apple/assets gen/apple/Externals/arm64/release
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "build=$BUILD_NUMBER" | tee -a "$RUNNER_TEMP/proof/build-proof.txt"
+          /usr/bin/plutil -create xml1 "$RUNNER_TEMP/StoreInfo.plist"
+          /usr/bin/plutil -insert CFBundleShortVersionString -string 1.0 "$RUNNER_TEMP/StoreInfo.plist"
+          CFG=$(node -e 'console.log(JSON.stringify({version:"1.0.0",bundle:{iOS:{bundleVersion:process.argv[1],infoPlist:process.argv[2]}},build:{beforeBuildCommand:""}}))' "$BUILD_NUMBER" "$RUNNER_TEMP/StoreInfo.plist")
+          npx --yes @tauri-apps/cli@2 ios build --target aarch64 --ci --no-sign --archive-only --config "$CFG" 2>&1 | tee "$RUNNER_TEMP/proof/archive.log"
+          ARCHIVE=gen/apple/build/done-app_iOS.xcarchive
+          APP="$ARCHIVE/Products/Applications/done.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist")" = "$BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")" = 1.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/PlugIns/done-widgets.appex/Info.plist")" = "$BUILD_NUMBER"
+          test -s "$APP/PrivacyInfo.xcprivacy"
+          otool -L "$APP/done" | grep '/usr/lib/libsqlite3'
+          if nm -u "$APP/done" | grep -E '^_(f)?statfs$'; then exit 1; fi
+          {
+            echo "binary count[thedone.app]=$(strings -a "$APP/done" | grep -c -F 'thedone.app' || true)"
+            echo "binary symbols[ring|rustls|aws_lc|openssl|boringssl]=$(nm "$APP/done" 2>/dev/null | grep -ciE 'ring_core|rustls|aws_lc|openssl|boringssl' || true)"
+            echo "linked libraries:"; otool -L "$APP/done"
+          } | tee -a "$RUNNER_TEMP/proof/build-proof.txt"
+          ditto -c -k --keepParent "$ARCHIVE" "$RUNNER_TEMP/done-1.0-$BUILD_NUMBER.xcarchive.zip"
+      - name: Rust dependencies linked into the iOS app
+        working-directory: src
+        run: |
+          set -eu
+          python3 crates/app/ios-rust/prepare.py "$RUNNER_TEMP/mirror" > /dev/null
+          cargo tree --manifest-path "$RUNNER_TEMP/mirror/Cargo.toml" -p done-app --target aarch64-apple-ios -e normal,build --prefix none --no-dedupe | sort -u > "$RUNNER_TEMP/proof/cargo-tree-ios.txt"
+          cargo tree --manifest-path "$RUNNER_TEMP/mirror/Cargo.toml" -p done-app --target aarch64-apple-ios -e normal > "$RUNNER_TEMP/proof/cargo-tree-ios-full.txt"
+          echo "crypto-looking crates:"; grep -iE '^(ring|rustls|aws-lc|openssl|native-tls|sha1|sha2|md-5|hmac|aes|chacha|blake|digest|crypto|security-framework|getrandom|rand)' "$RUNNER_TEMP/proof/cargo-tree-ios.txt" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-archive
+          path: ${{ runner.temp }}/done-*.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-proof
+          path: ${{ runner.temp }}/proof
+          retention-days: 5
+
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: rc, persist-credentials: false}
+      - id: source
+        run: echo "sha=$(tr -d '[:space:]' < rc/qa/ios-rc/SOURCE_SHA)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          path: src
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {targets: aarch64-apple-ios-sim}
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: src}
+      - name: Build the production interface
+        working-directory: src/ui
+        env:
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
+        run: |
+          set -eu
+          test -n "$VITE_DONE_CLOUD_URL"
+          npm ci
+          npm run build
+          grep -q -F "$VITE_DONE_CLOUD_URL" dist/index.html
+      - name: Compile and package the simulator app
+        working-directory: src/crates/app
+        env:
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
+        run: |
+          set -eu
+          command -v xcodegen || brew install xcodegen
+          mkdir -p gen/apple/assets gen/apple/Externals/arm64/debug
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          CFG=$(node -e 'console.log(JSON.stringify({version:"1.0.0",bundle:{iOS:{bundleVersion:process.argv[1]}},build:{beforeBuildCommand:""}}))' "$BUILD_NUMBER")
+          npx --yes @tauri-apps/cli@2 ios build --target aarch64-sim --debug --no-sign --archive-only --ci --config "$CFG" > "$RUNNER_TEMP/compiler.log" 2>&1 || { tail -80 "$RUNNER_TEMP/compiler.log"; exit 1; }
+          app=$(find gen/apple/build -type d -name done.app -print -quit)
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/done-simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator-application
+          path: ${{ runner.temp }}/done-simulator.zip
+          retention-days: 5
+
+  smoke:
+    needs: simulator
+    strategy:
+      fail-fast: false
+      matrix: {family: [iPhone, iPad]}
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: simulator-application, path: /tmp/done-qa}
+      - name: Boot device
+        timeout-minutes: 8
+        run: |
+          ditto -xk /tmp/done-qa/done-simulator.zip /tmp/done-qa
+          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; f=sys.argv[1]; ds=[d for k,ds in sorted(json.load(sys.stdin)["devices"].items(),reverse=True) if "iOS" in k for d in ds if d["isAvailable"] and (("Pro Max" in d["name"]) if f=="iPhone" else ("iPad Pro 13-inch" in d["name"]))]; print(ds[0]["udid"]); print(ds[0]["name"], file=sys.stderr)' "${{ matrix.family }}")
+          echo "QA_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Install the app and write synthetic sample data
+        timeout-minutes: 5
+        run: |
+          xcrun simctl status_bar "$QA_DEVICE" override --time '9:41' --batteryState charged --batteryLevel 100
+          xcrun simctl ui "$QA_DEVICE" appearance light
+          xcrun simctl install "$QA_DEVICE" /tmp/done-qa/done.app
+          xcrun simctl launch "$QA_DEVICE" app.thedone.ios
+          container=$(xcrun simctl get_app_container "$QA_DEVICE" app.thedone.ios data)
+          db="$container/Library/Application Support/done/done.db"
+          echo "QA_DB=$db" >> "$GITHUB_ENV"
+          for ((i = 0; i < 50; i++)); do test -f "$db" && break; sleep 1; done
+          test -f "$db"
+          xcrun simctl terminate "$QA_DEVICE" app.thedone.ios
+          sqlite3 "$db" < qa/ios-rc/sample.sql
+          mkdir -p qa/output
+          command -v xcodegen || brew install xcodegen
+          (cd qa/ios-rc/automation && xcodegen generate)
+      - name: Task, note, relaunch, Account pane
+        timeout-minutes: 12
+        run: |
+          set -o pipefail
+          xcodebuild -project qa/ios-rc/automation/StoreQA.xcodeproj -scheme StoreQA -destination "id=$QA_DEVICE" -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/smoke.xcresult" -only-testing:Capture/Capture/testSmoke test | tee "$RUNNER_TEMP/smoke.log"
+          sqlite3 "$QA_DB" 'select title from task; select text from note' | tee qa/output/store-records.txt
+          grep -q 'Pick up picnic blankets' qa/output/store-records.txt
+          grep -q 'Picnic packing list' qa/output/store-records.txt
+      - name: Export results
+        if: always()
+        run: |
+          mkdir -p qa/output
+          xcrun simctl io "$QA_DEVICE" screenshot qa/output/final.png || true
+          if test -d "$RUNNER_TEMP/smoke.xcresult"; then xcrun xcresulttool export attachments --path "$RUNNER_TEMP/smoke.xcresult" --output-path qa/output/screens || true; fi
+          if test -f "$RUNNER_TEMP/smoke.log"; then grep -E 'Test (Case|Suite)|error|TEST (SUCCEEDED|FAILED)' "$RUNNER_TEMP/smoke.log" > qa/output/smoke-summary.log || true; cp "$RUNNER_TEMP/smoke.log" qa/output; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.family }}
+          path: qa/output
+          retention-days: 7
