@@ -1,0 +1,65 @@
+name: Windows desktop
+
+on:
+  pull_request:
+    paths:
+      - 'crates/app/**'
+      - 'crates/core/**'
+      - 'crates/mcp/**'
+      - 'ui/**'
+      - 'Cargo.*'
+      - '.github/workflows/windows.yml'
+      - '.github/workflows/release.yml'
+      - '.github/scripts/*windows*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-x64-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Test the shared local database and MCP
+        run: cargo test --locked -p done-core -p done-mcp --release
+      - name: Build the Windows installer
+        working-directory: crates/app
+        env:
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
+        run: |
+          $version = "0.1.$(git rev-list --count HEAD)"
+          $config = Join-Path $env:RUNNER_TEMP 'candidate.json'
+          @{ version = $version } | ConvertTo-Json | Set-Content -Encoding utf8 $config
+          npx --yes @tauri-apps/cli@2 build --ci --config $config
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $files = @(Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe)
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
+          Copy-Item $files[0] "$env:RUNNER_TEMP/done-windows-x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: done-windows-x64-installer
+          path: ${{ runner.temp }}/done-windows-x64-setup.exe
+          compression-level: 0
+          if-no-files-found: error
+      - name: Install, launch and reopen local data
+        run: ./.github/scripts/test-windows-installer.ps1 -Installer "$env:RUNNER_TEMP/done-windows-x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-desktop-evidence
+          path: ${{ runner.temp }}/done-windows-evidence
+          if-no-files-found: ignore
