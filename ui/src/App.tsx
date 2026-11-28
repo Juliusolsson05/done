@@ -546,7 +546,7 @@ export default function App() {
                   'min-w-0 md:overflow-y-auto',
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
-                  'max-md:px-4 max-md:pt-[calc(var(--safe-top)+2.75rem)] max-md:pb-[calc(var(--safe-bottom)+8rem)]',
+                  'max-md:px-4 max-md:pt-[calc(var(--safe-top)+var(--phone-nav))] max-md:pb-[calc(var(--safe-bottom)+var(--phone-page-end))]',
                   // Lists is a grouped screen: white groups on grey.
                   view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
@@ -560,7 +560,7 @@ export default function App() {
                     // A phone switches tabs at once, as iOS does, and pushes
                     // a screen opened from Lists in from the right.
                     isMobile ? !isTab(view) && 'animate-push' : 'animate-enter',
-                    (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col',
+                    (view.kind === 'timeline' || view.kind === 'focus' || view.kind === 'board') && 'flex min-h-0 flex-1 flex-col',
                   )}
                 >
                   {view.kind === 'lists' && <ListsScreen />}
