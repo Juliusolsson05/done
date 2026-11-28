@@ -14,3 +14,7 @@ Apple's App Review Guideline 5.1.1(i) calls for an accessible privacy link withi
 ## Checks
 
 Exercise the actual hosted privacy and support routes without an account. Check the footer and mobile Settings text in the production UI build. Keep signed-in data out of these public pages. The App Store privacy questionnaire remains separate from the policy text.
+
+## Verified
+
+The hosted fixture served privacy, terms and support without a session and included the escaped operator and contact email. The native UI typecheck, 630 UI tests and Vite build passed. Chrome reached the production landing footer, existing policy, public contact email and Apple’s instructions. Production checks of the new pages follow deployment.

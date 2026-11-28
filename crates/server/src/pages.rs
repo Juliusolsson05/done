@@ -86,28 +86,36 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
     page(
         "Privacy",
         &cloud.operator,
-        r#"<h2>What is kept</h2>
+        r#"<h2>On your device</h2>
+<p>You can use the iPhone, iPad and Mac apps without an account. They keep your tasks, projects, notes and time sheet on the device. On iPhone and iPad, done also keeps a local snapshot so its widgets and Live Activity can display tasks and focus sessions.</p>
+
+<h2>When you sign in</h2>
+<p>Signing in uploads the device’s task data to your account and syncs changes across your devices. In the web app, the server stores the content you enter. Your personal space and time sheet are private to your account.</p>
+<p>Apple supplies an account identifier and may supply a name and email address, including an Apple relay address. Google supplies an account identifier, email, name and profile picture address when available. done uses these details to identify your account, show who belongs to a workspace and match invitations. A signed browser cookie or an app token keeps you signed in. done cannot read your mail, calendar, address book or files.</p>
+
+<h2>Who can see what</h2>
 <ul>
-  <li><strong>Your tasks.</strong> Your tasks, projects, notes and time sheet are kept in a database, in a space that belongs to your account alone.</li>
-  <li><strong>Workspaces you are in.</strong> A project you move into a workspace, its tasks and notes, and who is assigned to what are kept in that workspace, where every member can see and change them. Your time sheet and your other projects are never shared.</li>
-  <li><strong>Who you are, from Google.</strong> When you sign in, Google tells this server your account's id, name, email address and picture. They are kept with your account so the server knows which tasks are yours, so people in your workspaces see your name and picture, and so an invite sent to your address can reach you. A signed cookie in your browser (or a token in the app) says who you are on each visit.</li>
-  <li><strong>Feedback.</strong> If you post to the feedback wall, signed-in users can see the category, message and date. The server keeps the account that sent it so deleting your account also deletes your posts.</li>
-  <li><strong>Invites.</strong> An invite keeps the address it was sent to and who sent it. No email is sent: it waits in done for that address to sign in.</li>
+  <li>Members of a workspace can see and edit its projects, tasks, notes and assignments. They can see other members’ profile details. An invitation records the email address entered and the person who invited it.</li>
+  <li>Signed-in users can read the category, message and date of feedback you post on the wall. The server also records which account posted it.</li>
+  <li>If you connect an external assistant, it can read and change the tasks and notes available to it. Information sent to that service is handled under its own privacy policy.</li>
 </ul>
-<p>Nothing else is asked of Google. done cannot read your mail, calendar, contacts or files.</p>
+<p>done uses no advertising or cross-app tracking and does not sell your data or use it to train models. WHO uses hosting providers to serve requests and store synced data. The database is hosted on Google Cloud. Workspace profile pictures from Google load from Google. Hosting request logs can include the request time, requested address and network address.</p>
 
-<h2>What is not done</h2>
-<ul>
-  <li>No advertising and no tracking. The pages load nothing from other companies, except your workspace members' pictures, which come from Google.</li>
-  <li>Your tasks are not sold, shared beyond the workspaces you choose, or used to train anything.</li>
-  <li>The server's host keeps ordinary request logs (time, address requested, your network address) for a limited time, as every web server does. The content of your tasks is never written to them.</li>
-</ul>
+<h2>Retention and deletion</h2>
+<p>Synced data stays in your account until you delete it or the account. The database is backed up daily and each backup is kept for seven days. The sign-in cookie lasts 30 days.</p>
+<p>To delete your account, open Settings, choose “Delete my account” and confirm. This removes your personal space and feedback and ends your workspace memberships. A workspace you own passes to its earliest remaining member or is deleted if nobody else belongs to it. Shared content in a continuing workspace stays there. Deleted data ages out of backups within seven days.</p>
+<p>On iPhone, iPad and Mac, signing out or deleting your hosted account leaves local task data on your devices. To remove the local copy on iPhone or iPad, use Delete App on each device. If you signed in with Apple, also disconnect done under Sign in with Apple in your Apple Account. <a href="https://support.apple.com/102571">See Apple’s instructions</a>.</p>
+<p>For questions about your data, <a href="/support">contact support</a>.</p>"#,
+    )
+}
 
-<h2>Where it is kept, and for how long</h2>
-<p>The database is run on Google Cloud by WHO, and your tasks are kept until you delete your account. The database is backed up every day and each backup is kept for 7 days. The sign-in cookie lasts 30 days.</p>
-
-<h2>Deleting everything</h2>
-<p>In done, open Settings and choose "Delete my account". Your own space and everything in it are deleted at once, and leave the backups within 7 days. You leave every workspace; one you own that others are in passes to the member who joined it first, and one only you are in is deleted. Signing out only removes the cookie.</p>"#,
+pub async fn support(State(cloud): State<Cloud>) -> Html<String> {
+    page(
+        "Support",
+        &cloud.operator,
+        r#"<p>For help using done or questions about your account or privacy, contact WHO using the address below. Include your device and what happened. Please leave out passwords and the contents of private tasks.</p>
+<p>To report a problem or suggest a change to other users, visit the <a href="/feedback">feedback wall</a>. Signed-in users can read posts there.</p>
+<p><a href="/privacy">Privacy policy</a></p>"#,
     )
 }
 

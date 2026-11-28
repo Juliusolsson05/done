@@ -334,6 +334,7 @@ fn cloud(cloud: Cloud) -> Router {
         // For the host to ask whether the server is up. Says nothing else.
         .route("/healthz", get(|| async { "ok" }))
         .route("/privacy", get(pages::privacy))
+        .route("/support", get(pages::support))
         .route("/terms", get(pages::terms))
         .route("/auth/google", get(auth::start))
         .route("/auth/google/callback", get(auth::back))
@@ -727,6 +728,9 @@ mod tests {
         let mut browser = Browser::new(&at);
         let landing = browser.get("/feedback").await.text().await.unwrap();
         assert!(landing.contains(&format!("{at}/auth/google?then=%2Ffeedback")));
+        for path in ["/privacy", "/support"] {
+            assert!(landing.contains(&format!("href=\"{at}{path}\"")));
+        }
         assert!(!landing.contains("{{APP_URL}}"));
         let hi = browser.http.get(&at).header("host", "Hi.TheDone.App:443").send().await.unwrap();
         assert_eq!(hi.text().await.unwrap(), landing);
@@ -989,10 +993,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_privacy_and_terms_pages_are_open_to_everyone_and_name_who_runs_the_server() {
+    async fn the_public_help_pages_name_who_runs_the_server() {
         let (at, _google, _kept) = hosted(1).await;
         let http = reqwest::Client::new();
-        for path in ["/privacy", "/terms"] {
+        for path in ["/privacy", "/terms", "/support"] {
             let page = http.get(format!("{at}{path}")).send().await.unwrap();
             assert_eq!(page.status(), 200, "{path}");
             let text = page.text().await.unwrap();
@@ -1000,6 +1004,12 @@ mod tests {
             assert!(text.contains("Anna &amp; &lt;Co&gt;"), "{path}");
             assert!(!text.contains("<Co>"), "{path}");
             assert!(text.contains("mailto:anna@example.com"), "{path}");
+            if path == "/privacy" {
+                assert!(text.contains("Apple relay address") && text.contains("Delete App") && text.contains("external assistant"));
+            }
+            if path == "/support" {
+                assert!(text.contains("feedback wall") && text.contains("Privacy policy"));
+            }
             assert!(!text.contains("WHO"), "{path}: a placeholder was left in");
         }
         // A server on this Mac has no accounts and keeps nothing about anyone.
