@@ -1,4 +1,4 @@
-//! done on a Mac. The app itself is the library beside this file; this is
+//! done on the desktop. The app itself is the library beside this file; this is
 //! only how it is started.
 //!
 //! The same program is also done's MCP server: started as `done mcp` it opens

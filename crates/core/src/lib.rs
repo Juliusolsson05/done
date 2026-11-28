@@ -310,14 +310,19 @@ pub fn check_entry(entry: &NewEntry) -> Result<(), Error> {
     Ok(())
 }
 
-/// `~/Library/Application Support/done/done.db`, or `DONE_DB` when set. Outside
-/// any code folder on purpose: updating the app can never touch the tasks.
+/// A per-user file shared by the desktop app and MCP, outside the installation
+/// directory so an update leaves the tasks in place. DONE_DB overrides it.
 pub fn default_path() -> PathBuf {
     if let Some(path) = std::env::var_os("DONE_DB") {
         return PathBuf::from(path);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let dir = home.join("Library").join("Application Support").join("done");
+    #[cfg(windows)]
+    let dir = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("AppData").join("Local")))
+        .expect("find the user’s local application data directory")
+        .join("done");
+    #[cfg(not(windows))]
+    let dir = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library").join("Application Support").join("done");
     let _ = std::fs::create_dir_all(&dir);
     dir.join("done.db")
 }
