@@ -135,8 +135,8 @@ struct NewFeedback {
     message: String,
 }
 
-async fn feedback(State(cloud): State<Cloud>, _session: auth::Session) -> Response {
-    ([(header::CACHE_CONTROL, "private, no-store")], done(cloud.db.feedback().await)).into_response()
+async fn feedback(State(cloud): State<Cloud>, me: Me) -> Response {
+    ([(header::CACHE_CONTROL, "private, no-store")], done(cloud.db.feedback(&me).await)).into_response()
 }
 
 async fn add_feedback(State(cloud): State<Cloud>, me: Me, Json(q): Json<NewFeedback>) -> Response {
@@ -284,7 +284,7 @@ async fn live_ticket(State(cloud): State<Cloud>, me: Me, session: auth::Session,
     let Some(url) = cloud.config.collab_url.clone() else { return auth::down(Fail::NotFound) };
     let space = match (q.note, q.space) {
         (Some(note), _) => cloud.db.note_workspace(&me, note).await,
-        (None, Some(space)) => match cloud.db.in_workspace(&me.id, space).await {
+        (None, Some(space)) => match cloud.db.in_workspace(&me.id, me.generation, space).await {
             Ok(true) => Ok(space),
             Ok(false) => Err(Fail::NotFound),
             Err(e) => Err(e),
@@ -297,6 +297,7 @@ async fn live_ticket(State(cloud): State<Cloud>, me: Me, session: auth::Session,
     };
     let ticket = collab::Ticket {
         account: me.id.clone(),
+        generation: me.generation,
         name: session.name.clone(),
         picture: session.picture.clone(),
         space,
@@ -839,11 +840,15 @@ mod tests {
         b.sign_in().await;
         assert_eq!(b.titles().await, vec!["Call the bank"]);
         assert_eq!(db.count("1001").await.unwrap()[1], 1);
+        let mut other_device = Browser::new(&at);
+        other_device.sign_in().await;
         assert_eq!(b.post("/api/account/delete", serde_json::json!({})).await.status(), 200);
+        assert_eq!(other_device.get("/api/state?today=2026-11-18").await.status(), 401);
         assert!(matches!(db.count("1001").await, Err(Fail::NotFound)));
         assert_eq!(b.get("/api/state?today=2026-11-18").await.status(), 401);
         b.sign_in().await;
         assert!(b.titles().await.is_empty());
+        assert_eq!(other_device.get("/api/state?today=2026-11-18").await.status(), 401);
     }
 
     #[tokio::test]
@@ -1128,5 +1133,11 @@ mod tests {
         assert_eq!(renewed.status(), 200);
         let as_access = b.http.post(format!("{at}/mcp")).bearer_auth(refresh).json(&serde_json::json!({ "jsonrpc": "2.0", "id": 4, "method": "ping" })).send().await.unwrap();
         assert_eq!(as_access.status(), 401);
+        assert_eq!(b.post("/api/account/delete", serde_json::json!({})).await.status(), 200);
+        b.sign_in().await;
+        let expired = b.http.post(format!("{at}/oauth/token")).form(&[("grant_type", "refresh_token"), ("refresh_token", refresh)]).send().await.unwrap();
+        assert_eq!(expired.status(), 400);
+        let old = b.http.post(format!("{at}/mcp")).bearer_auth(&token).json(&serde_json::json!({"jsonrpc":"2.0","id":5,"method":"ping"})).send().await.unwrap();
+        assert_eq!(old.status(), 401);
     }
 }

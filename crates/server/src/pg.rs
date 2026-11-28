@@ -19,7 +19,7 @@
 //!
 //! The rules about what a valid task is are done-core's, shared with the apps.
 
-use deadpool_postgres::{GenericClient, Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
+use deadpool_postgres::{Client, GenericClient, Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
 use done_core::{
     check, check_entry, clean_folder, is_day, Assign, Assignee, Change, Cursor, Entry, Gone, NewEntry, Note, Outbox, Project, Reply, Rows,
     SaveNote, Stamped, State, Task,
@@ -28,7 +28,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_postgres::NoTls;
 
@@ -81,12 +80,14 @@ pub const MEMBERS: i64 = 50;
 pub const INVITES_A_DAY: i64 = 20;
 pub const PENDING: i64 = 50;
 const WEEK: i64 = 7 * 24 * 60 * 60 * 1000;
-const KNOWN_FOR: std::time::Duration = std::time::Duration::from_secs(60);
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS account (
   id TEXT PRIMARY KEY, email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', picture TEXT NOT NULL DEFAULT '',
   created BIGINT NOT NULL);
+ALTER TABLE account ADD COLUMN IF NOT EXISTS session_generation BIGINT;
+CREATE SEQUENCE IF NOT EXISTS account_generation_seq;
+ALTER TABLE account ALTER COLUMN session_generation SET DEFAULT nextval('account_generation_seq');
 CREATE INDEX IF NOT EXISTS account_email ON account (lower(email));
 CREATE TABLE IF NOT EXISTS feedback (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -150,6 +151,7 @@ pub struct Me {
     pub id: String,
     pub email: String,
     pub personal: i64,
+    pub generation: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -176,11 +178,6 @@ struct In {
 
 pub struct Db {
     pool: Pool,
-    /// Accounts already written this run, with what was written: signing in
-    /// on every request must not mean a write on every request.
-    /// Checked again after KNOWN_FOR: another copy of the server may have
-    /// deleted the account (and its space) since.
-    known: Mutex<HashMap<String, (i64, String, std::time::Instant)>>,
 }
 
 const TASK: &str = "id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by, changed";
@@ -239,6 +236,27 @@ fn entry_of(r: &tokio_postgres::Row) -> (Entry, i64) {
 /// The next value of a space's counter. Takes the space's row lock until commit.
 async fn bump(tx: &Transaction<'_>, space: i64) -> Result<i64, Fail> {
     Ok(tx.query_one("UPDATE space SET next_seq = next_seq + 1 WHERE id = $1 RETURNING next_seq", &[&space]).await?.get(0))
+}
+
+// Readers see one account incarnation and its data in the same snapshot.
+// Writers hold the account row until commit, so deletion either precedes
+// their generation check or follows the entire write.
+async fn account_snapshot<'a>(client: &'a mut Client, me: &Me) -> Result<Transaction<'a>, Fail> {
+    let tx = client.build_transaction().isolation_level(tokio_postgres::IsolationLevel::RepeatableRead).read_only(true).start().await?;
+    tx.query_opt(
+        "SELECT 1 FROM account WHERE id = $1 AND session_generation IS NOT DISTINCT FROM $2",
+        &[&me.id, &me.generation],
+    ).await?.ok_or(Fail::NotFound)?;
+    Ok(tx)
+}
+
+async fn account_write<'a>(client: &'a mut Client, me: &Me) -> Result<Transaction<'a>, Fail> {
+    let tx = client.transaction().await?;
+    tx.query_opt(
+        "SELECT 1 FROM account WHERE id = $1 AND session_generation IS NOT DISTINCT FROM $2 FOR SHARE",
+        &[&me.id, &me.generation],
+    ).await?.ok_or(Fail::NotFound)?;
+    Ok(tx)
 }
 
 async fn spaces_of(tx: &impl GenericClient, account: &str) -> Result<Vec<In>, Fail> {
@@ -787,7 +805,7 @@ impl Db {
         // A few connections per server copy: the database is shared by up
         // to ten of them, and it allows about a hundred.
         let pool = Pool::builder(manager).max_size(5).build().map_err(|e| Fail::Down(e.to_string()))?;
-        let db = Self { pool, known: Mutex::new(HashMap::new()) };
+        let db = Self { pool };
         let mut client = db.pool.get().await?;
         let tx = client.transaction().await?;
         // Two copies of the server starting at once would race to make the
@@ -817,29 +835,33 @@ impl Db {
         Ok(client.query_opt("SELECT name FROM account WHERE id = $1", &[&id]).await?.map(|r| r.get::<_, String>(0)).filter(|n| !n.is_empty()))
     }
 
-    /// The person, written down (or brought up to date) and with their own
-    /// space. Called with what their sign-in says on every request.
+    /// Provision a personal space only when the identity provider has authenticated the owner.
     pub async fn me(&self, id: &str, email: &str, name: &str, picture: &str) -> Result<Me, Fail> {
         let email = email.trim().to_lowercase();
-        let print = format!("{email}\n{name}\n{picture}");
-        if let Some((personal, seen, when)) = self.known.lock().unwrap().get(id) {
-            if *seen == print && when.elapsed() < KNOWN_FOR {
-                return Ok(Me { id: id.into(), email, personal: *personal });
-            }
-        }
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
         let now = now_ms();
-        tx.execute(
+        let generation: Option<i64> = tx.query_one(
             "INSERT INTO account (id, email, name, picture, created) VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (id) DO UPDATE SET email = excluded.email, name = excluded.name, picture = excluded.picture",
+             ON CONFLICT (id) DO UPDATE SET email = excluded.email, name = excluded.name, picture = excluded.picture
+             RETURNING session_generation",
             &[&id, &email, &name, &picture, &now],
-        )
-        .await?;
+        ).await?.get(0);
         let personal = self.personal_in(&tx, id).await?;
         tx.commit().await?;
-        self.known.lock().unwrap().insert(id.into(), (personal, print, std::time::Instant::now()));
-        Ok(Me { id: id.into(), email, personal })
+        Ok(Me { id: id.into(), email, personal, generation })
+    }
+
+    /// Accounts created before generations were introduced have NULL in both
+    /// the database and their old sessions. A new account always gets a generation.
+    pub async fn session_account(&self, id: &str, generation: Option<i64>) -> Result<Option<Me>, Fail> {
+        let client = self.pool.get().await?;
+        let row = client.query_opt(
+            "SELECT a.email, s.id FROM account a JOIN space s ON s.owner_id = a.id AND s.kind = 'personal'
+             WHERE a.id = $1 AND a.session_generation IS NOT DISTINCT FROM $2",
+            &[&id, &generation],
+        ).await?;
+        Ok(row.map(|r| Me { id: id.into(), email: r.get(0), personal: r.get(1), generation }))
     }
 
     async fn personal_in(&self, tx: &Transaction<'_>, id: &str) -> Result<i64, Fail> {
@@ -859,8 +881,9 @@ impl Db {
         Ok(personal)
     }
 
-    pub async fn feedback(&self) -> Result<Vec<Feedback>, Fail> {
-        let client = self.pool.get().await?;
+    pub async fn feedback(&self, me: &Me) -> Result<Vec<Feedback>, Fail> {
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let rows = client.query("SELECT id, kind, message, created FROM feedback ORDER BY id DESC LIMIT 100", &[]).await?;
         Ok(rows.into_iter().map(Feedback::from).collect())
     }
@@ -876,7 +899,7 @@ impl Db {
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
         // Serialize submissions by this account so simultaneous requests share its limit.
-        if tx.query_opt("SELECT id FROM account WHERE id = $1 FOR UPDATE", &[&me.id]).await?.is_none() {
+        if tx.query_opt("SELECT id FROM account WHERE id = $1 AND session_generation IS NOT DISTINCT FROM $2 FOR UPDATE", &[&me.id, &me.generation]).await?.is_none() {
             return Err(Fail::NotFound);
         }
         let now = now_ms();
@@ -904,7 +927,7 @@ impl Db {
         // two of them in the meantime shows up in both or in neither, never
         // as a tombstone in one without the row in the other.
         let mut client = self.pool.get().await?;
-        let tx = client.build_transaction().isolation_level(tokio_postgres::IsolationLevel::RepeatableRead).read_only(true).start().await?;
+        let tx = account_snapshot(&mut client, me).await?;
         let spaces = spaces_of(&tx, &me.id).await?;
         let legacy = outbox.cursors.is_none();
         // An app from before workspaces, or one that has never synced since,
@@ -939,7 +962,8 @@ impl Db {
         if !is_day(today) {
             return invalid("Today must be a day written YYYY-MM-DD.");
         }
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let spaces = spaces_of(&client, &me.id).await?;
         let ids: Vec<i64> = spaces.iter().map(|s| s.id).collect();
         let projects = client
@@ -976,7 +1000,7 @@ impl Db {
 
     async fn write(&self, me: &Me, rows: Rows) -> Result<usize, Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let spaces = spaces_of(&tx, &me.id).await?;
         lock(&tx, &spaces).await?;
         // Read again once locked: someone removed while this waited is out.
@@ -1017,13 +1041,15 @@ impl Db {
             ..Default::default()
         };
         self.write(me, rows).await?;
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let ids: Vec<i64> = spaces_of(&client, &me.id).await?.iter().map(|s| s.id).collect();
         Ok(client.query_one("SELECT coalesce(sum(next_seq), 0)::BIGINT FROM space WHERE id = ANY($1)", &[&ids]).await?.get(0))
     }
 
     pub async fn notes(&self, me: &Me) -> Result<Vec<Note>, Fail> {
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let ids: Vec<i64> = spaces_of(&client, &me.id).await?.iter().map(|s| s.id).collect();
         Ok(client
             .query(&format!("SELECT {NOTE} FROM note WHERE space_id = ANY($1) ORDER BY updated_at DESC, id DESC"), &[&ids])
@@ -1049,7 +1075,8 @@ impl Db {
         if !is_day(day) {
             return invalid("The day must be written YYYY-MM-DD.");
         }
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         Ok(client
             .query(&format!("SELECT {ENTRY} FROM entry WHERE space_id = $1 AND day = $2 ORDER BY started_at, id"), &[&me.personal, &day])
             .await?
@@ -1080,7 +1107,8 @@ impl Db {
     }
 
     pub async fn finished(&self, me: &Me, limit: i64) -> Result<Vec<Task>, Fail> {
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let ids: Vec<i64> = spaces_of(&client, &me.id).await?.iter().map(|s| s.id).collect();
         Ok(client
             .query(
@@ -1094,7 +1122,8 @@ impl Db {
     }
 
     pub async fn team(&self, me: &Me) -> Result<Value, Fail> {
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_snapshot(&mut connection, me).await?;
         let spaces = spaces_of(&client, &me.id).await?;
         team_in(&client, me, &spaces).await
     }
@@ -1113,6 +1142,8 @@ impl Db {
     }
 
     async fn workspace_role(tx: &Transaction<'_>, me: &Me, space: i64) -> Result<String, Fail> {
+        // Account deletion may transfer ownership while this writer waits.
+        tx.query_opt("SELECT id FROM space WHERE id = $1 FOR UPDATE", &[&space]).await?.ok_or(Fail::NotFound)?;
         let (role, kind) = Self::role(tx, me, space).await?;
         if kind != "workspace" {
             return Err(Fail::NotFound);
@@ -1123,7 +1154,7 @@ impl Db {
     pub async fn create_workspace(&self, me: &Me, name: &str) -> Result<i64, Fail> {
         let name = clean_name(name)?;
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let count: i64 = tx
             .query_one("SELECT count(*) FROM member m JOIN space s ON s.id = m.space_id WHERE m.account_id = $1 AND s.kind = 'workspace'", &[&me.id])
             .await?
@@ -1142,7 +1173,7 @@ impl Db {
     pub async fn rename_workspace(&self, me: &Me, space: i64, name: &str) -> Result<(), Fail> {
         let name = clean_name(name)?;
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         if Self::workspace_role(&tx, me, space).await? != "owner" {
             return invalid("Only the workspace's owner can rename it.");
         }
@@ -1155,12 +1186,10 @@ impl Db {
     /// devices drop it at their next sync, as it is no longer theirs.
     pub async fn delete_workspace(&self, me: &Me, space: i64) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         if Self::workspace_role(&tx, me, space).await? != "owner" {
             return invalid("Only the workspace's owner can delete it.");
         }
-        // The space first, as every writer takes it first: no waiting in a circle.
-        tx.execute("SELECT id FROM space WHERE id = $1 FOR UPDATE", &[&space]).await?;
         for table in ["task_assignee", "task", "note", "project", "tombstone", "notification"] {
             tx.execute(&format!("DELETE FROM {table} WHERE space_id = $1"), &[&space]).await?;
         }
@@ -1178,7 +1207,7 @@ impl Db {
             return invalid("That is not an email address.");
         }
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         Self::workspace_role(&tx, me, space).await?;
         let already: bool = tx
             .query_one("SELECT EXISTS (SELECT 1 FROM member m JOIN account a ON a.id = m.account_id WHERE m.space_id = $1 AND lower(a.email) = $2)", &[&space, &email])
@@ -1224,7 +1253,7 @@ impl Db {
     /// kept, so the old link stops working and a new one is made.
     pub async fn invite_link(&self, me: &Me, invite: i64, public_url: &str) -> Result<Made, Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let row = tx.query_opt("SELECT space_id FROM invite WHERE id = $1 AND state = 'pending'", &[&invite]).await?.ok_or(Fail::NotFound)?;
         Self::workspace_role(&tx, me, row.get(0)).await?;
         let token = format!("{:032x}{:032x}", rand::random::<u128>(), rand::random::<u128>());
@@ -1236,7 +1265,7 @@ impl Db {
 
     pub async fn revoke(&self, me: &Me, invite: i64) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let row = tx.query_opt("SELECT space_id FROM invite WHERE id = $1 AND state = 'pending'", &[&invite]).await?.ok_or(Fail::NotFound)?;
         Self::workspace_role(&tx, me, row.get(0)).await?;
         tx.execute("UPDATE invite SET state = 'revoked' WHERE id = $1", &[&invite]).await?;
@@ -1278,7 +1307,7 @@ impl Db {
     /// to can use it.
     pub async fn accept(&self, me: &Me, invite: Option<i64>, token: Option<&str>) -> Result<i64, Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let row = match (invite, token) {
             (Some(id), _) => tx.query_opt("SELECT id, space_id, email, expires, state, invited_by FROM invite WHERE id = $1 FOR UPDATE", &[&id]).await?,
             (None, Some(token)) => {
@@ -1331,12 +1360,14 @@ impl Db {
     }
 
     pub async fn decline(&self, me: &Me, invite: i64) -> Result<(), Fail> {
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_write(&mut connection, me).await?;
         let changed =
             client.execute("UPDATE invite SET state = 'declined' WHERE id = $1 AND email = $2 AND state = 'pending'", &[&invite, &me.email]).await?;
         if changed == 0 {
             return Err(Fail::NotFound);
         }
+        client.commit().await?;
         Ok(())
     }
 
@@ -1364,7 +1395,7 @@ impl Db {
 
     pub async fn remove_member(&self, me: &Me, space: i64, account: &str) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         if Self::workspace_role(&tx, me, space).await? != "owner" {
             return invalid("Only the workspace's owner can remove people.");
         }
@@ -1382,7 +1413,7 @@ impl Db {
 
     pub async fn leave(&self, me: &Me, space: i64) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         if Self::workspace_role(&tx, me, space).await? == "owner" {
             return invalid("You own this workspace. Delete it, or ask to be removed once someone else owns it.");
         }
@@ -1395,7 +1426,7 @@ impl Db {
     /// another space the person is in. Out of a workspace is the owner's call.
     pub async fn move_project(&self, me: &Me, project: i64, to: i64) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
-        let tx = client.transaction().await?;
+        let tx = account_write(&mut client, me).await?;
         let spaces = spaces_of(&tx, &me.id).await?;
         let from: i64 = tx.query_opt("SELECT space_id FROM project WHERE id = $1", &[&project]).await?.ok_or(Fail::NotFound)?.get(0);
         let source = spaces.iter().find(|s| s.id == from).ok_or(Fail::NotFound)?;
@@ -1437,8 +1468,10 @@ impl Db {
     }
 
     pub async fn read_notifications(&self, me: &Me) -> Result<(), Fail> {
-        let client = self.pool.get().await?;
+        let mut connection = self.pool.get().await?;
+        let client = account_write(&mut connection, me).await?;
         client.execute("UPDATE notification SET read_at = $2 WHERE account_id = $1 AND read_at IS NULL", &[&me.id, &now_ms()]).await?;
+        client.commit().await?;
         Ok(())
     }
 
@@ -1448,6 +1481,13 @@ impl Db {
     pub async fn delete_account(&self, me: &Me) -> Result<(), Fail> {
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
+        tx.query_opt(
+            "SELECT 1 FROM account WHERE id = $1 AND session_generation IS NOT DISTINCT FROM $2 FOR UPDATE",
+            &[&me.id, &me.generation],
+        ).await?.ok_or(Fail::NotFound)?;
+        let spaces = spaces_of(&tx, &me.id).await?;
+        lock(&tx, &spaces).await?;
+        // A different member may just have left or handed ownership to us.
         let spaces = spaces_of(&tx, &me.id).await?;
         for space in &spaces {
             let others: Option<String> = tx
@@ -1473,7 +1513,6 @@ impl Db {
         tx.execute("DELETE FROM notification WHERE account_id = $1", &[&me.id]).await?;
         tx.execute("DELETE FROM account WHERE id = $1", &[&me.id]).await?;
         tx.commit().await?;
-        self.known.lock().unwrap().remove(&me.id);
         Ok(())
     }
 
@@ -1635,12 +1674,12 @@ impl Db {
 
     /// Whether the person is in the workspace still: someone removed while a
     /// note is open is taken out of it.
-    pub async fn in_workspace(&self, account: &str, space: i64) -> Result<bool, Fail> {
+    pub async fn in_workspace(&self, account: &str, generation: Option<i64>, space: i64) -> Result<bool, Fail> {
         let client = self.pool.get().await?;
         Ok(client
             .query_one(
-                "SELECT EXISTS (SELECT 1 FROM member m JOIN space s ON s.id = m.space_id WHERE m.space_id = $1 AND m.account_id = $2 AND s.kind = 'workspace')",
-                &[&space, &account],
+                "SELECT EXISTS (SELECT 1 FROM member m JOIN space s ON s.id = m.space_id JOIN account a ON a.id = m.account_id WHERE m.space_id = $1 AND m.account_id = $2 AND s.kind = 'workspace' AND a.session_generation IS NOT DISTINCT FROM $3)",
+                &[&space, &account, &generation],
             )
             .await?
             .get(0))
@@ -1649,11 +1688,14 @@ impl Db {
     /// The workspace a note is in, for someone in it; "not found" for a note
     /// in someone's own space or one they cannot see.
     pub async fn note_workspace(&self, me: &Me, note: i64) -> Result<i64, Fail> {
-        let space = self.live_note(note).await?.filter(|n| n.workspace).ok_or(Fail::NotFound)?.space;
-        if !self.in_workspace(&me.id, space).await? {
-            return Err(Fail::NotFound);
-        }
-        Ok(space)
+        let client = self.pool.get().await?;
+        let row = client.query_opt(
+            "SELECT n.space_id FROM note n JOIN space s ON s.id = n.space_id
+             JOIN member m ON m.space_id = s.id JOIN account a ON a.id = m.account_id
+             WHERE n.id = $1 AND s.kind = 'workspace' AND a.id = $2 AND a.session_generation IS NOT DISTINCT FROM $3",
+            &[&note, &me.id, &me.generation],
+        ).await?.ok_or(Fail::NotFound)?;
+        Ok(row.get(0))
     }
 }
 
@@ -1762,6 +1804,77 @@ mod tests {
     use std::path::Path;
 
     const TODAY: &str = "2026-11-23";
+
+    #[tokio::test]
+    async fn existing_sessions_survive_migration_until_the_account_is_deleted() {
+        let db = testing::db().await;
+        let me = db.me("existing", "owner@example.com", "Owner", "").await.unwrap();
+        db.pool.get().await.unwrap().execute(
+            "UPDATE account SET session_generation = NULL WHERE id = $1", &[&me.id],
+        ).await.unwrap();
+        let old = db.session_account(&me.id, None).await.unwrap().unwrap();
+        db.delete_account(&old).await.unwrap();
+        assert!(db.session_account(&old.id, None).await.unwrap().is_none());
+        assert!(db.import(&old.id, &device().export().unwrap()).await.unwrap());
+        assert!(db.session_account(&old.id, None).await.unwrap().is_none());
+        let new = db.me(&old.id, &old.email, "Owner", "").await.unwrap();
+        assert!(new.generation.is_some());
+        assert!(db.session_account(&new.id, None).await.unwrap().is_none());
+        assert!(matches!(db.delete_account(&old).await, Err(Fail::NotFound)));
+        assert!(db.session_account(&new.id, new.generation).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn already_authenticated_requests_cannot_use_a_recreated_account() {
+        let db = testing::db().await;
+        let old = db.me("same-id", "me@example.com", "Me", "").await.unwrap();
+        db.delete_account(&old).await.unwrap();
+        let new = db.me(&old.id, &old.email, "Me", "").await.unwrap();
+        let workspace = db.create_workspace(&new, "New workspace").await.unwrap();
+
+        assert!(matches!(db.create_workspace(&old, "Stale workspace").await, Err(Fail::NotFound)));
+        assert!(matches!(db.add_feedback(&old, "bug", "Stale feedback").await, Err(Fail::NotFound)));
+        assert!(matches!(db.read_notifications(&old).await, Err(Fail::NotFound)));
+        assert!(matches!(db.feedback(&old).await, Err(Fail::NotFound)));
+        assert!(matches!(db.state(&old, TODAY).await, Err(Fail::NotFound)));
+        assert!(matches!(db.team(&old).await, Err(Fail::NotFound)));
+        assert!(!db.in_workspace(&old.id, old.generation, workspace).await.unwrap());
+        assert!(db.in_workspace(&new.id, new.generation, workspace).await.unwrap());
+        assert!(db.feedback(&new).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn deletion_waits_for_an_authorized_write_but_read_snapshots_stay_on_their_account() {
+        let db = testing::db().await;
+        let old = db.me("one", "one@example.com", "", "").await.unwrap();
+        let mut writer = db.pool.get().await.unwrap();
+        let tx = account_write(&mut writer, &old).await.unwrap();
+        let other = db.pool.get().await.unwrap();
+        // NOWAIT tests the same exclusive row lock deletion needs, without timers.
+        let busy = other.query_opt("SELECT id FROM account WHERE id = $1 FOR UPDATE NOWAIT", &[&old.id]).await.unwrap_err();
+        assert_eq!(busy.code(), Some(&tokio_postgres::error::SqlState::LOCK_NOT_AVAILABLE));
+        tx.commit().await.unwrap();
+
+        let mut reader = db.pool.get().await.unwrap();
+        let snapshot = account_snapshot(&mut reader, &old).await.unwrap();
+        db.delete_account(&old).await.unwrap();
+        let new = db.me(&old.id, &old.email, "", "").await.unwrap();
+        assert_ne!(new.personal, old.personal);
+        let spaces = spaces_of(&snapshot, &old.id).await.unwrap();
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].id, old.personal);
+    }
+
+    #[tokio::test]
+    async fn deleting_both_members_cannot_leave_an_ownerless_workspace() {
+        let db = testing::db().await;
+        let (owner, member) = people(&db).await;
+        let space = hop(&db, &owner, &member).await;
+        let (a, b) = tokio::join!(db.delete_account(&owner), db.delete_account(&member));
+        a.unwrap();
+        b.unwrap();
+        assert!(db.pool.get().await.unwrap().query_opt("SELECT id FROM space WHERE id = $1", &[&space]).await.unwrap().is_none());
+    }
 
     fn device() -> Store {
         Store::open(Path::new(":memory:")).unwrap()

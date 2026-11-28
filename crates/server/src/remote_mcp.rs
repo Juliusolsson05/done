@@ -98,8 +98,9 @@ pub async fn post(State(cloud): State<Cloud>, headers: HeaderMap, body: Bytes) -
     let Some(session) = auth::bearer(&headers, &cloud.config.key) else {
         return sign_in_first(&cloud);
     };
-    let me = match cloud.db.me(&session.sub, &session.email, &session.name, &session.picture).await {
-        Ok(me) => me,
+    let me = match session.account(&cloud).await {
+        Ok(Some(me)) => me,
+        Ok(None) => return sign_in_first(&cloud),
         Err(fail) => return auth::down(fail),
     };
     let Ok(message) = serde_json::from_slice::<serde_json::Value>(&body) else {
