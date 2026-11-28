@@ -1,8 +1,9 @@
-// The filter on the Board and the Timeline: a button in the header that
-// opens the choices (a popover, or a sheet from the bottom on a phone), and a
-// bar under the title that keeps what is filtered in sight as chips, with a
-// count. One filter for both pages (see lib/view-filter).
-import { useMemo, useSyncExternalStore, type ReactNode } from 'react'
+// The filter on every task view: a button in the header that opens the
+// choices (a popover, or a sheet from the bottom on a phone), and a bar under
+// the title that keeps what is filtered in sight as chips, with a count. One
+// filter for all of them; each view offers only what it does not decide
+// itself (see lib/view-filter).
+import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { CheckIcon, ListFilterIcon, SearchIcon, UserXIcon, XIcon } from 'lucide-react'
 import { Avatar } from '@/components/avatars'
 import { Button } from '@/components/ui/button'
@@ -14,8 +15,25 @@ import { ProjectDot } from '@/components/marks'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
-import { cleanFilter, filterChips, isFiltering, NO_FILTER, PRIORITY_SHORT, WHEN_NAMES, type ViewFilter, type When } from '@/lib/view-filter'
-import { getFilterOpen, getStoredFilter, setFilterOpen, setViewFilter, subscribeViewFilter } from '@/lib/view-filter-store'
+import { TODAY } from '@/lib/days'
+import type { Task, View } from '@/lib/tasks'
+import {
+  applyFilter,
+  cleanFilter,
+  filterChips,
+  fixedHere,
+  hiddenHere,
+  isFiltering,
+  NO_FILTER,
+  offered,
+  PRIORITY_SHORT,
+  WHEN_CHOICES,
+  WHEN_NAMES,
+  type Dimension,
+  type ViewFilter,
+  type When,
+} from '@/lib/view-filter'
+import { getFilterOpen, getStoredFilter, scopeChanged, setFilterOpen, setViewFilter, subscribeViewFilter } from '@/lib/view-filter-store'
 import { cn } from '@/lib/utils'
 import { workspaces, type Member } from '@/lib/team'
 
@@ -30,17 +48,47 @@ function usePeople(): Member[] {
 }
 
 // The filter as it applies now: read from storage and checked against the
-// projects there are today.
+// projects in the scope being looked at. When the scope has changed, the
+// projects outside it are dropped from the filter for good.
 export function useViewFilter(): ViewFilter {
-  const { data } = useApp()
+  const { shown, scope } = useApp()
   const stored = useSyncExternalStore(subscribeViewFilter, getStoredFilter)
-  return useMemo(() => cleanFilter(stored, data.projects), [stored, data.projects])
+  const filter = useMemo(() => cleanFilter(stored, shown.projects), [stored, shown.projects])
+  useEffect(() => {
+    if (scopeChanged(scope)) setViewFilter(filter)
+    // Only a change of scope writes; a read never does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope])
+  return filter
+}
+
+// The filter on the view being looked at (or `view`): what it lets the
+// filter choose, what it decides itself, and the tasks that pass.
+export function useTaskFilter(view?: View) {
+  const { shown, me, ui } = useApp()
+  const here = view ?? ui.view
+  const filter = useViewFilter()
+  const hasPeople = usePeople().length > 0
+  const fixed = useMemo(() => fixedHere(here, hasPeople), [here, hasPeople])
+  const on = isFiltering(filter)
+  const apply = (tasks: Task[]): Task[] => (on ? applyFilter(tasks, filter, { today: TODAY, me, projects: shown.projects, fixed }) : tasks)
+  return { filter, fixed, on, apply }
+}
+
+// What the view being looked at lets the filter choose.
+function useOffered(): Dimension[] {
+  const { ui } = useApp()
+  const hasPeople = usePeople().length > 0
+  const fixed = fixedHere(ui.view, hasPeople)
+  return (offered(ui.view) ?? []).filter((d) => !fixed.includes(d))
 }
 
 const LABEL = 'text-xs font-medium text-muted-foreground'
 // A chosen priority or time window in the app's blue, so what is on can be
 // told apart at a glance from what is not.
 const CHOSEN = 'data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
+// 44 points tall for a finger (#109); a mouse keeps the small ones.
+const TOUCH = 'pointer-coarse:h-11 pointer-coarse:px-3'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -55,6 +103,7 @@ function FilterChoices() {
   const { shown, me } = useApp()
   const people = usePeople()
   const filter = useViewFilter()
+  const offers = useOffered()
   const isMobile = useIsMobile()
   const set = (next: Partial<ViewFilter>) => setViewFilter({ ...filter, ...next })
   const toggleProject = (id: number | null) =>
@@ -69,7 +118,8 @@ function FilterChoices() {
         aria-checked={chosen}
         onClick={() => toggleProject(id)}
         className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent max-md:py-2.5',
+          // 44 points tall for a finger (#109).
+          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent pointer-coarse:min-h-11',
           chosen && 'font-medium',
         )}
       >
@@ -89,7 +139,7 @@ function FilterChoices() {
         role="menuitemcheckbox"
         aria-checked={chosen}
         onClick={() => set({ people: chosen ? filter.people.filter((p) => p !== key) : [...filter.people, key] })}
-        className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent max-md:py-2.5', chosen && 'font-medium')}
+        className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent pointer-coarse:min-h-11', chosen && 'font-medium')}
       >
         {face}
         <span className="min-w-0 flex-1 truncate">{name}</span>
@@ -105,20 +155,22 @@ function FilterChoices() {
         <Input
           value={filter.words}
           onChange={(event) => set({ words: event.target.value })}
-          placeholder="Words in the title or notes"
-          aria-label="Words in the title or notes"
+          placeholder="Words in a task or its project"
+          aria-label="Words in a task or its project"
           // On a phone the keyboard would cover half the choices if it rose by itself.
           autoFocus={!isMobile}
-          className="h-8 pl-8"
+          className="h-8 pl-8 pointer-coarse:h-11"
         />
       </div>
-      <Section title="Projects">
-        <div className="-mx-2 flex max-h-56 flex-col overflow-y-auto">
-          {projectRow(null, 'Inbox')}
-          {shown.projects.map((p) => projectRow(p.id, p.name))}
-        </div>
-      </Section>
-      {people.length > 0 && (
+      {offers.includes('projects') && (
+        <Section title="Projects">
+          <div className="-mx-2 flex max-h-56 flex-col overflow-y-auto">
+            {projectRow(null, 'Inbox')}
+            {shown.projects.map((p) => projectRow(p.id, p.name))}
+          </div>
+        </Section>
+      )}
+      {offers.includes('people') && (
         <Section title="Assignee">
           <div className="-mx-2 flex max-h-48 flex-col overflow-y-auto">
             {people.map((m) => personRow(m.id === me ? 'me' : m.id, m.id === me ? 'Me' : m.name || m.email, <Avatar who={m} size="xs" />))}
@@ -126,45 +178,49 @@ function FilterChoices() {
           </div>
         </Section>
       )}
-      <Section title="Priority">
-        <ToggleGroup
-          type="multiple"
-          variant="outline"
-          size="sm"
-          spacing={1}
-          value={filter.priorities.map(String)}
-          onValueChange={(values) => set({ priorities: values.map(Number) })}
-          aria-label="Priority"
-          className="flex-wrap"
-        >
-          {[0, 1, 2, 3, 4].map((p) => (
-            <ToggleGroupItem key={p} value={String(p)} className={CHOSEN}>
-              {PRIORITY_SHORT[p]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </Section>
-      <Section title="When">
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          spacing={1}
-          value={filter.when}
-          // Pressing the chosen one again goes back to any time, rather than to nothing.
-          onValueChange={(value) => set({ when: (value || 'any') as When })}
-          aria-label="When"
-          className="flex-wrap"
-        >
-          {(Object.keys(WHEN_NAMES) as When[]).map((when) => (
-            <ToggleGroupItem key={when} value={when} className={CHOSEN}>
-              {WHEN_NAMES[when]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </Section>
+      {offers.includes('priorities') && (
+        <Section title="Priority">
+          <ToggleGroup
+            type="multiple"
+            variant="outline"
+            size="sm"
+            spacing={1}
+            value={filter.priorities.map(String)}
+            onValueChange={(values) => set({ priorities: values.map(Number) })}
+            aria-label="Priority"
+            className="flex-wrap"
+          >
+            {[0, 1, 2, 3, 4].map((p) => (
+              <ToggleGroupItem key={p} value={String(p)} className={cn(CHOSEN, TOUCH)}>
+                {PRIORITY_SHORT[p]}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </Section>
+      )}
+      {offers.includes('when') && (
+        <Section title="When">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            spacing={1}
+            value={filter.when}
+            // Pressing the chosen one again goes back to any time, rather than to nothing.
+            onValueChange={(value) => set({ when: (value || 'any') as When })}
+            aria-label="When"
+            className="flex-wrap"
+          >
+            {WHEN_CHOICES.map((when) => (
+              <ToggleGroupItem key={when} value={when} className={cn(CHOSEN, TOUCH)}>
+                {WHEN_NAMES[when]}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </Section>
+      )}
       {isFiltering(filter) && (
-        <Button variant="ghost" size="sm" className="self-start text-muted-foreground" onClick={() => setViewFilter(NO_FILTER)}>
+        <Button variant="ghost" size="sm" className="self-start text-muted-foreground pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
           Clear all
         </Button>
       )}
@@ -174,17 +230,21 @@ function FilterChoices() {
 
 // The button in the header. Shows how many things are filtered, so a page
 // that looks short says why even with the bar scrolled away.
-export function FilterButton() {
+// `className` places it in a header; the button keeps its own size.
+export function FilterButton({ className }: { className?: string } = {}) {
+  const { fixed } = useTaskFilter()
   const filter = useViewFilter()
   const open = useSyncExternalStore(subscribeViewFilter, getFilterOpen)
   const isMobile = useIsMobile()
-  const count = filterChips(filter, []).length
+  const count = filterChips(filter, [], [], fixed).length
+  const trigger = useRef<HTMLButtonElement>(null)
   const button = (
     <Button
+      ref={trigger}
       variant={count ? 'secondary' : 'ghost'}
       size="sm"
       // 44 points tall for a finger (#109); the Mac keeps 28.
-      className={cn('pointer-coarse:h-11', count ? 'text-foreground' : 'text-muted-foreground')}
+      className={cn('pointer-coarse:h-11', count ? 'text-foreground' : 'text-muted-foreground', className)}
       aria-label={count ? `Filter, ${count} on` : 'Filter'}
       title="Filter (F)"
       onClick={isMobile ? () => setFilterOpen(true) : undefined}
@@ -219,23 +279,33 @@ export function FilterButton() {
   return (
     <Popover open={open} onOpenChange={setFilterOpen}>
       <PopoverTrigger asChild>{button}</PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
+      <PopoverContent
+        align="end"
+        className="w-80"
+        // Opened with F, nothing had focus: it goes back to the button, not to the page.
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          trigger.current?.focus()
+        }}
+      >
         <FilterChoices />
       </PopoverContent>
     </Popover>
   )
 }
 
-// Under the title while a filter is on: what is filtered, each removable,
-// how many tasks are shown of how many, and Clear.
+// Under the title while a filter is on, on every task view: what is
+// filtered, each removable, how many choices this view decides itself
+// ("hidden here"), how many tasks are shown of how many, and Clear.
 export function FilterBar({ shown, total }: { shown: number; total: number }) {
   const { data, team } = useApp()
-  const filter = useViewFilter()
-  if (!isFiltering(filter)) return null
+  const { filter, fixed, on } = useTaskFilter()
+  if (!on) return null
   const people = (team?.spaces ?? []).flatMap((s) => s.members).map((m) => ({ id: m.id, name: m.name || m.email }))
+  const hidden = hiddenHere(filter, fixed)
   return (
-    <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5" aria-label="Filter">
-      {filterChips(filter, data.projects, people).map((chip) => (
+    <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5 max-md:mt-0 max-md:mb-3" role="group" aria-label="Filter">
+      {filterChips(filter, data.projects, people, fixed).map((chip) => (
         <span key={chip.key} className="flex items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1 pl-2.5 text-xs">
           {chip.key.startsWith('p') && <ProjectDot id={chip.key === 'pinbox' ? null : Number(chip.key.slice(1))} />}
           {chip.label}
@@ -252,10 +322,15 @@ export function FilterBar({ shown, total }: { shown: number; total: number }) {
           </button>
         </span>
       ))}
+      {hidden > 0 && (
+        <span className="ml-1 text-xs text-muted-foreground" title="Set on another view; this view decides it itself">
+          {hidden} hidden here
+        </span>
+      )}
       <span className="ml-1 text-xs text-muted-foreground tabular-nums">
         {shown} of {total} tasks
       </span>
-      <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setViewFilter(NO_FILTER)}>
+      <Button variant="ghost" size="xs" className="text-muted-foreground pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
         Clear
       </Button>
     </div>
@@ -268,7 +343,7 @@ export function NothingMatches() {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-14 text-center">
       <p className="text-sm text-muted-foreground">No tasks match the filter.</p>
-      <Button variant="outline" size="sm" onClick={() => setViewFilter(NO_FILTER)}>
+      <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
         Clear the filter
       </Button>
     </div>

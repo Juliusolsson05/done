@@ -7,6 +7,7 @@ import type { syntaxTree } from '@codemirror/language'
 import { markdownLanguage } from '@codemirror/lang-markdown'
 import { describeDay, type Day } from '@/lib/days'
 import { byPriority, openTasks, type Task } from '@/lib/tasks'
+import { fold, matchesQuery } from '@/lib/search'
 
 const SCHEME = 'done:task/'
 
@@ -150,20 +151,20 @@ export function insertMention(text: string, start: number, caret: number, link: 
 // every word; within each, by priority. Nothing typed yet: the soonest due.
 export function suggestions(tasks: Task[], query: string, limit = 8): Task[] {
   const open = openTasks(tasks)
-  const q = query.trim().toLowerCase()
+  const q = fold(query.trim())
   if (!q) {
     const soon = (t: Task) => t.due ?? '9999'
     return [...open].sort((a, b) => soon(a).localeCompare(soon(b)) || byPriority(a, b)).slice(0, limit)
   }
   const words = q.split(/\s+/)
   const rank = (t: Task): number => {
-    const title = t.title.toLowerCase()
+    const title = fold(t.title)
     if (title.startsWith(q)) return 0
     if (title.split(/\s+/).some((w) => w.startsWith(words[0]))) return 1
     return 2
   }
   return open
-    .filter((t) => words.every((w) => t.title.toLowerCase().includes(w)))
+    .filter((t) => matchesQuery(t.title, query))
     .sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
     .slice(0, limit)
 }
@@ -183,18 +184,18 @@ export function noteSuggestions<N extends { id: number; title: string; updatedAt
   limit = 3,
 ): N[] {
   const candidates = notes.filter((n) => n.id !== current && !n.blank).sort((a, b) => b.updatedAt - a.updatedAt || b.id - a.id)
-  const q = query.trim().toLowerCase()
+  const q = fold(query.trim())
   if (!q) return candidates.slice(0, limit)
   const words = q.split(/\s+/)
   const rank = (n: N): number => {
-    const title = n.title.toLowerCase()
+    const title = fold(n.title)
     if (title.startsWith(q)) return 0
     if (title.split(/\s+/).some((w) => w.startsWith(words[0]))) return 1
     return 2
   }
   // A stable sort keeps the newest first within each rank.
   return candidates
-    .filter((n) => words.every((w) => n.title.toLowerCase().includes(w)))
+    .filter((n) => matchesQuery(n.title, query))
     .sort((a, b) => rank(a) - rank(b))
     .slice(0, limit)
 }

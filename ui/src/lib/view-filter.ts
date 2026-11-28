@@ -1,13 +1,14 @@
 // The filter every task view shares: which tasks it shows. Plain data in,
 // plain data out. Filtering only changes what is drawn; no task is written
-// because of it. Board and Timeline still call matchesFilter; applyFilter is
-// what every view moves to (docs/plans/2026-11-27-universal-filter.md).
+// because of it. Every task view calls applyFilter, leaving out what the view
+// decides itself (docs/plans/2026-11-27-universal-filter.md).
 import { addDays, type Day } from '@/lib/days'
 import { matchesQuery } from '@/lib/search'
 import type { Project, Task, View } from '@/lib/tasks'
 
 // A time window by due date. Late is its own choice: "this week" does not
-// include what is already late, so the two never blur.
+// include what is already late, so the two never blur. "fortnight" (Next two
+// weeks) is no longer offered; one saved before reads back as this week.
 export type When = 'any' | 'late' | 'today' | 'week' | 'fortnight' | 'none'
 
 export interface ViewFilter {
@@ -32,6 +33,9 @@ export const WHEN_NAMES: Record<When, string> = {
   fortnight: 'Next two weeks',
   none: 'No date',
 }
+
+// The windows the panel offers, in order.
+export const WHEN_CHOICES: readonly When[] = ['any', 'late', 'today', 'week', 'none']
 
 export const PRIORITY_SHORT: Record<number, string> = { 0: 'P0', 1: 'P1', 2: 'P2', 3: 'P3', 4: 'No priority' }
 
@@ -64,15 +68,6 @@ function inWindow(task: Task, when: When, today: Day): boolean {
 function forPeople(task: Task, people: string[], me: string | null | undefined): boolean {
   const on = task.assignees ?? []
   return people.some((p) => (p === 'nobody' ? on.length === 0 : p === 'me' ? !!me && on.includes(me) : on.includes(p)))
-}
-
-export function matchesFilter(task: Task, filter: ViewFilter, today: Day, me?: string | null): boolean {
-  if (filter.projects.length > 0 && !filter.projects.includes(task.projectId)) return false
-  if (filter.people.length > 0 && !forPeople(task, filter.people, me)) return false
-  if (filter.priorities.length > 0 && !filter.priorities.includes(task.priority)) return false
-  if (!inWindow(task, filter.when, today)) return false
-  // Title and notes only, as before; applyFilter adds the project's name.
-  return matchesQuery(task.title + '\n' + task.notes, filter.words)
 }
 
 // ---------- The filter every view shares ----------
@@ -161,6 +156,18 @@ export function fixedFor(view: View): Dimension[] {
   return DIMENSIONS.filter((d) => !shown.includes(d))
 }
 
+// What the view decides here and now: as fixedFor, and the person too where
+// the scope has nobody to choose (one's own space), since its tasks have
+// nobody on them and a person chosen elsewhere would empty the page.
+export function fixedHere(view: View, hasPeople: boolean): Dimension[] {
+  const fixed = fixedFor(view)
+  return hasPeople || fixed.includes('people') ? fixed : [...fixed, 'people']
+}
+
+// The dimension a chip belongs to, from its key.
+const dimensionOf = (key: string): Dimension =>
+  key === 'words' ? 'words' : key === 'when' ? 'when' : key.startsWith('p') ? 'projects' : key.startsWith('r') ? 'priorities' : 'people'
+
 // What is filtered, as chips under the title: each with its label and the
 // filter as it would be without it, so removing one leaves the rest.
 export interface Chip {
@@ -169,8 +176,14 @@ export interface Chip {
   without: ViewFilter
 }
 
-// `people` names the account ids a filter may hold, for their chips.
-export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | 'name'>[], people: { id: string; name: string }[] = []): Chip[] {
+// `people` names the account ids a filter may hold, for their chips. A
+// dimension in `fixed` gets no chips: the view decides it (see hiddenHere).
+export function filterChips(
+  filter: ViewFilter,
+  projects: Pick<Project, 'id' | 'name'>[],
+  people: { id: string; name: string }[] = [],
+  fixed: readonly Dimension[] = [],
+): Chip[] {
   const chips: Chip[] = []
   if (filter.words.trim()) chips.push({ key: 'words', label: `“${filter.words.trim()}”`, without: { ...filter, words: '' } })
   for (const id of filter.projects) {
@@ -189,8 +202,13 @@ export function filterChips(filter: ViewFilter, projects: Pick<Project, 'id' | '
     const label = person === 'me' ? 'Me' : person === 'nobody' ? 'Nobody' : (people.find((p) => p.id === person)?.name ?? 'Someone')
     chips.push({ key: `a${person}`, label, without: { ...filter, people: filter.people.filter((p) => p !== person) } })
   }
-  return chips
+  return chips.filter((chip) => !fixed.includes(dimensionOf(chip.key)))
 }
+
+// How many choices are set that this view decides itself, so the bar can
+// say "2 hidden here" instead of letting them vanish.
+export const hiddenHere = (filter: ViewFilter, fixed: readonly Dimension[]): number =>
+  filterChips(filter, []).length - filterChips(filter, [], [], fixed).length
 
 // A filter read back from storage, made safe: anything unreadable becomes no
 // filter, and a project deleted since is dropped (it would hide everything,
@@ -206,7 +224,8 @@ export function cleanFilter(stored: unknown, projects: Pick<Project, 'id'>[]): V
     // 0 is P0 (#114): it was left out here, so it never stayed chosen.
     priorities: [...new Set(list(value.priorities).filter((p): p is number => Number.isInteger(p) && p >= 0 && p <= 4))],
     // Its own keys only: "toString" is "in" any object, and would hide everything.
-    when: typeof value.when === 'string' && Object.hasOwn(WHEN_NAMES, value.when) ? (value.when as When) : 'any',
+    // "Next two weeks" left the panel: one saved before is this week.
+    when: value.when === 'fortnight' ? 'week' : typeof value.when === 'string' && Object.hasOwn(WHEN_NAMES, value.when) ? (value.when as When) : 'any',
     words: typeof value.words === 'string' ? value.words : '',
     people: [...new Set(list(value.people).filter((p): p is string => typeof p === 'string' && p !== ''))],
   }
@@ -218,10 +237,20 @@ export const onlyProject = (filter: ViewFilter): number | null => (filter.projec
 
 // What a task added on a filtered page gets, so it shows on the page it was
 // added on: the one project, the one priority, and a due date inside the
-// time window (today for today, this week and the next two weeks). Words and
-// "late" cannot be given to a new task; a line that sets its own date or
-// priority wins over these.
-export function addDefaults(filter: ViewFilter, today: Day): { projectId: number | null; priority: number | null; due: Day | null } {
-  const due = filter.when === 'today' || filter.when === 'week' || filter.when === 'fortnight' ? today : null
-  return { projectId: onlyProject(filter), priority: filter.priorities.length === 1 ? filter.priorities[0] : null, due }
+// time window (today for today and this week). Words and "late" cannot be
+// given to a new task; a line that sets its own date or priority wins over
+// these, and so does what the view decides itself (`fixed`: a project page's
+// project, Today's date).
+export function addDefaults(
+  filter: ViewFilter,
+  today: Day,
+  fixed: readonly Dimension[] = [],
+): { projectId: number | null; priority: number | null; due: Day | null } {
+  const on = (d: Dimension) => !fixed.includes(d)
+  const due = on('when') && (filter.when === 'today' || filter.when === 'week' || filter.when === 'fortnight') ? today : null
+  return {
+    projectId: on('projects') ? onlyProject(filter) : null,
+    priority: on('priorities') && filter.priorities.length === 1 ? filter.priorities[0] : null,
+    due,
+  }
 }

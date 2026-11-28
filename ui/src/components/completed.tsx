@@ -1,7 +1,9 @@
-// Completed: what has been finished, under the day it was finished. Ticking
-// the check again puts a task back, as it does anywhere else.
+// Completed: what has been finished in the scope being looked at, under the
+// day it was finished. Ticking the check again puts a task back, as it does
+// anywhere else. The filter offers words, project and priority here.
 import { useEffect, useState } from 'react'
-import { ViewHeader } from '@/components/list-view'
+import { IN_HEADER, ViewHeader } from '@/components/list-view'
+import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { ProjectDot } from '@/components/marks'
 import { TaskCheck } from '@/components/task-row'
 import { useApp } from '@/lib/app-context'
@@ -11,11 +13,13 @@ import { TODAY } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { change } from '@/lib/store'
 import { markOpen, projectName, type Task } from '@/lib/tasks'
+import { shownFor } from '@/lib/team'
 import { recordStep } from '@/lib/undo'
 import { cn } from '@/lib/utils'
 
 export function Completed() {
-  const { data, reopen } = useApp()
+  const { data, scope, team, reopen } = useApp()
+  const filter = useTaskFilter()
   const [finished, setFinished] = useState<Task[] | null>(null)
 
   useEffect(() => {
@@ -40,12 +44,20 @@ export function Completed() {
     })
   }
 
-  const groups = finished ? byFinishedDay(finished, TODAY) : []
+  // Only what is in the scope, as every other list: a finished task's space
+  // is its project's, or its own when it has none.
+  const inScope = finished ? shownFor({ projects: data.projects, tasks: finished }, scope, team).tasks : null
+  const listed = inScope ? filter.apply(inScope) : null
+  const groups = listed ? byFinishedDay(listed, TODAY) : []
 
   return (
     <div className="max-w-3xl">
-      <ViewHeader title="Completed" sub={finished ? `${finished.length} finished` : undefined} />
-      {finished && finished.length === 0 && <p className="text-muted-foreground">Nothing finished yet. It shows up here once it is.</p>}
+      <ViewHeader title="Completed" sub={inScope ? `${inScope.length} finished` : undefined}>
+        <FilterButton className={IN_HEADER} />
+      </ViewHeader>
+      <FilterBar shown={listed?.length ?? 0} total={inScope?.length ?? 0} />
+      {inScope && inScope.length === 0 && <p className="text-muted-foreground">Nothing finished yet. It shows up here once it is.</p>}
+      {inScope && inScope.length > 0 && listed?.length === 0 && filter.on && <NothingMatches />}
       <div className="-mx-2 flex flex-col gap-7">
         {groups.map((group) => (
           <section key={group.day}>

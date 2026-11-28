@@ -15,19 +15,18 @@ import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
-import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
+import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
-import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
+import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { placed, spanOf, type Placed } from '@/lib/timeline-layout'
 import { swallowClick } from '@/lib/swallow-click'
 import { daysDragged, HOLD_MS, IDLE, press, released, SLOP, type PressState } from '@/lib/timeline-press'
 import { dayWidth, daysToFill, parseZoom, ticks, TOUCH_ZOOMS, type TouchZoom } from '@/lib/timeline-touch'
 import { edgeOf, initialLeft, LEAD, leadFor, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
-import { isFiltering, matchesFilter } from '@/lib/view-filter'
 import { cn } from '@/lib/utils'
 
 // The zoom is a habit of the person, so it is remembered on this device.
@@ -119,7 +118,7 @@ const EDGE_GAP = 8
 const ROW = 'h-16'
 
 export function Timeline() {
-  const { data, dragging, edit, update, shown: inScope, me } = useApp()
+  const { data, dragging, edit, update, shown: inScope } = useApp()
   const isMobile = useIsMobile()
   const coarse = useCoarse()
   const root = useRef<HTMLDivElement>(null)
@@ -144,8 +143,8 @@ export function Timeline() {
   const [drag, setDrag] = useState<Drag | null>(null)
   const [dropDay, setDropDay] = useState<Day | null>(null)
 
-  const filter = useViewFilter()
-  const visible = inScope.tasks.filter((t) => isSubtask(t) || matchesFilter(t, filter, TODAY, me))
+  const filter = useTaskFilter()
+  const visible = filter.apply(inScope.tasks)
   const groups = timelineGroups(inScope.projects, visible, 'project')
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
@@ -154,7 +153,7 @@ export function Timeline() {
   const total = openTasks(inScope.tasks).length
   // A filter that matches nothing replaces the chart; when it is cleared
   // the chart comes back, scrolled to where it was (or to today).
-  const chartShown = !(isFiltering(filter) && shown === 0)
+  const chartShown = !(filter.on && shown === 0)
   // The chart's own width (the view less the No date column, if any): a day
   // is fitted to it, and the names and No date are kept within it.
   const chartWidth = useWidth(scroller, chartShown)
