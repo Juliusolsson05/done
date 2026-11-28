@@ -9,6 +9,7 @@ import { PhoneHeader } from '@/components/phone'
 import { AddRow } from '@/components/quick-add'
 import { TaskEditor } from '@/components/task-editor'
 import { TaskRow } from '@/components/task-row'
+import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useFocus, useNameField } from '@/hooks/use-focus'
 import { useIsMobile, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
@@ -55,6 +56,11 @@ export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: s
     </header>
   )
 }
+
+// A 44 point button in a list's header on an iPad takes no height of its
+// own, as the sidebar button above does, so the header is no taller than a
+// Mac's and as many tasks stay in view (#109).
+export const IN_HEADER = 'wide:pointer-coarse:-my-1.5'
 
 export function HeaderButton({ danger = false, ...props }: { danger?: boolean; onClick: () => void; children: ReactNode }) {
   // 44 points tall for a finger (they were 28 on iPhone and iPad, #109).
@@ -148,6 +154,7 @@ function readOnlyMe(): boolean {
 
 export function ListView() {
   const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject } = useApp()
+  const isMobile = useIsMobile()
   const view = ui.view
   const [onlyMe, setOnlyMe] = useState(readOnlyMe)
   const toggleOnlyMe = () => {
@@ -168,8 +175,14 @@ export function ListView() {
           return me !== null && on.includes(me) && (!onlyMe || on.length === 1)
         })
       : shown.tasks
-  const list = sections(view, source, TODAY, keep)
-  const count = list.reduce((n, s) => n + s.tasks.length, 0)
+  // The filter only changes what is listed; Today's goal, drawn above the
+  // list from every task, is never filtered.
+  const filter = useTaskFilter()
+  const all = sections(view, source, TODAY, keep)
+  const list = filter.on ? sections(view, filter.apply(source), TODAY, keep) : all
+  const tally = (of: typeof list) => of.reduce((n, s) => n + s.tasks.length, 0)
+  const count = tally(list)
+  const total = tally(all)
   const addUnderSection = list.some((s) => s.addHere)
   const empty =
     view.kind === 'project'
@@ -179,9 +192,21 @@ export function ListView() {
 
   return (
     <div className="max-w-3xl">
-      {view.kind === 'inbox' && <ViewHeader title="Inbox" />}
-      {view.kind === 'today' && <ViewHeader title="Today" sub={fullDay(TODAY)} />}
-      {view.kind === 'upcoming' && <ViewHeader title="Upcoming" />}
+      {view.kind === 'inbox' && (
+        <ViewHeader title="Inbox">
+          <FilterButton className={IN_HEADER} />
+        </ViewHeader>
+      )}
+      {view.kind === 'today' && (
+        <ViewHeader title="Today" sub={fullDay(TODAY)}>
+          <FilterButton className={IN_HEADER} />
+        </ViewHeader>
+      )}
+      {view.kind === 'upcoming' && (
+        <ViewHeader title="Upcoming">
+          <FilterButton className={IN_HEADER} />
+        </ViewHeader>
+      )}
       {view.kind === 'mine' && (
         <ViewHeader title="Assigned to me">
           <Button
@@ -193,14 +218,16 @@ export function ListView() {
           >
             Only me
           </Button>
+          <FilterButton className={IN_HEADER} />
         </ViewHeader>
       )}
       {view.kind === 'project' && (
         <ViewHeader title={<ProjectTitle id={view.id} />}>
+          {/* Every task in it moves, not just those the filter shows. */}
           {ui.confirmDelete ? (
             <>
               <HeaderButton danger onClick={() => removeProject(view.id)}>
-                Delete it{count ? ` and move ${count} ${count === 1 ? 'task' : 'tasks'} to Inbox` : ''}
+                Delete it{total ? ` and move ${total} ${total === 1 ? 'task' : 'tasks'} to Inbox` : ''}
               </HeaderButton>
               <HeaderButton onClick={closeAll}>Keep it</HeaderButton>
             </>
@@ -208,10 +235,19 @@ export function ListView() {
             <>
               <HeaderButton onClick={rename}>Rename</HeaderButton>
               <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
+              {!isMobile && <FilterButton className={IN_HEADER} />}
             </>
           )}
         </ViewHeader>
       )}
+      {/* On a phone a project's own buttons are behind ⋯ in the bar, so the
+          Filter has a row of its own under the title, as other lists have. */}
+      {view.kind === 'project' && isMobile && (
+        <div className="-mt-1 mb-2 -ml-2.5 flex">
+          <FilterButton className={IN_HEADER} />
+        </div>
+      )}
+      <FilterBar shown={count} total={total} />
 
       {/* Rows keep their padding for the hover, so the list is pulled out by
           the same amount and the checks line up with the page title. */}
@@ -220,10 +256,17 @@ export function ListView() {
           little closer to keep as many tasks in view (#109). */}
       <div className="-mx-2 flex flex-col gap-7 max-md:mx-0 wide:touch:gap-5">
         {view.kind === 'today' && <GoalBlock />}
-        {count === 0 && !ui.adding && !hasGoal && (
+        {/* The view's own words when it has no tasks at all; when the
+            filter leaves none, that is said instead, with the way back. */}
+        {total === 0 && !ui.adding && !hasGoal && (
           <div className="px-2 pt-4 text-muted-foreground">
             <b className="block font-semibold text-foreground">{empty[0]}</b>
             {empty[1]}
+          </div>
+        )}
+        {total > 0 && count === 0 && filter.on && (
+          <div className="px-2 max-md:px-0">
+            <NothingMatches />
           </div>
         )}
         {list.map((section, i) => (

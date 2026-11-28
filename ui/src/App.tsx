@@ -39,6 +39,7 @@ import { forgetLast, undoLast } from '@/lib/undo'
 import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 import { setFilterOpen } from '@/lib/view-filter-store'
+import { offered } from '@/lib/view-filter'
 import { back, opened } from '@/lib/view-history'
 
 const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
@@ -457,8 +458,8 @@ export default function App() {
         event.preventDefault()
         app.add()
       }
-      // F opens the filter where there is one (Cmd+F, finding on the page, is left alone above).
-      if (event.key === 'f' && (app.ui.view.kind === 'board' || app.ui.view.kind === 'timeline')) {
+      // F opens the filter on every task view (Cmd+F, finding on the page, is left alone above).
+      if (event.key === 'f' && offered(app.ui.view)) {
         event.preventDefault()
         setFilterOpen(true)
       }
