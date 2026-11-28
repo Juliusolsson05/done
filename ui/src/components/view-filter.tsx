@@ -183,7 +183,8 @@ export function FilterButton() {
     <Button
       variant={count ? 'secondary' : 'ghost'}
       size="sm"
-      className={count ? 'text-foreground' : 'text-muted-foreground'}
+      // 44 points tall for a finger (#109); the Mac keeps 28.
+      className={cn('pointer-coarse:h-11', count ? 'text-foreground' : 'text-muted-foreground')}
       aria-label={count ? `Filter, ${count} on` : 'Filter'}
       title="Filter (F)"
       onClick={isMobile ? () => setFilterOpen(true) : undefined}

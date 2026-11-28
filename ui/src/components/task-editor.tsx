@@ -20,6 +20,11 @@ import { describeDay, TODAY, type Day } from '@/lib/days'
 import { cn } from '@/lib/utils'
 import { onlyOnDevice, ONLY_HERE } from '@/lib/on-device'
 
+// On a touch screen (the iPad gets this editor; the phone has the sheet
+// below) every control here is 44 points tall (they were 28, #109). A mouse
+// never matches pointer-coarse, so the Mac is unchanged.
+const TOUCH = 'pointer-coarse:h-11'
+
 function EditorForm({ task }: { task: Task }) {
   const { data, update, closeAll, removeTask } = useApp()
   const [title, setTitle] = useState(task.title)
@@ -61,11 +66,11 @@ function EditorForm({ task }: { task: Task }) {
       <div className="flex flex-wrap items-center gap-2">
         <Label className="text-xs font-normal text-muted-foreground">
           Starts
-          <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="h-7 w-auto px-2" />
+          <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={cn('h-7 w-auto px-2', TOUCH)} />
         </Label>
         <Label className="text-xs font-normal text-muted-foreground">
           Due
-          <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="h-7 w-auto px-2" />
+          <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={cn('h-7 w-auto px-2', TOUCH)} />
         </Label>
         <ToggleGroup
           type="single"
@@ -78,7 +83,7 @@ function EditorForm({ task }: { task: Task }) {
           onValueChange={(value) => value && setPriority(Number(value))}
         >
           {[0, 1, 2, 3, 4].map((p) => (
-            <ToggleGroupItem key={p} value={String(p)} title={PRIORITY_NAME[p]}>
+            <ToggleGroupItem key={p} value={String(p)} title={PRIORITY_NAME[p]} className={cn(TOUCH, 'pointer-coarse:min-w-11')}>
               <PriorityDot priority={p} />
               {p < 4 ? p : 'None'}
             </ToggleGroupItem>
@@ -87,7 +92,7 @@ function EditorForm({ task }: { task: Task }) {
         {/* A subtask is shown under its task wherever that is, so it has no project to choose. */}
         {!isSubtask(task) && (
           <Select value={String(projectId ?? 'inbox')} onValueChange={(value) => setProjectId(value === 'inbox' ? null : Number(value))}>
-            <SelectTrigger size="sm" aria-label="Project">
+            <SelectTrigger size="sm" aria-label="Project" className="pointer-coarse:data-[size=sm]:h-11">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -102,14 +107,14 @@ function EditorForm({ task }: { task: Task }) {
         )}
         {/* Who is on it: only on a workspace's task. Saved as it is chosen. */}
         <AssigneePicker task={task} />
-        <div className="ml-auto flex gap-2">
-          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => removeTask(task.id)}>
+        <div className="ml-auto flex gap-2 pointer-coarse:w-full pointer-coarse:justify-end">
+          <Button type="button" variant="ghost" size="sm" className={cn('text-muted-foreground hover:text-destructive', TOUCH)} onClick={() => removeTask(task.id)}>
             Delete task
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={closeAll}>
+          <Button type="button" variant="ghost" size="sm" className={cn('text-muted-foreground', TOUCH)} onClick={closeAll}>
             Cancel
           </Button>
-          <Button type="submit" size="sm">
+          <Button type="submit" size="sm" className={TOUCH}>
             Save
           </Button>
         </div>
@@ -182,7 +187,8 @@ function Sheet({ task }: { task: Task }) {
   }
 
   const row = 'flex min-h-11 items-center gap-3 border-b border-border py-1.5 pr-4 last:border-b-0'
-  const value = 'min-w-0 flex-1 appearance-none bg-transparent text-right text-body text-primary outline-none'
+  // A select fills its row's height, so the whole row takes the tap.
+  const value = 'min-w-0 flex-1 -my-1.5 self-stretch appearance-none bg-transparent text-right text-body text-primary outline-none'
   return (
     <div className="fixed inset-0 z-50">
       <div className={cn('absolute inset-0 bg-black/40 transition-opacity duration-200', leaving ? 'opacity-0' : 'animate-in fade-in')} onClick={() => close(closeAll)} />
@@ -191,7 +197,9 @@ function Sheet({ task }: { task: Task }) {
         aria-label="Details"
         style={{ transform: pull ? `translateY(${pull}px)` : undefined }}
         className={cn(
-          'absolute inset-x-0 top-[calc(var(--safe-top)+0.75rem)] bottom-0 flex flex-col overflow-hidden rounded-t-2xl bg-grouped shadow-2xl',
+          // Its background runs edge to edge; what is on it stays inside the
+          // side safe areas when the phone is turned sideways (#109).
+          'absolute inset-x-0 top-[calc(var(--safe-top)+0.75rem)] bottom-0 flex flex-col overflow-hidden rounded-t-2xl bg-grouped pr-[var(--safe-right)] pl-[var(--safe-left)] shadow-2xl',
           leaving ? 'translate-y-full transition-transform duration-200 ease-in' : !pull && 'animate-rise',
         )}
       >
@@ -206,24 +214,26 @@ function Sheet({ task }: { task: Task }) {
           }}
         >
           <div className="mx-auto mt-1.5 h-1.25 w-9 rounded-full bg-foreground/20" />
-          <div className="flex h-11 items-center px-4">
-            <button type="button" onClick={() => close(closeAll)} className="text-body text-primary active:opacity-40">
+          {/* 16 points in on an upright phone, 20 turned sideways, as iOS's margins. */}
+          <div className="flex h-11 items-center px-4 landscape:px-5">
+            {/* The bar's whole height takes the tap (the words alone were 22 tall, #109). */}
+            <button type="button" onClick={() => close(closeAll)} className="-ml-2 h-11 px-2 text-body text-primary active:opacity-40">
               Cancel
             </button>
             <span className="flex-1 text-center text-body font-semibold">Details</span>
-            <button type="button" onClick={done} disabled={!title.trim()} className="text-body font-semibold text-primary active:opacity-40 disabled:text-tertiary">
+            <button type="button" onClick={done} disabled={!title.trim()} className="-mr-2 h-11 min-w-11 px-2 text-body font-semibold text-primary active:opacity-40 disabled:text-tertiary">
               Done
             </button>
           </div>
         </div>
         {choosing && (
-          <div className="flex flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-[calc(var(--safe-bottom)+2rem)]">
+          <div className="flex flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-[calc(var(--safe-bottom)+2rem)] landscape:px-5">
             <AssigneePage task={task} onBack={() => setChoosing(false)} />
           </div>
         )}
         {/* Each group keeps its height and the sheet scrolls: as flex items they
             would otherwise shrink to fit, clipping the last rows (24 Nov). */}
-        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(var(--safe-bottom)+2rem)] [&>*]:shrink-0', choosing && 'hidden')}>
+        <div className={cn('flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-2 pb-[calc(var(--safe-bottom)+2rem)] landscape:px-5 [&>*]:shrink-0', choosing && 'hidden')}>
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <textarea
               value={title}

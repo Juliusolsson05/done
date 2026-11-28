@@ -275,6 +275,17 @@
   }
 }
 
+/* A phone's page is the window and scrolls only up and down. A screen being
+   pushed in from the right (or swiped back) is wider than the window for a
+   moment, which made the page scroll sideways and, in Chromium, kept the
+   layout wider for the rest of the session (#109). Clipped on the app's own
+   frame rather than on body: body's overflow is handed to the viewport, and
+   Chromium widens a mobile layout viewport to its content all the same.
+   clip, unlike hidden, makes no scroll container, so sticky headings stick. */
+[data-layout="phone"] [data-slot="sidebar-wrapper"] {
+  overflow-x: clip;
+}
+
 /* A finger, not a pointer. */
 @media (pointer: coarse) {
   html {

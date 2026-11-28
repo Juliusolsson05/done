@@ -42,6 +42,33 @@ this change's files, with what was measured:
 Notes (M08, M12, M14–M16, M24, M25, M32), Focus (M18) and Board (M20) belong
 to other branches.
 
+## Apple's guidance, as applied
+
+Read from Apple's Human Interface Guidelines on 27 Nov 2026 (the page data
+behind developer.apple.com/design/human-interface-guidelines/layout and
+/accessibility):
+
+- Accessibility, control size: "iOS, iPadOS — default control size 44x44 pt,
+  minimum 28x28 pt", and "Consider spacing between controls as important as
+  size … about 12 points of padding around elements that include a bezel …
+  about 24 points … without a bezel." Applied: every control in scope takes a
+  44 pt tap on touch; adjacent header buttons get 8 pt gaps (`gap-2`) on
+  touch, and borderless buttons keep their padding as part of their target.
+- Layout, guides and safe areas: "respecting system-defined safe areas,
+  margins, and guides", "A safe area defines the area within a window that
+  isn't covered … by a hardware feature or another view … like a toolbar, tab
+  bar, or status bar", and layout guides "apply standard margins around
+  content and restrict the width of text for optimal readability." Applied:
+  bars keep their background edge to edge and their content inside
+  `--safe-*` (the existing variables in index.css / lib/safe-area.ts); the
+  task sheet now does too; content columns stay capped (`max-w-3xl` /
+  `max-w-4xl`, already in place) on iPad.
+- The HIG pages do not state a margin number. The 16 pt (compact width) and
+  20 pt (regular width) side margins are UIKit's system minimum layout
+  margins, which the owner asked for: content on an upright iPhone is 16 from
+  the safe edge, 20 when turned sideways; the iPad's page margin (48, 32 on
+  the wide views) is already above 20.
+
 ## Decisions
 
 - **Which rule makes a control larger.** Sizes that today apply to the phone
@@ -78,15 +105,46 @@ to other branches.
 - **Landscape**: the task sheet keeps its content inside the side safe areas;
   the tab bar and New Task no longer start the page's long-press menu.
 
+- **Margins on the phone.** The task list no longer hangs 8 pt into the
+  margin (`-mx-2` was for the Mac's hover background): checks, section
+  headings, "Today's goal" and Add task sit on the 16 pt margin, aligned
+  with the large title. A swipe row runs edge to edge with the margin inside
+  it, as iOS's rows do, so the check's tap area is not cut at the margin.
+  New Task sits on the margin too (it was 12 in).
+
+## Rulings made while building
+
+- Ruling: the horizontal clip is on the app's frame
+  (`[data-slot=sidebar-wrapper]`), not `body` — `body`'s overflow is handed to
+  the viewport, and Chromium widened the mobile layout viewport to 448 all the
+  same. Cost if wrong: none seen; `clip` makes no scroll container, so sticky
+  headings still stick.
+- Ruling: Timeline's own buttons (View, Group by project, zoom, the no-date
+  panel) are left alone — the Timeline screen belongs to another branch. It
+  still gets the shared Today and Filter buttons and the sidebar toggle,
+  which live in this change's files. Cost if wrong: those four stay 28–32 pt
+  on touch until that branch takes them.
+- Ruling: an iPad task row is 48 pt tall (`py-3.5` on the tablet layout) so
+  the check's 44 pt tap area is not cut by the next row. Cost if wrong: an
+  iPad list shows a little less per screen.
+- Ruling: the long-press menu is kept from starting on the tab bar and New
+  Task by stopping their pointer-down and contextmenu from reaching the
+  window-wide menu trigger.
+- Ruling: `HeaderButton` is shared, so Notes' "New note" in its header gets
+  the 44 pt height on iPad too. That helps M08 and changes nothing else there.
+
 ## Not done here (deferred)
 
 - M29's space taken by the bars in landscape (fold New Task into the nav bar):
-  a layout decision for the owner, not a sizing fix.
-- M30, wrapping Timeline titles: every title row lines up with a bar on the
-  chart at a fixed height; the full title is one tap away in the task sheet.
+  a layout decision for the owner, not a sizing fix. The long press on the tab
+  bar opening the page menu is fixed.
+- M30, wrapping Timeline titles: the Timeline belongs to another branch.
 - M22's "Delete Task under the home indicator": the sheet already pads its
   end by the safe area; the button is under it only because the sheet is
   longer than the screen and scrolls.
+- M11 follow-up: open the phone's task sheet as a centred form sheet on the
+  iPad (44 pt rows, subtasks, status, focus and goal already in it). Likely
+  the better design; a redesign the owner should see on its own.
 
 ## Checks
 
@@ -102,4 +160,26 @@ to other branches.
 
 ## Verification
 
-(filled in as the work lands)
+All in Chromium's touch emulation (`isMobile`, `hasTouch`) with the safe areas
+an iPhone reports injected, on the built UI with stubbed `/api`:
+
+- `ui/checks/touch-sizes.cjs` fails on `origin/main` (22 failures: Today inset
+  12, pushed screen at scrollY 727, back 63x28, Time sheet page 587 wide,
+  remove 28x28 at x=451, Cancel/Done 52x22 / 42x22, iPad checks 41x33,
+  toggle at x=-8 and 28x28, day arrows and Timeline Today/Filter 28 tall) and
+  passes on this branch.
+- Re-measured each finding before and after at 390x844, 844x390, 820x1180 and
+  a 1440x900 mouse: back 63x28 → 71x44; ⋯ 32 → 44; menu rows 28 → 44; task
+  sheet Cancel/Done 22 → 44 tall, selects 22 → 43; pushed screen scrollY
+  727 → 0; Time sheet viewport 562 → 390 with every control on screen; iPad
+  checks 18 (hit 41x32) → 22 (hit 45x44), toggle x=-8 → 20 and 44x44, day
+  arrows and header buttons 28 → 44; tab bar long press menu 1 → 0.
+- Margins (first and last drawn content, from the screen edge): Today
+  12/50 → 16/46 at 390, 59 → 67 (47 safe + 20) at 844; Time sheet 16/141 →
+  16/81; Settings 16/58; task sheet in landscape 16 → 67 from the edge.
+- Desktop 1440x900 with a mouse: every measurement equal and the five
+  screenshots byte-identical before and after.
+- `npm run typecheck`, `npm test` (639), `npm run build` green.
+
+Not verified: WebKit and a real iPhone or iPad (safe areas there come from
+the device, not injected values), and anything with the on-screen keyboard up.

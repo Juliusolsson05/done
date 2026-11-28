@@ -49,9 +49,12 @@ export function TaskCheck({ task, checked, onChange, className }: { task: Task; 
       checked={checked}
       onCheckedChange={onChange}
       aria-label={`${task.done ? 'Reopen' : 'Complete'}: ${task.title}`}
-      // On a phone the circle is a little larger, and the area that takes a
-      // tap is larger still (the ::after), so a thumb does not have to aim.
-      className={cn('relative size-4.5 rounded-full max-md:size-5.5 max-md:after:absolute max-md:after:-inset-3', CHECK_TONE[task.priority], className)}
+      // On a touch screen (an iPhone or an iPad) the circle is a little
+      // larger, and the area that takes a tap is larger still (the ::after),
+      // so a thumb does not have to aim. The iPad had the Mac's 18 point
+      // circle until #109. Lifted over the title beside it, which would
+      // otherwise take the edge of that area.
+      className={cn('relative size-4.5 rounded-full touch:z-[1] touch:size-5.5 touch:after:absolute touch:after:-inset-3', CHECK_TONE[task.priority], className)}
     />
   )
 }
@@ -74,11 +77,15 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
       data-task={task.id}
       className={cn(
         'group/row flex items-start gap-2.5 rounded-lg p-2 md:hover:bg-muted',
+        // An iPad row is as tall as the check's 44 point tap area plus room,
+        // so neighbouring rows do not take the edges of it (#109).
+        'wide:touch:py-3.5',
         // A phone: Reminders' row. The text in iOS's body size, a hairline
         // under it that starts where the text starts, and the grey of a
         // row being pressed.
-        'max-md:relative max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-0.5 max-md:rounded-none max-md:px-1 max-md:py-3 max-md:active:bg-secondary',
-        'max-md:after:absolute max-md:after:right-0 max-md:after:bottom-0 max-md:after:left-9.5 max-md:after:h-px max-md:after:bg-border',
+        // The check sits on the page's 16 point margin, as in Reminders (#109).
+        'max-md:relative max-md:flex-wrap max-md:gap-x-3 max-md:gap-y-0.5 max-md:rounded-none max-md:px-0 max-md:py-3 max-md:active:bg-secondary',
+        'max-md:after:absolute max-md:after:right-0 max-md:after:bottom-0 max-md:after:left-8.5 max-md:after:h-px max-md:after:bg-border',
         noticed === task.id && 'animate-noticed',
         leaving && 'opacity-0 transition-opacity delay-150 duration-150',
       )}
@@ -122,7 +129,9 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
             aria-expanded={open}
             aria-label={open ? 'Hide subtasks' : 'Show subtasks'}
             onClick={() => toggleExpanded(task.id)}
-            className="h-5 gap-1 px-1.5 text-xs font-normal text-muted-foreground tabular-nums max-md:-ml-1.5 max-md:h-7 max-md:text-sm"
+            // Its ::after makes the tap area 44 tall on a touch screen
+            // without making the row taller (#109).
+            className="relative h-5 gap-1 px-1.5 text-xs font-normal text-muted-foreground tabular-nums max-md:-ml-1.5 max-md:h-7 max-md:text-sm touch:after:absolute touch:after:-inset-x-1 touch:after:-inset-y-3.5"
           >
             <ChevronRightIcon className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
             {sub ? `${sub.done}/${sub.total}` : 'Subtasks'}

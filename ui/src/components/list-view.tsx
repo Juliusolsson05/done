@@ -31,13 +31,14 @@ export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: s
         {title}
       </h1>
       {sub && <span className="text-sm whitespace-nowrap text-muted-foreground">{sub}</span>}
-      <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full">{children}</div>
+      <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full pointer-coarse:gap-2">{children}</div>
     </header>
   )
 }
 
 export function HeaderButton({ danger = false, ...props }: { danger?: boolean; onClick: () => void; children: ReactNode }) {
-  return <Button variant="ghost" size="sm" className={danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground'} {...props} />
+  // 44 points tall for a finger (they were 28 on iPhone and iPad, #109).
+  return <Button variant="ghost" size="sm" className={cn('pointer-coarse:h-11', danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground')} {...props} />
 }
 
 // Today's goal: the one thing that has to happen today. It is the only task
@@ -64,7 +65,7 @@ function GoalBlock() {
   // display face set it apart, so it needs no card to say it is special.
   return (
     <section aria-label="Today’s goal" className="flex flex-col gap-1 pb-2 md:border-b md:border-border md:pb-5">
-      <div className={cn('px-2 text-sm font-medium', task.done ? 'text-faint' : 'text-primary')}>
+      <div className={cn('px-2 text-sm font-medium max-md:px-0', task.done ? 'text-faint' : 'text-primary')}>
         {task.done ? 'Today’s goal, done' : 'Today’s goal'}
       </div>
       {task.done ? (
@@ -194,7 +195,8 @@ export function ListView() {
 
       {/* Rows keep their padding for the hover, so the list is pulled out by
           the same amount and the checks line up with the page title. */}
-      <div className="-mx-2 flex flex-col gap-7">
+      {/* On a phone there is no hover, so the list sits on the page's margin. */}
+      <div className="-mx-2 flex flex-col gap-7 max-md:mx-0">
         {view.kind === 'today' && <GoalBlock />}
         {count === 0 && !ui.adding && !hasGoal && (
           <div className="px-2 pt-4 text-muted-foreground">
@@ -207,7 +209,7 @@ export function ListView() {
             {section.heading && (
               <h3
                 className={cn(
-                  'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-1 max-md:text-title max-md:font-bold',
+                  'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-0 max-md:text-title max-md:font-bold',
                   section.late ? 'text-overdue' : 'text-muted-foreground max-md:text-foreground',
                   // On a phone a long day of tasks keeps its day in sight
                   // (Upcoming lost which day it was, 23 Nov audit): the heading

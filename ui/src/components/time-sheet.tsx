@@ -5,6 +5,7 @@ import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { useApp } from '@/lib/app-context'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { deleteEntry, loadEntries } from '@/lib/backend'
 import { addDays, fullDay, TODAY } from '@/lib/days'
 import { onRecorded } from '@/lib/focus-store'
@@ -19,8 +20,46 @@ function Difference({ plannedMs, focusedMs }: { plannedMs: number; focusedMs: nu
   )
 }
 
+// A phone has no room for five columns (a 390 point screen grew to 430 and
+// cut the title to "Writ…", #109): each block is two lines instead, the title
+// in full and then its times, with the remove button in reach of a thumb.
+function PhoneEntries({ entries, remove }: { entries: Entry[]; remove: (entry: Entry) => void }) {
+  const sum = totals(entries)
+  return (
+    <ul className="flex flex-col">
+      {entries.map((entry) => (
+        <li key={entry.id} className="flex items-center gap-3 border-b border-border py-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-body wrap-anywhere">{entry.title}</span>
+            <span className="text-subhead text-tertiary tabular-nums">
+              {clockTime(entry.startedAt)}–{clockTime(entry.endedAt)} · {minutesText(entry.focusedMs)} of {minutesText(entry.plannedMs)} ·{' '}
+              <Difference plannedMs={entry.plannedMs} focusedMs={entry.focusedMs} />
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-mr-3 size-11 shrink-0 text-muted-foreground"
+            aria-label={'Remove from the time sheet: ' + entry.title}
+            onClick={() => remove(entry)}
+          >
+            <XIcon />
+          </Button>
+        </li>
+      ))}
+      <li className="flex flex-col gap-0.5 py-3">
+        <span className="text-body font-semibold">Total</span>
+        <span className="text-subhead text-tertiary tabular-nums">
+          {minutesText(sum.focusedMs)} of {minutesText(sum.plannedMs)} · <Difference plannedMs={sum.plannedMs} focusedMs={sum.focusedMs} />
+        </span>
+      </li>
+    </ul>
+  )
+}
+
 export function TimeSheet() {
   const { say } = useApp()
+  const isMobile = useIsMobile()
   const [day, setDay] = useState(TODAY)
   const [entries, setEntries] = useState<Entry[] | null>(null)
   // Bumped to read the day again: a block was written down, one was
@@ -73,14 +112,14 @@ export function TimeSheet() {
   return (
     <div className="max-w-4xl">
       <ViewHeader title="Time sheet" sub={fullDay(day)}>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground max-md:size-11" aria-label="Day before" onClick={() => go(addDays(day, -1))}>
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground touch:size-11" aria-label="Day before" onClick={() => go(addDays(day, -1))}>
           <ChevronLeftIcon />
         </Button>
         {day !== TODAY && <HeaderButton onClick={() => go(TODAY)}>Today</HeaderButton>}
         <Button
           variant="ghost"
           size="icon-sm"
-          className="text-muted-foreground max-md:size-11"
+          className="text-muted-foreground touch:size-11"
           aria-label="Day after"
           disabled={day >= TODAY}
           onClick={() => go(addDays(day, 1))}
@@ -93,6 +132,8 @@ export function TimeSheet() {
         <p className="text-muted-foreground">
           {day === TODAY ? 'Nothing yet today. Each focus block is written here when it ends.' : 'No focus blocks on this day.'}
         </p>
+      ) : isMobile ? (
+        <PhoneEntries entries={entries} remove={remove} />
       ) : (
         <table className="w-full border-collapse text-sm">
           <thead>
@@ -123,7 +164,7 @@ export function TimeSheet() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                    className="text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:size-11 [@media(hover:none)]:opacity-100"
                     aria-label={'Remove from the time sheet: ' + entry.title}
                     onClick={() => remove(entry)}
                   >

@@ -32,7 +32,10 @@ export function SwipeRow({ children, onComplete, onDelete }: { children: ReactNo
   }
 
   return (
-    <div className="relative overflow-hidden">
+    // Edge to edge, as iOS's rows are: the page's margin is inside the row
+    // that slides, so the check's tap area, which reaches into the margin,
+    // is not cut off at the margin (#109).
+    <div className="relative -mx-4 overflow-hidden landscape:-mx-5">
       {dx !== 0 && (
         <div
           aria-hidden
@@ -43,7 +46,7 @@ export function SwipeRow({ children, onComplete, onDelete }: { children: ReactNo
       )}
       <div
         style={{ transform: dx ? `translateX(${dx}px)` : undefined }}
-        className={cn('relative bg-background', settling && 'transition-transform duration-200 ease-out')}
+        className={cn('relative bg-background px-4 landscape:px-5', settling && 'transition-transform duration-200 ease-out')}
         onTransitionEnd={() => setSettling(false)}
         onTouchStart={(e) => {
           const t = e.touches[0]

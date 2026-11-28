@@ -1,5 +1,5 @@
 import { appleKeyboard, shortcut } from '@/lib/platform'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
@@ -28,7 +28,7 @@ import { isDesktop, isIosApp, leftOnLoad, onMenuBarCommand, sendWidgetSnapshot, 
 import { endedMessage } from '@/lib/account-switch'
 import { widgetSnapshot } from '@/lib/widget-snapshot'
 import { addDays, dayOf, TODAY } from '@/lib/days'
-import { useIsMobile, useLayout } from '@/hooks/use-mobile'
+import { useIsMobile, useIsTouch, useLayout } from '@/hooks/use-mobile'
 import { isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, rememberMinutes, remind, retryUnsaved, storedMinutes, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
@@ -57,11 +57,16 @@ function sidebarWasOpen(): boolean {
 // sidebar shows, its own header has the button.)
 function SidebarToggle() {
   const { open, isMobile } = useSidebar()
+  const touch = useIsTouch()
   if (open || isMobile) return null
   return (
-    <div className="sticky top-0 z-20 h-0">
+    // On a touch screen (an upright iPad, where this is the only way to the
+    // other views) it has a 44 point row of its own above the page: the wide
+    // views' margin cannot hold it, and it hung off the screen (#109). A
+    // finger has no ⌘B.
+    <div className="sticky top-0 z-20 h-0 touch:h-11 touch:mb-2">
       {/* In the page's left margin, clear of the title it sits beside. */}
-      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground" title={`Show sidebar (${shortcut('B')})`} />
+      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground touch:m-0 touch:-ml-3 touch:size-11" title={touch ? 'Show sidebar' : `Show sidebar (${shortcut('B')})`} />
     </div>
   )
 }
@@ -102,6 +107,17 @@ export default function App() {
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
   // The page a phone swipes back from.
   const page = useRef<HTMLDivElement>(null)
+  // A phone's page is the window, which keeps its scroll from one screen to
+  // the next: a list opened from a scrolled Lists opened mid-list, its title
+  // off the screen (#109). A screen that is opened starts at its top.
+  const pushed = useRef(false)
+  const pageKey = ui.view.kind === 'project' ? `project-${ui.view.id}` : ui.view.kind
+  const shownKey = useRef(pageKey)
+  useLayoutEffect(() => {
+    if (pushed.current && isMobile && shownKey.current !== pageKey) window.scrollTo(0, 0)
+    pushed.current = false
+    shownKey.current = pageKey
+  })
   const goBack = useCallback(() => latest.current.back(), [])
   useEdgeSwipeBack(isMobile && !isTab(ui.view) && !isOpen(ui), goBack, page)
 
@@ -167,7 +183,10 @@ export default function App() {
     closeAll,
     say,
     setZoom,
-    openView: (view: View) => setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) })),
+    openView: (view: View) => {
+      pushed.current = true
+      setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
+    },
     back: () =>
       setUi((u) => {
         // A list that is gone, or is not in this space, is skipped.
@@ -548,6 +567,9 @@ export default function App() {
                   // On a phone: below iOS's navigation bar (44 points under
                   // the status bar), and clear of the tab bar and New Task.
                   'max-md:px-4 max-md:pt-[calc(var(--safe-top)+var(--phone-nav))] max-md:pb-[calc(var(--safe-bottom)+var(--phone-page-end))]',
+                  // iOS's margins: 16 points on an upright iPhone, 20 turned
+                  // sideways (a regular-width column), inside the safe area.
+                  'max-md:landscape:px-5',
                   // Lists is a grouped screen: white groups on grey.
                   view.kind === 'lists' && 'max-md:bg-grouped',
                   wide ? 'md:p-8' : 'md:px-12 md:pt-10 md:pb-24',
