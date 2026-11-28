@@ -1,6 +1,7 @@
 """Prepare Xcode's Rust workspace without changing other platforms' SQLite."""
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -16,7 +17,12 @@ def link(source, destination):
 
 
 shutil.copyfile(root / 'Cargo.toml', mirror / 'Cargo.toml')
-shutil.copyfile(Path(__file__).with_name('Cargo.lock'), mirror / 'Cargo.lock')
+# Only SQLite and its dependencies differ. Keep every other package locked
+# to the workspace version when the main lockfile advances.
+subprocess.run([
+    'patch', '-s', '-F', '0', '-o', str(mirror / 'Cargo.lock'),
+    str(root / 'Cargo.lock'), str(Path(__file__).with_name('sqlite-lock.patch')),
+], check=True)
 link(root / 'ui', mirror / 'ui')
 for name in ['core', 'mcp', 'app', 'server']:
     source = root / 'crates' / name
