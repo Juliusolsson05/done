@@ -110,6 +110,22 @@ export async function finishSignIn(link: string): Promise<boolean> {
   return cloudSession() !== null
 }
 
+// The same sign-in without leaving the app: the iPhone and iPad app shows the
+// page in the system's sign-in sheet, which gives back the link the page ended
+// on (the App Store does not accept being sent out to Safari to sign in).
+// `present` shows the sheet. Resolves false when the person closed it, which
+// is not a failure and gets no message.
+export type SheetAnswer = { link?: string; error?: string }
+export async function signInInSheet(present: (url: string) => Promise<SheetAnswer>): Promise<boolean> {
+  let answer: SheetAnswer = {}
+  await beginSignIn(async (url) => {
+    answer = await present(url)
+  })
+  if (answer.error === 'cancelled') return false
+  if (!answer.link || !(await finishSignIn(answer.link))) throw new Error('Signing in did not work. Try again.')
+  return true
+}
+
 // Sign-ins that finish in one request rather than a trip through the
 // browser: Apple's (the iPhone app hands over the token Apple gave it) and
 // the App Review login. Both answer `{token, account}`, like `/auth/exchange`.

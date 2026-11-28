@@ -18,9 +18,16 @@ On iPhone and iPad the hosted sign-in page opens in a sheet inside done, and the
 
 ## Tests
 
-- `ui/src/lib/cloud.test.ts`: `signInInSheet` hands the sheet's link to the exchange and signs in; a closed sheet resolves false, asks the server nothing and stores no session; a failure other than closing throws.
+- `ui/src/lib/sheet-sign-in.test.ts`: `signInInSheet` hands the sheet's link to the exchange and signs in; a closed sheet resolves false, asks the server nothing and stores no session; a failure other than closing throws.
 - CI: typecheck, UI tests, UI build, `cargo test` for core, mcp, server. CI does not compile `crates/app` or any Swift.
+
+## Rulings and what is verified
+
+- Ruling: the Xcode project was regenerated with `xcodegen generate` (2.45.4) in the worktree, with empty `Externals` and `assets` folders standing in for the build's, and the two empty `TEMP_…` groups it then dropped were put back by hand — why: the committed project should differ by the new framework only — cost if wrong: none for a build; the next regeneration after a real build rewrites those groups anyway.
+- Ruling: the "Your browser could not be opened." message moved from the settings button into `signIn` (`backend.ts`), so the button shows whichever message the platform's sign-in gives — why: the phone's failure is not about a browser — cost if wrong: a wrong sentence in a toast.
+- Verified here: `DoneNative.swift` with `Shared/DoneShared.swift` type-checks against the iPhone SDK (`swiftc -typecheck`, target `arm64-apple-ios15.0`, no errors or warnings). The three plists pass `plutil -lint`. The new UI test file is formatted with Prettier.
+- Verified by CI only (no `node_modules` in the worktree): typecheck, the UI tests including `ui/src/lib/sheet-sign-in.test.ts`, the UI build.
 
 ## Not verified
 
-Nothing here can run without a device build, which this change does not make (the Mac's disk is nearly full). Not verified: that the Swift and the iOS-only Rust compile; that the sheet appears, returns the link and signs in on a real iPhone and iPad; that closing it is silent; that the regenerated Xcode project builds. These belong to the next device build before submission.
+No device build was made (the Mac's disk is nearly full), and CI does not compile `crates/app`. Not verified: that the iOS-only Rust (`web_sign_in`) compiles and links against the Swift symbol; that the sheet appears, returns the link and signs in on a real iPhone and iPad; that closing it is silent; that Google's page offers the Safari account; that the Mac app's sign-in is unchanged in practice (its code path is the same call as before). These belong to the next device build before submission.

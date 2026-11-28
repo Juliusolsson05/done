@@ -3,7 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
-import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
+import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInInSheet, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
@@ -227,7 +227,19 @@ export const REMOTE_MCP: string | null = tauri
   : typeof location === 'undefined'
     ? null
     : `${location.origin}/mcp`
-export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url }))
+// Sign in with Google. A Mac or PC opens the person's own browser, which
+// hands the finished sign-in back as a link (`onSignedIn`). An iPhone or iPad
+// stays in the app (a sheet over it, DoneNative.swift) and starts over signed
+// in when the sheet closes; closing it by hand changes nothing.
+export const signIn = async (): Promise<void> => {
+  if (!isIosApp) {
+    await beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url })).catch(() => {
+      throw new Error('Your browser could not be opened.')
+    })
+    return
+  }
+  if (await signInInSheet((url) => tauri!.core.invoke<SheetAnswer>('web_sign_in', { url }))) location.reload()
+}
 
 // Sign in with Apple: the iPhone and iPad app only, where the App Store asks
 // for it next to Google. The sheet is native (DoneNative.swift); the token it
