@@ -60,16 +60,19 @@ function SidebarToggle() {
   const touch = useIsTouch()
   if (open || isMobile) return null
   return (
-    // On a touch screen (an upright iPad, where this is the only way to the
-    // other views) it has a 44 point row of its own above the page: the wide
-    // views' margin cannot hold it, and it hung off the screen (#109). A
-    // finger has no ⌘B.
-    <div className="sticky top-0 z-20 h-0 touch:h-11 touch:mb-2">
+    // On a touch screen (an upright iPad) a page's own header holds the
+    // button at the start of its row (ViewHeader); a page without one gets a
+    // 44 point row here, since the margin cannot hold it (#109). A finger
+    // has no ⌘B.
+    <div className="sticky top-0 z-20 h-0 touch:h-11 touch:mb-2 touch:in-[[data-slot=sidebar-inset]:has([data-view-header])]:hidden">
       {/* In the page's left margin, clear of the title it sits beside. */}
-      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground touch:m-0 touch:-ml-3 touch:size-11" title={touch ? 'Show sidebar' : `Show sidebar (${shortcut('B')})`} />
+      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground touch:m-0 touch:-ml-3 touch:size-11" aria-label="Show sidebar" title={touch ? 'Show sidebar' : `Show sidebar (${shortcut('B')})`} />
     </div>
   )
 }
+
+// Which page is showing, for remembering where it was scrolled.
+const keyOf = (view: View) => (view.kind === 'project' ? `project-${view.id}` : view.kind)
 
 function storedZoom(): number {
   try {
@@ -109,13 +112,19 @@ export default function App() {
   const page = useRef<HTMLDivElement>(null)
   // A phone's page is the window, which keeps its scroll from one screen to
   // the next: a list opened from a scrolled Lists opened mid-list, its title
-  // off the screen (#109). A screen that is opened starts at its top.
-  const pushed = useRef(false)
-  const pageKey = ui.view.kind === 'project' ? `project-${ui.view.id}` : ui.view.kind
+  // off the screen (#109). So a screen pushed in starts at its top, and going
+  // back returns to where the screen under it was left, as on iOS. Switching
+  // tabs is left as it was.
+  const scrolls = useRef(new Map<string, number>())
+  const moving = useRef<'push' | 'back' | null>(null)
+  const pageKey = keyOf(ui.view)
   const shownKey = useRef(pageKey)
   useLayoutEffect(() => {
-    if (pushed.current && isMobile && shownKey.current !== pageKey) window.scrollTo(0, 0)
-    pushed.current = false
+    if (isMobile && shownKey.current !== pageKey) {
+      if (moving.current === 'push') window.scrollTo(0, 0)
+      if (moving.current === 'back') window.scrollTo(0, scrolls.current.get(pageKey) ?? 0)
+    }
+    moving.current = null
     shownKey.current = pageKey
   })
   const goBack = useCallback(() => latest.current.back(), [])
@@ -184,15 +193,20 @@ export default function App() {
     say,
     setZoom,
     openView: (view: View) => {
-      pushed.current = true
+      if (!isTab(view)) {
+        scrolls.current.set(keyOf(ui.view), window.scrollY)
+        moving.current = 'push'
+      }
       setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
     },
-    back: () =>
+    back: () => {
+      moving.current = 'back'
       setUi((u) => {
         // A list that is gone, or is not in this space, is skipped.
         const to = back(u.history, (v) => v.kind !== 'project' || shown.projects.some((p) => p.id === v.id))
         return { ...u, ...CLOSED, view: to.view, history: to.history }
-      }),
+      })
+    },
     // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
       setUi((u) => ({

@@ -30,7 +30,7 @@ function PhoneEntries({ entries, remove }: { entries: Entry[]; remove: (entry: E
       {entries.map((entry) => (
         <li key={entry.id} className="flex items-center gap-3 border-b border-border py-2">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-body wrap-anywhere">{entry.title}</span>
+            <span className={cn('text-body wrap-anywhere', !entry.title.trim() && 'text-tertiary')}>{entry.title.trim() || 'No title'}</span>
             <span className="text-subhead text-tertiary tabular-nums">
               {clockTime(entry.startedAt)}–{clockTime(entry.endedAt)} · {minutesText(entry.focusedMs)} of {minutesText(entry.plannedMs)} ·{' '}
               <Difference plannedMs={entry.plannedMs} focusedMs={entry.focusedMs} />

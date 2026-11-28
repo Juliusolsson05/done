@@ -77,9 +77,9 @@ export function TaskRow({ task, goal = false }: { task: Task; goal?: boolean }) 
       data-task={task.id}
       className={cn(
         'group/row flex items-start gap-2.5 rounded-lg p-2 md:hover:bg-muted',
-        // An iPad row is as tall as the check's 44 point tap area plus room,
-        // so neighbouring rows do not take the edges of it (#109).
-        'wide:touch:py-3.5',
+        // An iPad row is 44 points, as tall as the check's tap area, so the
+        // next row does not take the edge of it (#109).
+        'wide:touch:min-h-11 wide:touch:py-2.5',
         // A phone: Reminders' row. The text in iOS's body size, a hairline
         // under it that starts where the text starts, and the grey of a
         // row being pressed.

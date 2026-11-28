@@ -83,27 +83,41 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   and a 44 px remove button on the right. The table stays for tablet and Mac.
   Removing stays a visible button rather than a swipe: nothing is lost and it
   needs no new gesture.
-- **Pushed screens open at the top.** `openView` marks the change as a push;
-  a layout effect scrolls the window to 0 when the page key changes after a
-  push, on a phone only. Back keeps today's behaviour (no saved positions in
-  this change).
-- **iPad sidebar toggle.** On touch the toggle stops hanging in the page
-  margin (the wide views' 32 px padding cannot hold it) and gets a 44 px row
-  of its own above the page's header. The Mac keeps the margin button.
+- **Pushed screens open at the top; Back returns where you were.** On a phone,
+  `openView` to a pushed (non-tab) screen saves the current page's scrollY in
+  a `Map<pageKey, scrollY>` ref and the new page starts at 0; `back` (the
+  button and the edge swipe) restores the saved position of the page it
+  returns to. Switching tabs behaves as on main (scroll untouched). Review of
+  #119 caught the first version resetting the previous list to 0 on Back.
+- **iPad sidebar toggle.** On touch the toggle starts the page's existing
+  header row (`ViewHeader`), as iPadOS bars put it, with `-my-1.5` so the
+  header is no taller than main; a page without a `ViewHeader` (a note open in
+  Notes) keeps a 44 pt row of its own. The Mac keeps the margin button. (The
+  first version gave the toggle its own row everywhere, pushing every header
+  down 52 px.)
 - **Long-press menu** rows get `pointer-coarse:min-h-11` and body text, in the
-  shared context-menu primitive (the same pattern the notes Lists menu uses).
+  shared context-menu primitive (the same pattern the notes Lists menu uses);
+  on a touch screen under 500 tall (an iPhone on its side) rows are 36 so
+  nine fit, and the menu's collision padding is the `--safe-*` insets plus 8,
+  so it never runs under the status bar, notch strip or home indicator.
 - **iPad task editor** keeps the inline editor; each control gets
   `pointer-coarse:h-11`. Follow-up (not here): opening the phone's sheet as a
   centred form sheet on the iPad is probably the better design, since it
   already has 44 pt rows and the long-press actions; it is a redesign, and the
   owner should see it on its own.
 - **Settings in a browser** shows the Mac download and the terminal pane only
-  on the desktop layout (a mouse and a wide window). The Mac app itself is
-  unaffected.
-- **Push animation overflow**: `overflow-x: clip` on the phone's body, so a
-  page sliding in cannot widen the layout viewport.
+  with a fine pointer (a mouse), however narrow the window. The Mac app itself
+  is unaffected. Kept minimal: PR #99 replaces the downloads pane with OS
+  detection and should win that hunk.
+- **Push animation overflow**: `overflow-x: clip` on the app's frame on a
+  phone, so a page sliding in cannot widen the layout viewport.
 - **Landscape**: the task sheet keeps its content inside the side safe areas;
-  the tab bar and New Task no longer start the page's long-press menu.
+  the tab bar, New Task and the navigation bar no longer start the page's
+  long-press menu.
+- **Time sheet** block with an empty title reads "No title".
+- **Tab bar height** (`3.0625rem`) is one `TAB_BAR` constant in phone.tsx used
+  by the tab bar and New Task, so it can switch to `--tab-bar` from the Board
+  PR #116 in one line when that merges.
 
 - **Margins on the phone.** The task list no longer hangs 8 pt into the
   margin (`-mx-2` was for the Mac's hover background): checks, section
@@ -124,12 +138,15 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   still gets the shared Today and Filter buttons and the sidebar toggle,
   which live in this change's files. Cost if wrong: those four stay 28–32 pt
   on touch until that branch takes them.
-- Ruling: an iPad task row is 48 pt tall (`py-3.5` on the tablet layout) so
-  the check's 44 pt tap area is not cut by the next row. Cost if wrong: an
-  iPad list shows a little less per screen.
-- Ruling: the long-press menu is kept from starting on the tab bar and New
-  Task by stopping their pointer-down and contextmenu from reaching the
-  window-wide menu trigger.
+- Ruling: an iPad task row is 44 pt (`min-h-11 py-2.5` on the tablet layout),
+  as tall as the check's tap area, and the list's groups sit 16 apart instead
+  of 28 on the tablet layout, so 22 rows show at 820x1180 (main 25 at 38 pt;
+  the first version's 48 pt rows and toggle row showed 17). Cost if wrong: a
+  little tighter grouping on iPad.
+- Ruling: the long-press menu is kept from starting on the tab bar, New Task
+  and the navigation bar: their contextmenu (what a browser's long press and a
+  right click send) is stopped from reaching the window-wide menu trigger, and
+  so is a touch's pointer-down, which starts Radix's own press timer.
 - Ruling: `HeaderButton` is shared, so Notes' "New note" in its header gets
   the 44 pt height on iPad too. That helps M08 and changes nothing else there.
 
@@ -149,12 +166,20 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
 ## Checks
 
 - `ui/checks/touch-sizes.cjs`: Playwright (Chromium, touch) against the built
-  UI with stubbed `/api`. At 390x844: no horizontal overflow on Time sheet and
-  its rows fit the screen, back button and task-sheet Cancel/Done ≥ 44 tall, a
-  screen pushed from a scrolled Lists opens at scrollY 0. At 820x1180: task
-  checkboxes and header buttons have ≥ 44 px tap areas (measured with
-  `elementFromPoint` at the edges) and the sidebar toggle is fully on screen.
-  It must fail on `origin/main`.
+  UI with stubbed `/api`, waiting on conditions (animations finished) rather
+  than sleeps, with role-based locators. At 390x844: 16 pt margins on Today,
+  Lists, Settings and Time sheet; a list pushed from Lists scrolled to 300
+  opens at 0 and Back returns to 300; back button and task-sheet Cancel/Done
+  ≥ 44; a long press on the navigation bar opens no menu; Time sheet fits,
+  remove buttons 44 and on screen, an empty title reads "No title". At
+  844x390: margins ≥ 47 + 16, the long-press menu fits between the insets
+  without scrolling (Delete visible), the task sheet clear of the notch. At
+  820x1180: ≥ 22 Today rows in view and the title no lower than main, check
+  tap areas ≥ 44 (measured with `elementFromPoint`), sidebar toggle on screen
+  and 44 on Board, Timeline and Time sheet, header buttons 44. A 700 wide
+  mouse window keeps "Connect an AI agent" and "Mac app". Mouse windows at
+  1440, 1024 and 800: checkbox 18, title at y=40, no header toggle, day arrow
+  28, menu rows 28, Time sheet a table.
 - `npm run typecheck && npm test && npm run build`.
 - A 1440x900 mouse pass comparing screenshots and sizes before and after.
 
@@ -163,11 +188,14 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
 All in Chromium's touch emulation (`isMobile`, `hasTouch`) with the safe areas
 an iPhone reports injected, on the built UI with stubbed `/api`:
 
-- `ui/checks/touch-sizes.cjs` fails on `origin/main` (22 failures, also after rebasing on main at 1eef78e: Today inset
-  12, pushed screen at scrollY 727, back 63x28, Time sheet page 587 wide,
-  remove 28x28 at x=451, Cancel/Done 52x22 / 42x22, iPad checks 41x33,
-  toggle at x=-8 and 28x28, day arrows and Timeline Today/Filter 28 tall) and
-  passes on this branch.
+- `ui/checks/touch-sizes.cjs` fails on `origin/main` 34d2745 (26 failures)
+  and on this PR's first head (9 failures, one per review item: Back returned
+  Lists at 0, long press on the bar, no "No title", landscape menu 390 tall
+  and scrolling with Delete at y=374, iPad 17 rows and title at y=116, the
+  700 wide mouse window's two panes), and passes on this branch.
+- Review fixes, measured: Back after Lists at 300 — main 300, first head 0,
+  now 300. iPad 820 Today — main 25 rows, title y=64; first head 17 rows,
+  y=116; now 22 rows, y=64.
 - Re-measured each finding before and after at 390x844, 844x390, 820x1180 and
   a 1440x900 mouse: back 63x28 → 71x44; ⋯ 32 → 44; menu rows 28 → 44; task
   sheet Cancel/Done 22 → 44 tall, selects 22 → 43; pushed screen scrollY
@@ -179,7 +207,7 @@ an iPhone reports injected, on the built UI with stubbed `/api`:
   16/81; Settings 16/58; task sheet in landscape 16 → 67 from the edge.
 - Desktop 1440x900 with a mouse: every measurement equal and the five
   screenshots byte-identical before and after.
-- `npm run typecheck`, `npm test` (689, after rebasing on main), `npm run build` green.
+- `npm run typecheck`, `npm test` (710, on main 34d2745), `npm run build` green.
 
 Not verified: WebKit and a real iPhone or iPad (safe areas there come from
 the device, not injected values), and anything with the on-screen keyboard up.

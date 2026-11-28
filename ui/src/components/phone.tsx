@@ -95,6 +95,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
     }
   }, [])
   const pushed = !isTab(ui.view)
+  const backTo = backLabel(ui.history[ui.history.length - 1], shown.projects)
   const menu = ui.view.kind === 'project' && children !== undefined
   const [actions, setActions] = useState(false)
 
@@ -105,6 +106,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
       {createPortal(
         <div
           ref={bar}
+          {...noPageMenu}
           className={cn(
             'fixed inset-x-0 top-0 z-30 pt-[var(--safe-top)] transition-colors duration-200',
             under > 0 ? 'border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150' : 'border-b border-transparent',
@@ -117,12 +119,14 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
               <button
                 type="button"
                 onClick={back}
+                // Named as VoiceOver reads iOS's back button, not as the Lists tab.
+                aria-label={backTo === 'Back' ? 'Back' : `Back to ${backTo}`}
                 // The bar's whole height takes the tap, as iOS's back button
                 // does (it was 63x28, #109).
                 className="relative z-10 -ml-1 flex h-11 min-w-11 items-center pr-2 text-body text-primary active:opacity-40"
               >
                 <ChevronLeftIcon className="size-7" strokeWidth={2.4} />
-                {backLabel(ui.history[ui.history.length - 1], shown.projects)}
+                {backTo}
               </button>
             )}
             {menu && (
@@ -185,8 +189,10 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
 
 // The bars over the page are not the page: a long press on them must not
 // open the page's menu (it did on the tab bar in landscape, #109). The menu's
-// trigger is the whole window, so its press and its contextmenu are kept
-// from reaching it.
+// trigger is the whole window. Its contextmenu is what a long press sends in
+// a browser (and a right click), so that is stopped here; the press timer
+// Radix starts on a touch's pointer-down is stopped too, for a web view that
+// sends no contextmenu.
 const noPageMenu = {
   onPointerDown: (event: PointerEvent) => event.stopPropagation(),
   onContextMenu: (event: MouseEvent) => {

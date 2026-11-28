@@ -15,7 +15,6 @@ import { deletionWarning, signOutQuestion, waitingMessage, type Held } from '@/l
 import { deleteAccountHere, prepareToLeave, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
-import { useLayout } from '@/hooks/use-mobile'
 
 // On a touch screen the buttons and the switch here take a 44 point tap
 // (they were 28, #109); a mouse never matches pointer-coarse.
@@ -278,8 +277,9 @@ function DesktopDownloads() {
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   // A browser on a phone or an iPad has no terminal and no Mac to download
-  // to: the Mac app and the agent commands are for a desktop browser (#109).
-  const desktopBrowser = useLayout() === 'desktop'
+  // to: the Mac app and the agent commands are for a browser with a mouse
+  // (#109), however narrow its window.
+  const desktopBrowser = typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches
   const account = useAccount()
   // A workspace's page opens in place of the settings, with a way back.
   const [space, setSpace] = useState<number | null>(null)
