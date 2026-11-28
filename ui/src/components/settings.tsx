@@ -16,9 +16,11 @@ import { deleteAccountHere, prepareToLeave, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
+// On a touch screen the buttons and the switch here take a 44 point tap
+// (they were 28, #109); a mouse never matches pointer-coarse.
 function Pane({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex max-w-2xl flex-col gap-3">
+    <section className="flex max-w-2xl flex-col gap-3 pointer-coarse:[&_[data-slot=button]]:h-11 pointer-coarse:[&_[data-slot=switch]]:after:-inset-y-3.5">
       <h3 className="font-semibold">{title}</h3>
       {children}
     </section>
@@ -274,6 +276,10 @@ function DesktopDownloads() {
 
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
+  // A browser on a phone or an iPad has no terminal: the agent commands are
+  // for a browser with a mouse (#109), however narrow its window. (The
+  // download pane reads the operating system itself.)
+  const desktopBrowser = typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches
   const account = useAccount()
   // A workspace's page opens in place of the settings, with a way back.
   const [space, setSpace] = useState<number | null>(null)
@@ -313,7 +319,7 @@ export function Settings() {
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
             too; in the web app there is no file here to read. */}
-        {path && (!account || isDesktop) && !onIos && (
+        {path && (!account || isDesktop) && !onIos && (isDesktop || desktopBrowser) && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up

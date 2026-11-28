@@ -4,7 +4,7 @@
 // swipe from the left edge that goes back. A window never shows any of this.
 import { PhoneBell } from '@/components/notifications'
 import { SpacePicker } from '@/components/space-picker'
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import {
   CalendarDaysIcon,
@@ -95,6 +95,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
     }
   }, [])
   const pushed = !isTab(ui.view)
+  const backTo = backLabel(ui.history[ui.history.length - 1], shown.projects)
   const menu = ui.view.kind === 'project' && children !== undefined
   const [actions, setActions] = useState(false)
 
@@ -105,6 +106,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
       {createPortal(
         <div
           ref={bar}
+          {...noPageMenu}
           className={cn(
             'fixed inset-x-0 top-0 z-30 pt-[var(--safe-top)] transition-colors duration-200',
             under > 0 ? 'border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150' : 'border-b border-transparent',
@@ -117,10 +119,14 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
               <button
                 type="button"
                 onClick={back}
-                className="relative z-10 -ml-1 flex items-center text-body text-primary active:opacity-40"
+                // Named as VoiceOver reads iOS's back button, not as the Lists tab.
+                aria-label={backTo === 'Back' ? 'Back' : `Back to ${backTo}`}
+                // The bar's whole height takes the tap, as iOS's back button
+                // does (it was 63x28, #109).
+                className="relative z-10 -ml-1 flex h-11 min-w-11 items-center pr-2 text-body text-primary active:opacity-40"
               >
                 <ChevronLeftIcon className="size-7" strokeWidth={2.4} />
-                {backLabel(ui.history[ui.history.length - 1], shown.projects)}
+                {backTo}
               </button>
             )}
             {menu && (
@@ -128,9 +134,12 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
                 type="button"
                 aria-label="More"
                 onClick={() => setActions(true)}
-                className="relative z-10 ml-auto flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary active:opacity-40"
+                // A 44 point target around the 32 point circle, as in Notes.
+                className="group/more relative z-10 -mr-1.5 ml-auto flex size-11 items-center justify-center text-primary"
               >
-                <EllipsisIcon className="size-5" strokeWidth={2.4} />
+                <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 group-active/more:opacity-40">
+                  <EllipsisIcon className="size-5" strokeWidth={2.4} />
+                </span>
               </button>
             )}
             <div
@@ -151,7 +160,7 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
           {title}
         </h1>
         {sub && <span className="text-subhead text-tertiary">{sub}</span>}
-        {children && !menu && <div className="-ml-2.5 flex flex-wrap gap-1 pt-1">{children}</div>}
+        {children && !menu && <div className="-ml-2.5 flex flex-wrap gap-2 pt-1">{children}</div>}
         {/* A list's own actions (rename, delete) are behind ⋯ in the bar and
             come up as an action sheet, as iOS does. Tapping one closes it. */}
         {menu &&
@@ -176,6 +185,20 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
       </header>
     </>
   )
+}
+
+// The bars over the page are not the page: a long press on them must not
+// open the page's menu (it did on the tab bar in landscape, #109). The menu's
+// trigger is the whole window. Its contextmenu is what a long press sends in
+// a browser (and a right click), so that is stopped here; the press timer
+// Radix starts on a touch's pointer-down is stopped too, for a web view that
+// sends no contextmenu.
+const noPageMenu = {
+  onPointerDown: (event: PointerEvent) => event.stopPropagation(),
+  onContextMenu: (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  },
 }
 
 // The tab bar: the three lists used every day, and Lists for the rest.
@@ -219,6 +242,7 @@ export function TabBar() {
     // Edge to edge, with its tabs inside the safe area on every side.
     <nav
       aria-label="Views"
+      {...noPageMenu}
       className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(var(--tab-bar)+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
     >
       {tab('today', 'Today', CalendarIcon, late)}
@@ -240,7 +264,9 @@ export function NewTaskButton() {
     <button
       type="button"
       onClick={add}
-      className="fixed bottom-[calc(3.0625rem+var(--safe-bottom)+0.5rem)] left-[max(0.75rem,var(--safe-left))] z-30 flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
+      {...noPageMenu}
+      // On the page's margin, 16 points in from the safe edge (#109).
+      className="fixed bottom-[calc(var(--tab-bar)+var(--safe-bottom)+0.5rem)] left-[calc(var(--safe-left)+1rem)] z-30 landscape:left-[calc(var(--safe-left)+1.25rem)] flex items-center gap-2 rounded-full bg-background py-2 pr-4 pl-2 text-body font-semibold text-primary shadow-[0_2px_12px_rgb(0_0_0/0.12)] active:opacity-40"
     >
       <span className="flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <PlusIcon className="size-4.5" strokeWidth={3} />
@@ -315,7 +341,7 @@ export function ListsScreen() {
         </div>
         {/* Where you are, as the sidebar's picker says in a window. */}
         <SpacePicker phone />
-        <button type="button" onClick={search} className="flex h-9 items-center gap-1.5 rounded-lg bg-foreground/6 px-2 text-body text-tertiary">
+        <button type="button" onClick={search} className="flex h-11 items-center gap-1.5 rounded-lg bg-foreground/6 px-2 text-body text-tertiary">
           <SearchIcon className="size-4.5" />
           Search
         </button>
@@ -341,7 +367,7 @@ export function ListsScreen() {
           ))}
           {shown.projects.length === 0 && <p className="px-4 py-3 text-subhead text-tertiary">No lists yet.</p>}
         </Group>
-        <button type="button" onClick={newProject} className="self-end px-1 text-body text-primary active:opacity-40">
+        <button type="button" onClick={newProject} className="-mr-2 h-11 self-end px-2 text-body text-primary active:opacity-40">
           Add List
         </button>
       </section>

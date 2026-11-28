@@ -3,13 +3,14 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { NotebookPenIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { ProjectDot } from '@/components/marks'
 import { PhoneHeader } from '@/components/phone'
 import { AddRow } from '@/components/quick-add'
 import { TaskEditor } from '@/components/task-editor'
 import { TaskRow } from '@/components/task-row'
 import { useFocus, useNameField } from '@/hooks/use-focus'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsMobile, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { loadNotes } from '@/lib/backend'
 import { fullDay, TODAY } from '@/lib/days'
@@ -19,6 +20,24 @@ import { play } from '@/lib/sounds'
 import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
+// On an iPad with the sidebar put away, the button that brings it back starts
+// the header row, as in iPadOS's own bars: it is the only way to the other
+// views there, and the page's margin is too narrow to hold a 44 point button
+// (it hung off the screen on Board and Timeline, #109). It takes no height of
+// its own (-my-1.5), so the header is no taller than before. A Mac keeps its
+// button in the page's margin (App.tsx).
+function HeaderSidebarToggle() {
+  const { open, isMobile } = useSidebar()
+  const { ui } = useApp()
+  const touch = useIsTouch()
+  if (!touch || open || isMobile) return null
+  // Timeline and Board's page clips what reaches into its margin, which took
+  // the left 12 points of the tap area there, so the button starts at the
+  // margin instead of reaching into it.
+  const wide = ui.view.kind === 'timeline' || ui.view.kind === 'board'
+  return <SidebarTrigger aria-label="Show sidebar" className={cn('-my-1.5 size-11 self-center text-muted-foreground', !wide && '-ml-3')} title="Show sidebar" />
+}
+
 export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
   const isMobile = useIsMobile()
   // A phone has iOS's navigation bar and large title instead.
@@ -26,18 +45,20 @@ export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: s
   return (
     // On a phone the heading wraps: the title and what it is about on one
     // line, the view's buttons on the next, where they have room.
-    <header className="mb-6 flex min-h-8 items-baseline gap-3 max-md:mb-4 max-md:flex-wrap max-md:gap-y-1">
+    <header data-view-header className="mb-6 flex min-h-8 items-baseline gap-3 max-md:mb-4 max-md:flex-wrap max-md:gap-y-1">
+      <HeaderSidebarToggle />
       <h1 className="flex items-center gap-2.5 text-2xl font-bold tracking-tight max-md:text-3xl md:font-display md:text-[30px] md:leading-tight md:font-semibold md:tracking-[-0.02em]">
         {title}
       </h1>
       {sub && <span className="text-sm whitespace-nowrap text-muted-foreground">{sub}</span>}
-      <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full">{children}</div>
+      <div className="ml-auto flex gap-1 self-center empty:hidden max-md:-ml-2.5 max-md:basis-full pointer-coarse:gap-2">{children}</div>
     </header>
   )
 }
 
 export function HeaderButton({ danger = false, ...props }: { danger?: boolean; onClick: () => void; children: ReactNode }) {
-  return <Button variant="ghost" size="sm" className={danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground'} {...props} />
+  // 44 points tall for a finger (they were 28 on iPhone and iPad, #109).
+  return <Button variant="ghost" size="sm" className={cn('pointer-coarse:h-11', danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground')} {...props} />
 }
 
 // Today's goal: the one thing that has to happen today. It is the only task
@@ -64,7 +85,7 @@ function GoalBlock() {
   // display face set it apart, so it needs no card to say it is special.
   return (
     <section aria-label="Today’s goal" className="flex flex-col gap-1 pb-2 md:border-b md:border-border md:pb-5">
-      <div className={cn('px-2 text-sm font-medium', task.done ? 'text-faint' : 'text-primary')}>
+      <div className={cn('px-2 text-sm font-medium max-md:px-0', task.done ? 'text-faint' : 'text-primary')}>
         {task.done ? 'Today’s goal, done' : 'Today’s goal'}
       </div>
       {task.done ? (
@@ -194,7 +215,10 @@ export function ListView() {
 
       {/* Rows keep their padding for the hover, so the list is pulled out by
           the same amount and the checks line up with the page title. */}
-      <div className="-mx-2 flex flex-col gap-7">
+      {/* On a phone there is no hover, so the list sits on the page's margin.
+          An iPad's rows are 44 points for a finger, so its groups sit a
+          little closer to keep as many tasks in view (#109). */}
+      <div className="-mx-2 flex flex-col gap-7 max-md:mx-0 wide:touch:gap-5">
         {view.kind === 'today' && <GoalBlock />}
         {count === 0 && !ui.adding && !hasGoal && (
           <div className="px-2 pt-4 text-muted-foreground">
@@ -207,7 +231,7 @@ export function ListView() {
             {section.heading && (
               <h3
                 className={cn(
-                  'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-1 max-md:text-title max-md:font-bold',
+                  'mb-1 flex items-baseline gap-2 px-2 text-xs font-semibold max-md:mt-2 max-md:px-0 max-md:text-title max-md:font-bold',
                   section.late ? 'text-overdue' : 'text-muted-foreground max-md:text-foreground',
                   // On a phone a long day of tasks keeps its day in sight
                   // (Upcoming lost which day it was, 23 Nov audit): the heading

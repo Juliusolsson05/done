@@ -79,7 +79,7 @@ export function SearchDialog() {
                   data-at={i === at}
                   onMouseMove={() => setAt(i)}
                   onClick={() => choose(hit)}
-                  className={cn('flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left', i === at && 'bg-accent')}
+                  className={cn('flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left pointer-coarse:min-h-11', i === at && 'bg-accent')}
                 >
                   <HitIcon hit={hit} />
                   <span className="min-w-0 flex-1">

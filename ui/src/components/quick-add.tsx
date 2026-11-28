@@ -187,7 +187,7 @@ function QuickAdd() {
         </div>
         {/* The projects an "@" could be, the first taken with Tab. */}
         {suggestion && (
-          <div className="flex flex-wrap items-center gap-1 text-xs" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-1 text-xs pointer-coarse:gap-2" aria-live="polite">
             {suggestion.projects.slice(0, 5).map((p, i) => (
               <button
                 key={p.id}
@@ -203,7 +203,7 @@ function QuickAdd() {
                     inputRef.current?.setSelectionRange(taken.caret, taken.caret)
                   })
                 }}
-                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
+                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5 pointer-coarse:min-h-9 pointer-coarse:px-3 pointer-coarse:text-sm', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
               >
                 <ProjectDot id={p.id} />
                 {p.name}
@@ -214,7 +214,7 @@ function QuickAdd() {
         )}
         {/* The people a "+" could be, the first taken with Tab. */}
         {personSuggestion && (
-          <div className="flex flex-wrap items-center gap-1 text-xs" aria-live="polite">
+          <div className="flex flex-wrap items-center gap-1 text-xs pointer-coarse:gap-2" aria-live="polite">
             {personSuggestion.people.slice(0, 5).map((p, i) => (
               <button
                 key={p.id}
@@ -230,7 +230,7 @@ function QuickAdd() {
                     inputRef.current?.setSelectionRange(taken.caret, taken.caret)
                   })
                 }}
-                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
+                className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5 pointer-coarse:min-h-9 pointer-coarse:px-3 pointer-coarse:text-sm', i === 0 ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted')}
               >
                 <Avatar who={memberOf(p.id)} size="xs" />
                 {p.name}
@@ -287,7 +287,7 @@ function QuickAdd() {
             type="button"
             variant="ghost"
             size="sm"
-            className="text-muted-foreground max-md:h-9 max-md:px-2 max-md:text-body max-md:text-primary max-md:hover:bg-transparent"
+            className="text-muted-foreground max-md:h-9 max-md:px-2 max-md:text-body max-md:text-primary max-md:hover:bg-transparent max-md:pointer-coarse:h-11"
             onClick={closeAll}
           >
             <span className="md:hidden">Cancel</span>
@@ -297,7 +297,7 @@ function QuickAdd() {
             type="submit"
             size="sm"
             disabled={!read.title}
-            className="max-md:h-9 max-md:rounded-full max-md:px-4 max-md:text-body max-md:font-semibold"
+            className="max-md:h-9 max-md:rounded-full max-md:px-4 max-md:text-body max-md:font-semibold max-md:pointer-coarse:h-11"
           >
             <span className="md:hidden">Add</span>
             <span className="max-md:hidden">Add task</span>
@@ -330,7 +330,7 @@ export function AddRow() {
   // On a phone the box is drawn by MobileQuickAdd, and the row stays a row.
   if (ui.adding && !isMobile) return <QuickAdd />
   return (
-    <Button variant="ghost" onClick={add} className="h-9 w-full justify-start gap-2.5 px-2 font-normal text-faint hover:text-muted-foreground max-md:h-11 max-md:gap-3 max-md:text-base">
+    <Button variant="ghost" onClick={add} className="h-9 w-full justify-start gap-2.5 px-2 font-normal text-faint hover:text-muted-foreground max-md:h-11 max-md:gap-4 max-md:px-0 max-md:text-base pointer-coarse:h-11">
       <PlusIcon className="size-4.5" />
       Add task
       {/* A phone has no Q to press. */}

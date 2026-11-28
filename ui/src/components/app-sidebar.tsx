@@ -43,7 +43,7 @@ import { Countdown } from '@/components/focus-view'
 import { NameField } from '@/components/note-folders'
 import { ProjectDot } from '@/components/marks'
 import { useFocus, useNameField } from '@/hooks/use-focus'
-import { useSidebarDocked } from '@/hooks/use-mobile'
+import { useSidebarDocked, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { restart } from '@/lib/backend'
 import { play } from '@/lib/sounds'
@@ -183,6 +183,8 @@ export function AppSidebar() {
   const { info, ui, focus, openView: open, newProject, search, shown, keep, team, me, scope } = useApp()
   useSidebarMakesRoom(ui.view)
   const { setOpenMobile } = useSidebar()
+  // A finger has no ⌘B to be told about.
+  const touch = useIsTouch()
   const count = counts(shown.tasks, TODAY, keep)
   const spaces = workspaces(team)
   const mine = me ? openTasks(shown.tasks).filter((t) => (t.assignees ?? []).includes(me)).length : 0
@@ -262,7 +264,7 @@ export function AppSidebar() {
           </svg>
           done
         </span>
-        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title={`Hide sidebar (${shortcut('B')})`} />
+        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden touch:size-11" title={touch ? 'Hide sidebar' : `Hide sidebar (${shortcut('B')})`} />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
