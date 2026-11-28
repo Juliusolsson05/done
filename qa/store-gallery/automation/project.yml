@@ -1,0 +1,34 @@
+name: StoreQA
+options:
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGNING_ALLOWED: NO
+targets:
+  Driver:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.done.qa.host
+  Capture:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.done.qa.tests
+        TEST_TARGET_NAME: Driver
+    dependencies:
+      - target: Driver
+schemes:
+  StoreQA:
+    build:
+      targets:
+        Driver: all
+        Capture: [test]
+    test:
+      targets: [Capture]
