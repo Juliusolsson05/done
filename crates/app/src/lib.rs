@@ -145,7 +145,33 @@ async fn safe_area() -> Option<[f64; 4]> {
 extern "C" {
     fn done_focus(json: *const std::os::raw::c_char);
     fn done_widget_snapshot(json: *const std::os::raw::c_char);
+    fn done_watch_apple_user(user: *const std::os::raw::c_char, id: *const std::os::raw::c_char, ended: extern "C" fn(*const std::os::raw::c_char));
     fn done_apple_sign_in(answer: extern "C" fn(*const std::os::raw::c_char));
+}
+
+#[cfg(target_os = "ios")]
+static APPLE_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "ios")]
+extern "C" fn apple_credential_ended(id: *const std::os::raw::c_char) {
+    let id = unsafe { std::ffi::CStr::from_ptr(id) }.to_string_lossy();
+    if let Some(app) = APPLE_APP.get() {
+        let _ = app.emit("apple-credential-ended", id.into_owned());
+    }
+}
+
+#[tauri::command]
+fn watch_apple_user(app: tauri::AppHandle, user: String, id: String) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    {
+        let user = std::ffi::CString::new(user).map_err(|_| "Invalid Apple user")?;
+        let id = std::ffi::CString::new(id).map_err(|_| "Invalid credential watch")?;
+        APPLE_APP.get_or_init(|| app);
+        unsafe { done_watch_apple_user(user.as_ptr(), id.as_ptr(), apple_credential_ended) };
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = (app, user, id);
+    Ok(())
 }
 
 /// Where the one Sign in with Apple under way is waiting for Swift's answer.
@@ -479,7 +505,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, watch_apple_user]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]

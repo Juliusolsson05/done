@@ -1,5 +1,5 @@
 fn main() {
-    // On iOS this crate calls three Swift functions that live in the app target
+    // On iOS this crate calls Swift functions that live in the app target
     // (gen/apple/Sources/done-app/DoneNative.swift, `done_focus`,
     // `done_widget_snapshot` and `done_apple_sign_in`). The app links the static library, where the
     // linker joins them by name. The crate is also built as a cdylib (for
@@ -11,6 +11,7 @@ fn main() {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-U,_done_focus");
         println!("cargo:rustc-cdylib-link-arg=-Wl,-U,_done_widget_snapshot");
         println!("cargo:rustc-cdylib-link-arg=-Wl,-U,_done_apple_sign_in");
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-U,_done_watch_apple_user");
     }
     tauri_build::build()
 }

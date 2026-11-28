@@ -3,7 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
-import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
+import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
@@ -234,11 +234,13 @@ export const signIn = (): Promise<void> => beginSignIn((url) => tauri!.core.invo
 // gives goes to the server, and the app starts over signed in, as after Google.
 // Resolves false when the person closed the sheet.
 export const canSignInWithApple = canSignIn && isIosApp
+export const needsAppleVerification = isIosApp && Boolean(hosted?.account.id?.startsWith('apple') && !hosted.appleUser)
 export const signInWithApple = async (): Promise<boolean> => {
-  const answer = await tauri!.core.invoke<{ token?: string; name?: string; error?: string }>('apple_sign_in')
+  const answer = await tauri!.core.invoke<{ token?: string; name?: string; user?: string; error?: string }>('apple_sign_in')
   if (answer.error === 'cancelled') return false
-  if (!answer.token) throw new Error('Signing in with Apple did not work. Try again.')
-  await signInWithAppleToken(answer.token, answer.name ?? '')
+  if (!answer.token || !answer.user) throw new Error('Signing in with Apple did not work. Try again.')
+  if (hosted) await rememberAppleUser(hosted, answer.user)
+  else await signInWithAppleToken(answer.token, answer.name ?? '', answer.user)
   location.reload()
   return true
 }
@@ -257,6 +259,28 @@ export const openLink = (url: string): void => {
   if (tauri) void tauri.core.invoke('open_in_browser', { url })
   else window.open(url, '_blank', 'noopener')
 }
+// A notification may arrive after another sign-in or a window reload. Only
+// the current watch can sign out the exact session it was started for.
+export const watchAppleSession = (): (() => void) | undefined => {
+  if (!isIosApp || !tauri) return
+  if (!hosted?.appleUser || !hosted.account.id?.startsWith('apple')) {
+    void tauri.core.invoke('watch_apple_user', { user: '', id: '' })
+    return
+  }
+  const id = crypto.randomUUID()
+  let active = true
+  const listening = tauri.event.listen<string>('apple-credential-ended', ({ payload }) => {
+    if (active && payload === id && sameAppleSession(cloudSession(), hosted)) void signOut()
+  })
+  void listening.then(() => {
+    if (active) return tauri.core.invoke('watch_apple_user', { user: hosted.appleUser, id })
+  })
+  return () => {
+    active = false
+    void listening.then((stop) => stop())
+  }
+}
+
 // The browser hands a finished sign-in back as a link. Returns how to stop listening.
 export const onSignedIn = (done: () => void): (() => void) => {
   const listening = tauri?.event.listen<string>('opened-link', (event) => {
