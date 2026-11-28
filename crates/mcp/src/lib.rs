@@ -106,7 +106,7 @@ pub fn handle(store: &dyn Tasks, message: &Value) -> Option<Value> {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "done", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 0 (P0) is only for what must happen right away; otherwise 1 is the most urgent and 4 means none. A task with no project is in the Inbox. A task can have subtasks, one level deep: a list to tick off under it. A subtask has its own id and is changed, completed and deleted like any task.",
+                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 0 (P0) is only for what must happen right away; otherwise 1 is the most urgent and 4 means none. A task with no project is in the Inbox. A task can have subtasks, one level deep: a list to tick off under it. A subtask has its own id and is changed, completed and deleted like any task. A project that is a sprint says so in list_projects, with its deadline (if any) and whether it is completed.",
             })
         }
         "ping" => json!({}),
@@ -536,6 +536,9 @@ fn call(store: &dyn Tasks, name: &str, args: &Value) -> Result<Value, String> {
             let projects: Vec<Value> = state.projects.iter().map(|p| {
                 let open = state.tasks.iter().filter(|t| !t.done && t.parent_id.is_none() && t.project_id == Some(p.id)).count();
                 let mut said = json!({ "name": p.name, "openTasks": open });
+                if let Some(sprint) = p.sprint.as_ref().filter(|s| s.enabled) {
+                    said["sprint"] = json!({ "deadline": sprint.deadline, "completed": sprint.completed });
+                }
                 if let Some(space) = workspace(&state.team, p.space_id) {
                     said["workspace"] = space["name"].clone();
                     said["members"] = space["members"].as_array().into_iter().flatten().map(|m| m["name"].clone()).collect();
@@ -1012,7 +1015,8 @@ mod tests {
         let reply: done_core::Reply = serde_json::from_value(json!({
             "upto": 0,
             "rows": {
-                "projects": [{ "id": 5000000000001i64, "name": "Launch", "color": 3, "spaceId": 77, "changed": 1 }],
+                "projects": [{ "id": 5000000000001i64, "name": "Launch", "color": 3, "spaceId": 77, "changed": 1,
+                    "sprint": { "enabled": true, "deadline": "2026-12-04", "completed": false } }],
                 "tasks": [{ "id": 5000000000002i64, "title": "Open the bank account", "projectId": 5000000000001i64, "spaceId": 77, "changed": 1 }]
             },
             "spaces": [{ "space": 77, "at": 2 }, { "space": 11, "at": 0 }],
@@ -1042,6 +1046,7 @@ mod tests {
         assert_eq!(said(1)["tasks"][0]["title"], "Open the bank account");
         assert!(replies[2]["result"]["content"][0]["text"].as_str().unwrap().contains("Nobody called \"ana\" is in Hop"));
         assert_eq!(said(3)["projects"][0]["members"], json!(["Julius Olsson", "Geart"]));
+        assert_eq!(said(3)["projects"][0]["sprint"], json!({ "deadline": "2026-12-04", "completed": false }));
         let mut on = store.state(&store.today().unwrap()).unwrap().tasks[0].assignees.clone();
         on.sort();
         assert_eq!(on, vec!["1001", "1002"]);

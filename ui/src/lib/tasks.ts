@@ -344,7 +344,8 @@ export function tidyDates(start: Day | null, due: Day | null): { start: Day | nu
 export type DragMode = 'move' | 'start' | 'end'
 export function dragBar(task: Task, mode: DragMode, days: number): { start: Day | null; due: Day | null } {
   if (!task.due) {
-    if (task.start && mode === 'move') return { start: addDays(task.start, days), due: null }
+    // A start alone has no other end to keep: dragging it moves it.
+    if (task.start && mode !== 'end') return { start: addDays(task.start, days), due: null }
     if (task.start && mode === 'end' && days > 0) return { start: task.start, due: addDays(task.start, days) }
     return { start: task.start, due: null }
   }
