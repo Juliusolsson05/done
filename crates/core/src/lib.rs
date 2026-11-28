@@ -320,7 +320,8 @@ pub fn default_path() -> PathBuf {
     let dir = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
         .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("AppData").join("Local")))
         .expect("find the user’s local application data directory")
-        .join("done");
+        // The per-user NSIS installer puts the executable in LOCALAPPDATA/done.
+        .join("dev.done.app");
     #[cfg(not(windows))]
     let dir = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Library").join("Application Support").join("done");
     let _ = std::fs::create_dir_all(&dir);
