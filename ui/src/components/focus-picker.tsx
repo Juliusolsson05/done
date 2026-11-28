@@ -6,11 +6,11 @@ import { ChevronDownIcon, SearchIcon } from 'lucide-react'
 import { ProjectDot } from '@/components/marks'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useIsMobile, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { describeDay, TODAY } from '@/lib/days'
-import { pickerGroups } from '@/lib/focus-picker'
+import { cursorAt, moveCursor, pickerGroups, type Cursor, type RowKey } from '@/lib/focus-picker'
 import { projectName, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
@@ -60,18 +60,16 @@ function Finder({
   const groups = pickerGroups({ tasks, projects: data.projects, today: TODAY, query, recent, goalId })
   // "Nothing in particular" leads the list until something is typed.
   const options: (Task | null)[] = [...(typed ? [] : [null]), ...groups.flatMap((g) => g.tasks)]
-  const [at, setAt] = useState(() =>
-    Math.max(
-      0,
-      options.findIndex((t) => (t?.id ?? null) === chosen),
-    ),
-  )
+  const keys: RowKey[] = options.map((t) => t?.id ?? null)
+  // Opens on the task already chosen, if it is still in the list.
+  const [cursor, setCursor] = useState<Cursor>(() => (keys.includes(chosen) ? chosen : undefined))
+  const at = cursorAt(keys, cursor)
   const list = useRef<HTMLUListElement>(null)
   const [maxHeight, setMaxHeight] = useState<number>()
 
   useEffect(() => {
     list.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
-  }, [at])
+  }, [cursor])
 
   // The list ends above the on-screen keyboard: iOS shrinks the visual
   // viewport for it, not the page, so nothing else on the page knows.
@@ -83,50 +81,57 @@ function Finder({
       setMaxHeight(Math.max(SHORTEST_LIST, Math.min(bottom - list.current.getBoundingClientRect().top - 12, 420)))
     }
     fit()
+    // Measured again once the popover or sheet has slid into place: during
+    // its opening animation the list is not yet where it ends up.
+    const frame = requestAnimationFrame(fit)
+    const settled = setTimeout(fit, 300)
     view?.addEventListener('resize', fit)
     view?.addEventListener('scroll', fit)
     return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(settled)
       view?.removeEventListener('resize', fit)
       view?.removeEventListener('scroll', fit)
     }
   }, [])
 
-  const optionId = (i: number) => `${id}-option-${i}`
+  // Named by the row's task, so the id always belongs to a row that exists.
+  const optionId = (key: RowKey) => `${id}-option-${key ?? 'none'}`
   const onKeyDown = (event: KeyboardEvent) => {
-    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key]
+    const step = ({ ArrowDown: 1, ArrowUp: -1 } as const)[event.key as 'ArrowDown' | 'ArrowUp']
     if (step) {
       event.preventDefault()
-      if (options.length) setAt((i) => (i + step + options.length) % options.length)
+      setCursor(moveCursor(keys, cursor, step))
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      setAt(event.key === 'Home' ? 0 : options.length - 1)
+      setCursor(keys.length ? keys[event.key === 'Home' ? 0 : keys.length - 1] : undefined)
     }
-    if (event.key === 'Enter') {
+    // Enter while composing (Japanese, Chinese input) accepts the word, not a row.
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      if (options.length) onChoose(options[at])
+      if (at !== -1) onChoose(options[at])
     }
   }
 
-  let i = -1
   const row = (task: Task | null) => {
-    i += 1
-    const index = i
-    const selected = (task?.id ?? null) === chosen
+    const key = task?.id ?? null
+    const active = keys[at] === key && at !== -1
+    const selected = key === chosen
     return (
       <li
-        key={task?.id ?? 'nothing'}
-        id={optionId(index)}
+        key={key ?? 'nothing'}
+        id={optionId(key)}
         role="option"
         aria-selected={selected}
-        data-active={index === at}
+        data-active={active}
         // Only a mouse moves the cursor by hovering; a finger scrolling
         // past rows must not.
-        onPointerMove={(event) => event.pointerType === 'mouse' && setAt(index)}
+        onPointerMove={(event) => event.pointerType === 'mouse' && setCursor(key)}
         onClick={() => onChoose(task)}
         className={cn(
           'flex min-h-11 cursor-default flex-col justify-center gap-0.5 rounded-md px-3 py-1.5 select-none',
-          index === at && 'bg-accent',
+          active && 'bg-accent',
           selected && 'font-medium',
         )}
       >
@@ -153,12 +158,12 @@ function Finder({
           aria-expanded
           aria-controls={`${id}-list`}
           aria-autocomplete="list"
-          aria-activedescendant={options.length ? optionId(at) : undefined}
+          aria-activedescendant={at !== -1 ? optionId(keys[at]) : undefined}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)
             // A new query starts at its best match.
-            setAt(0)
+            setCursor(undefined)
           }}
           onKeyDown={onKeyDown}
           placeholder="Find a task or project"
@@ -182,10 +187,11 @@ function Finder({
         {groups.map((group) =>
           group.heading ? (
             <li key={group.key} role="presentation">
-              <div id={`${id}-${group.key}`} className="px-3 pt-2.5 pb-1 text-xs font-medium text-faint">
+              {/* Seen, not read: the group's label says it to a screen reader. */}
+              <div aria-hidden className="px-3 pt-2.5 pb-1 text-xs font-medium text-faint">
                 {group.heading}
               </div>
-              <ul role="group" aria-labelledby={`${id}-${group.key}`}>
+              <ul role="group" aria-label={group.heading}>
                 {group.tasks.map(row)}
               </ul>
             </li>
@@ -193,12 +199,11 @@ function Finder({
             group.tasks.map(row)
           ),
         )}
-        {options.length === 0 && (
-          <li role="presentation" className="px-3 py-6 text-center text-sm text-muted-foreground">
-            Nothing matches
-          </li>
-        )}
       </ul>
+      {/* Outside the list, which holds only options; said aloud when it appears. */}
+      <p aria-live="polite" className={cn('px-3 text-center text-sm text-muted-foreground', options.length === 0 && 'py-6')}>
+        {options.length === 0 ? 'Nothing matches' : ''}
+      </p>
     </div>
   )
 }
@@ -229,10 +234,8 @@ export function FocusPicker({
     <Button
       id={id}
       variant="outline"
-      aria-haspopup="listbox"
+      aria-haspopup="dialog"
       aria-expanded={open}
-      // In a popover, its trigger opens it; a sheet is opened here.
-      onClick={isMobile ? () => setOpen(true) : undefined}
       className="h-auto min-h-11 w-full justify-between gap-3 px-3 py-1.5 text-left font-normal"
     >
       <span className="flex min-w-0 flex-col gap-0.5">
@@ -257,8 +260,9 @@ export function FocusPicker({
   if (isMobile)
     return (
       <>
-        {trigger}
         <Sheet open={open} onOpenChange={setOpen}>
+          {/* As its trigger, the button gets the focus back when the sheet closes. */}
+          <SheetTrigger asChild>{trigger}</SheetTrigger>
           <SheetContent side="top" showCloseButton={false} className="gap-0 rounded-b-xl pt-[env(safe-area-inset-top)]">
             <SheetTitle className="sr-only">What are you working on?</SheetTitle>
             <SheetDescription className="sr-only">Type to find a task, then choose it.</SheetDescription>

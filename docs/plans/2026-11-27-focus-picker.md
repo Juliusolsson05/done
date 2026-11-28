@@ -28,13 +28,48 @@ and a minutes field, a reminders form, Start focus and Up next all at once.
   what is set (`optionsSummary` in `lib/focus.ts`): "Stand up and stretch every
   30 min", "2 reminders", "1 block up next". Up next leaves the header before a
   session; during one it stays in the header, as before.
-- Two taps at most: Other then a preset; Options then a reminder field or Up
-  next. "Start next" still appears beside Start focus when blocks are queued.
+- Taps, counted in the browser: a preset under Other is two (Other, the
+  preset); the reminder field is two (Options, the field); the Up next panel
+  is two (Options, Up next), where it was one before this change, from the
+  header. Inside the panel, adding a block takes the same steps as before.
+  "Start next" still appears beside Start focus when blocks are queued.
 - On touch layouts the length buttons and Start focus are 40-44px tall.
 
 Ruling: the chosen length is kept per browser, not in the tasks file — it is
 a preference of this window, like the reminders list — cost if wrong: a length
 chosen on the Mac is not the one offered on the iPhone.
+
+## Review fixes
+
+An independent review of the PR found no blockers; these were fixed:
+
+- **Typed minutes are not lost.** Typing 50 under Other and pressing Start
+  focus without Set ran the old length; before the PR a filled minutes field
+  won. The typed text now lives in the page (`Setup`), Start focus uses
+  `chosenMinutes(typed, chosen length)` as it did before, and leaving the
+  popover also remembers it. Ruling: Start reads the field rather than a
+  length saved when the popover closes — in Chrome, the close that a click
+  on Start causes had not reached Start's handler yet, and it ran 25:00 —
+  cost if wrong: none found; the field is the one source.
+- **The cursor follows a task, not a row number** (`cursorAt`, `moveCursor`
+  in `lib/focus-picker.ts`, tested). If the task under it leaves the list
+  while the picker is open (finished on another device or by an agent), the
+  cursor is on no row: Enter chooses nothing and `aria-activedescendant` is
+  removed, rather than choosing whatever moved into its place. Option ids are
+  made from task ids, so they always point at a row that exists.
+- Enter while an input method is composing is left to it.
+- The list height is measured again a frame after opening and once the
+  opening animation has ended (300 ms).
+- ARIA: group headings are hidden from screen readers and the groups carry
+  the label; "Nothing matches" is outside the listbox in a polite live
+  region; the button says `aria-haspopup="dialog"`.
+- On a phone the button is the sheet's trigger, so focus returns to it when
+  the sheet closes.
+- Folding Options hides it rather than removing it, so a reminder half typed
+  survives.
+- The length row wraps again; at 320 wide "1 h 30 min" goes to a second line.
+- The stored length is read by `storedLength` in `lib/focus.ts`, tested
+  against bad values (empty, 0, negative, 601, 12.5, text).
 
 ## Evidence
 
@@ -90,7 +125,10 @@ home chores; a finished task with a similar title; a subtask):
 - matching: word order, case, accents, project name, nothing matches;
 - title matches before project-only matches;
 - `optionsSummary` (in `focus.test.ts`): nothing set, one or several
-  reminders, blocks up next.
+  reminders, blocks up next;
+- the cursor: stays on its task when the list reorders or shrinks, is on no
+  row once its task is gone, moves round the ends;
+- `storedLength`: good and bad stored values.
 
 Reverting `pickerGroups` to a pass-through fails 12 of its 13 tests (checked).
 

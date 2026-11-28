@@ -198,6 +198,13 @@ export function focusTasks(tasks: Task[], today: Day): Task[] {
   return openTasks(tasks).sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
 }
 
+// The length kept from last time, as storage holds it: text, or nothing.
+// Anything that is not a whole length the field would accept is the default.
+export function storedLength(text: string | null): number {
+  const minutes = Number(text)
+  return text !== null && Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_MINUTES ? minutes : DEFAULT_MINUTES
+}
+
 // One line saying what the Focus page's folded options hold, so they need
 // not be opened to know. Empty when nothing is set.
 export function optionsSummary(reminders: Reminder[], blocks: Block[]): string {

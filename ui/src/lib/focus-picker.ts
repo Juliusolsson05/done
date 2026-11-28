@@ -94,3 +94,31 @@ export function pickerGroups({ tasks, projects, today, query, recent, goalId }: 
   const titleFirst = [...found].sort((a, b) => Number(!matchesQuery(a.title, query)) - Number(!matchesQuery(b.title, query)))
   return titleFirst.length ? [{ key: null, heading: null, tasks: titleFirst }] : []
 }
+
+// ---------- The cursor ----------
+
+// Which row the cursor is on, by what is on it rather than where: a task's
+// id, null for "Nothing in particular", or undefined for "the first row".
+// The list can change under an open picker (a task finished on another
+// device, or by an agent), and a row number would then point at another
+// task, or at none.
+export type Cursor = number | null | undefined
+
+// Each row's key, in order: null for "Nothing in particular".
+export type RowKey = number | null
+
+// The row the cursor is on now, or -1 when its task has left the list (so
+// Enter chooses nothing rather than whatever moved into its place).
+export function cursorAt(rows: RowKey[], cursor: Cursor): number {
+  if (cursor === undefined) return rows.length ? 0 : -1
+  return rows.indexOf(cursor)
+}
+
+// One row down (1) or up (-1), round the ends. From a row that has gone,
+// down starts at the top and up at the bottom.
+export function moveCursor(rows: RowKey[], cursor: Cursor, step: 1 | -1): Cursor {
+  if (!rows.length) return undefined
+  const at = cursorAt(rows, cursor)
+  const next = at === -1 ? (step === 1 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length
+  return rows[next]
+}

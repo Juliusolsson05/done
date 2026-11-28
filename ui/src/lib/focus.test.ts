@@ -16,6 +16,7 @@ import {
   newReminder,
   nextReminderAt,
   optionsSummary,
+  storedLength,
   start,
   timeLeft,
   toggle,
@@ -361,5 +362,18 @@ describe('optionsSummary', () => {
   it('counts the blocks up next', () => {
     expect(optionsSummary([], [block('1')])).toBe('1 block up next')
     expect(optionsSummary([stretch], [block('1'), block('2')])).toBe('Stand up and stretch every 30 min · 2 blocks up next')
+  })
+})
+
+describe('storedLength', () => {
+  it('keeps a length the field would accept', () => {
+    expect(storedLength('90')).toBe(90)
+    expect(storedLength('1')).toBe(1)
+    expect(storedLength('600')).toBe(600)
+  })
+
+  it('falls back to the usual length for anything else', () => {
+    for (const bad of [null, '', '0', '-5', '601', '12.5', 'abc', 'NaN', 'Infinity', ' '])
+      expect(storedLength(bad), String(bad)).toBe(25)
   })
 })

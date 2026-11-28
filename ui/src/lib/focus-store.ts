@@ -18,7 +18,7 @@ import {
   start,
   startBlock,
   toggle,
-  MAX_MINUTES,
+  storedLength,
   type Block,
   type Reminder,
   type Session,
@@ -41,8 +41,7 @@ const MINUTES_KEY = 'done-focus-minutes'
 
 export function storedMinutes(): number {
   try {
-    const minutes = Math.round(Number(localStorage.getItem(MINUTES_KEY)))
-    return minutes >= 1 && minutes <= MAX_MINUTES ? minutes : DEFAULT_MINUTES
+    return storedLength(localStorage.getItem(MINUTES_KEY))
   } catch {
     return DEFAULT_MINUTES
   }

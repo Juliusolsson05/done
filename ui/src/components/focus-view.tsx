@@ -157,19 +157,28 @@ function useRecent(): number[] {
 // Three lengths most sessions use, and "Other" for the rest: the other
 // presets and a length of your own. Other names the length when it is the
 // one chosen, so a choice made there is seen without opening it.
-function Length() {
-  const { ui, chooseFocus } = useApp()
+// `length` is what Start focus will use: the typed minutes when they are a
+// usable number (the field wins, as it always has), else the chosen button.
+function Length({ typed, setTyped, length }: { typed: string; setTyped: (typed: string) => void; length: number }) {
+  const { chooseFocus } = useApp()
   const [open, setOpen] = useState(false)
-  const [typed, setTyped] = useState('')
-  const other = !COMMON.includes(ui.focusMinutes)
+  const other = !COMMON.includes(length)
+  // Choosing a button empties the field, or the field would still win.
   const choose = (focusMinutes: number) => {
     chooseFocus({ focusMinutes })
-    setOpen(false)
     setTyped('')
+    setOpen(false)
+  }
+  // Leaving the popover (Set, Enter, a tap outside, Start focus) keeps the
+  // typed length as the one remembered. Start focus reads the field itself
+  // rather than this, so it never depends on which of the two runs first.
+  const close = (next: boolean) => {
+    setOpen(next)
+    if (!next && typed.trim()) chooseFocus({ focusMinutes: length })
   }
   const own = (event: FormEvent) => {
     event.preventDefault()
-    if (typed.trim()) choose(chosenMinutes(typed, ui.focusMinutes))
+    close(false)
   }
 
   return (
@@ -177,14 +186,15 @@ function Length() {
       <Label id="focus-length" className={FIELD_LABEL}>
         For how long?
       </Label>
-      <div className="flex items-center gap-1">
+      {/* Wraps only if it must: a 320-wide phone with "1 h 30 min" chosen. */}
+      <div className="flex flex-wrap items-center gap-1">
         <ToggleGroup
           type="single"
           variant="outline"
           size="sm"
           spacing={1}
           aria-labelledby="focus-length"
-          value={other ? '' : String(ui.focusMinutes)}
+          value={other ? '' : String(length)}
           // Pressing the chosen one again would leave no length at all.
           onValueChange={(value) => value && choose(Number(value))}
         >
@@ -194,10 +204,10 @@ function Length() {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={close}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" aria-pressed={other} className="aria-pressed:bg-muted touch:h-10 touch:px-3">
-              {other ? minutesText(ui.focusMinutes * 60000) : 'Other'}
+              {other ? minutesText(length * 60000) : 'Other'}
               <ChevronDownIcon className="text-muted-foreground" />
             </Button>
           </PopoverTrigger>
@@ -207,7 +217,7 @@ function Length() {
                 <Button
                   key={minutes}
                   variant="outline"
-                  aria-pressed={ui.focusMinutes === minutes}
+                  aria-pressed={length === minutes}
                   className="aria-pressed:bg-muted touch:h-11"
                   onClick={() => choose(minutes)}
                 >
@@ -253,21 +263,21 @@ function Options() {
         aria-expanded={open}
         aria-controls="focus-options"
         onClick={() => setOpen((o) => !o)}
-        className="-mx-2 flex min-h-11 min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted"
+        className="flex min-h-11 min-w-0 items-center gap-2 rounded-md px-1 text-left text-sm hover:bg-muted"
       >
         <ChevronRightIcon className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
         <span className="shrink-0 font-medium">Options</span>
         <span className={cn('min-w-0 truncate', summary ? 'text-muted-foreground' : 'text-faint')}>{summary || 'Reminders and Up next'}</span>
       </button>
-      {open && (
-        <div id="focus-options" className="flex flex-col gap-6 pb-2">
-          <Reminders />
-          <div className="flex flex-col items-start gap-2">
-            <Label className={FIELD_LABEL}>After this block</Label>
-            <UpNext />
-          </div>
+      {/* Hidden, not removed, so a reminder half typed is still there when
+          the options are opened again. */}
+      <div id="focus-options" hidden={!open} className="flex flex-col gap-6 pb-2">
+        <Reminders />
+        <div className="flex flex-col items-start gap-2">
+          <Label className={FIELD_LABEL}>After this block</Label>
+          <UpNext />
         </div>
-      )}
+      </div>
     </section>
   )
 }
@@ -281,6 +291,8 @@ function Setup() {
   const wanted = ui.focusPick ?? (goalId !== null ? String(goalId) : NOTHING)
   // The task chosen earlier may have been finished or deleted since.
   const chosen = tasks.find((t) => String(t.id) === wanted) ?? null
+  const [typed, setTyped] = useState('')
+  const length = chosenMinutes(typed, ui.focusMinutes)
 
   return (
     <div className="flex max-w-lg flex-col gap-6">
@@ -297,9 +309,9 @@ function Setup() {
           onChoose={(task) => chooseFocus({ focusPick: task ? String(task.id) : NOTHING })}
         />
       </div>
-      <Length />
+      <Length typed={typed} setTyped={setTyped} length={length} />
       <div className="flex flex-wrap gap-2">
-        <Button className="touch:h-11 touch:px-5" onClick={() => startFocus(chosen, ui.focusMinutes)}>
+        <Button className="touch:h-11 touch:px-5" onClick={() => startFocus(chosen, length)}>
           Start focus
         </Button>
         {/* With blocks queued, the first of them can be started from here too:

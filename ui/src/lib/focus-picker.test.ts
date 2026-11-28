@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pickerGroups, recentTaskIds, type PickerInput } from '@/lib/focus-picker'
+import { cursorAt, moveCursor, pickerGroups, recentTaskIds, type PickerInput } from '@/lib/focus-picker'
 import type { Project, Task } from '@/lib/tasks'
 
 const TODAY = '2026-11-27'
@@ -157,5 +157,40 @@ describe('recentTaskIds', () => {
       { taskId: 19, endedAt: 200 },
     ]
     expect(recentTaskIds(entries)).toEqual([18, 19])
+  })
+})
+
+describe('the cursor', () => {
+  // Nothing in particular, then three tasks.
+  const rows = [null, 10, 12, 11]
+
+  it('starts on the first row, and finds none in an empty list', () => {
+    expect(cursorAt(rows, undefined)).toBe(0)
+    expect(cursorAt([], undefined)).toBe(-1)
+  })
+
+  it('stays on its task when the list is reordered or shrinks', () => {
+    expect(cursorAt(rows, 12)).toBe(2)
+    // Another device finished task 10 while the picker was open.
+    expect(cursorAt([null, 12, 11], 12)).toBe(1)
+    expect(cursorAt([null, 11, 12], 12)).toBe(2)
+  })
+
+  it('is on no row once its own task has gone, so Enter picks nothing', () => {
+    // Task 12 finished elsewhere: the cursor must not fall onto 11.
+    expect(cursorAt([null, 10, 11], 12)).toBe(-1)
+  })
+
+  it('moves by rows, round the ends', () => {
+    expect(moveCursor(rows, 12, 1)).toBe(11)
+    expect(moveCursor(rows, 11, 1)).toBeNull()
+    expect(moveCursor(rows, null, -1)).toBe(11)
+    expect(moveCursor(rows, undefined, 1)).toBe(10)
+  })
+
+  it('moves from a row that has gone to the top or the bottom', () => {
+    expect(moveCursor([null, 10, 11], 12, 1)).toBeNull()
+    expect(moveCursor([null, 10, 11], 12, -1)).toBe(11)
+    expect(moveCursor([], 12, 1)).toBeUndefined()
   })
 })
