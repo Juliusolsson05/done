@@ -1,0 +1,23 @@
+name: Windows build warmup
+on:
+  push:
+    branches: [qa/windows-native-warm]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-x64-release
+          cache-on-failure: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: ui
+        run: npm ci && npm run build
+      - run: cargo build --locked --release -p done-app
