@@ -151,7 +151,7 @@ Done empty. Chrome through Playwright, sidebar open and closed.
   a held card at a column's bottom edge scrolls it (840 px in a second).
 - Desktop at 1440x900 matches the before screenshot apart from the columns
   reaching the bottom (same column positions, widths and cards).
-- `npm run typecheck && npm test && npm run build` green (643 tests).
+- `npm run typecheck && npm test && npm run build` green (693 tests after rebasing on origin/main 1eef78e).
 
 ## Not verified
 
