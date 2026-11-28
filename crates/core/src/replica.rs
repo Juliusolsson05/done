@@ -71,17 +71,46 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, Erro
     })?)
 }
 
-/// Older clients may have pulled project rows without retaining sprint settings.
-pub(crate) fn prepare_project_sprints(conn: &Connection) -> Result<(), Error> {
+/// Whether an app from before sprints has used this file since this one last
+/// opened it: the column is missing, or the project trigger (which every app
+/// rewrites on open, see `prepare`) does not watch it. Such an app pulls
+/// project rows without their sprint and moves the sync position past them.
+fn older_app_was_here(conn: &Connection) -> Result<bool, Error> {
     if !has_column(conn, "project", "sprint")? {
+        return Ok(true);
+    }
+    let trigger: Option<String> =
+        conn.query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'project_edited'", [], |r| r.get(0)).optional()?;
+    Ok(trigger.is_some_and(|sql| !sql.contains("sprint")))
+}
+
+/// After an older app: fetch everything again, and do not trust the sprint of
+/// a row the server has (`seq <= pushed`), which may be older than the row's
+/// stamp says. Cleared quietly, it is filled from the server's copy of the
+/// same edit when the replay arrives (see `merge`); a rename before then sends
+/// no sprint, so the server keeps its own. A row not yet sent keeps its
+/// sprint: the server has never seen it. `prepare` then makes the trigger
+/// watch `sprint`, so the next open does nothing: one replay per older open.
+pub(crate) fn prepare_project_sprints(conn: &Connection) -> Result<(), Error> {
+    if older_app_was_here(conn)? {
         let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
-        // Another Done process may already have performed the upgrade while we waited.
-        if !has_column(&tx, "project", "sprint")? {
+        // Another Done process may already have done this while we waited.
+        if older_app_was_here(&tx)? {
             tx.execute_batch(
-                "ALTER TABLE project ADD COLUMN sprint TEXT;
-                 UPDATE space_cursor SET pulled = 0 WHERE pulled > 0;
+                "UPDATE space_cursor SET pulled = 0 WHERE pulled > 0;
                  UPDATE meta SET value = 0 WHERE key = 'pulled' AND value > 0;",
             )?;
+            if !has_column(&tx, "project", "sprint")? {
+                // First upgrade: no sprint to distrust yet.
+                tx.execute_batch("ALTER TABLE project ADD COLUMN sprint TEXT;")?;
+            } else {
+                tx.execute_batch(
+                    "UPDATE meta SET value = 1 WHERE key IN ('quiet', 'applying');
+                     UPDATE project SET sprint = NULL
+                       WHERE sprint IS NOT NULL AND seq <= (SELECT value FROM meta WHERE key = 'pushed');
+                     UPDATE meta SET value = 0 WHERE key IN ('quiet', 'applying');",
+                )?;
+            }
         }
         tx.commit()?;
     }
@@ -969,6 +998,94 @@ mod tests {
         let state = device.state("2026-12-04").unwrap();
         assert_eq!(state.projects[1].sprint, Some(sprint));
         assert_eq!(state.projects[1].name, "Release renamed offline");
+    }
+
+    fn sprint(completed: bool) -> Option<Sprint> {
+        Some(Sprint { enabled: true, deadline: Some("2026-12-04".into()), completed })
+    }
+
+    fn save_project(s: &Store, project: Project) {
+        let rev = s.state("2026-11-21").unwrap().rev;
+        s.sync(Change { rev, projects: vec![project], ..Default::default() }).unwrap();
+    }
+
+    fn first_project(s: &Store) -> Project {
+        s.state("2026-11-21").unwrap().projects[0].clone()
+    }
+
+    #[test]
+    fn a_newer_row_without_a_sprint_keeps_the_local_one() {
+        let device = store();
+        let id = 5_000_000_000_001;
+        save_project(&device, Project { id, name: "Launch".into(), color: 2, space_id: None, sprint: sprint(true) });
+        let here = device.export().unwrap().rows.projects[0].changed;
+        // An older app renamed it elsewhere: no sprint key, a later stamp.
+        let renamed = Stamped { row: Project { id, name: "Release".into(), color: 2, space_id: None, sprint: None }, changed: here + 1_000 };
+        let reply = Reply { upto: 3, rows: Rows { projects: vec![renamed], ..Default::default() }, ..Default::default() };
+        assert!(device.inbox(&reply, 0).unwrap());
+        let project = first_project(&device);
+        assert_eq!(project.name, "Release");
+        assert_eq!(project.sprint, sprint(true));
+    }
+
+    /// The triggers as an app from before sprints writes them on every open.
+    fn as_an_older_app_opens_it(s: &Store) {
+        let conn = s.conn.lock().unwrap();
+        let sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'project_edited'", [], |r| r.get(0)).unwrap();
+        let old = sql.replace("UPDATE OF name, color, space_id, sprint", "UPDATE OF name, color, space_id");
+        assert_ne!(old, sql);
+        conn.execute_batch(&format!("DROP TRIGGER project_edited; {old};")).unwrap();
+    }
+
+    #[test]
+    fn an_older_app_on_the_same_file_cannot_bring_back_an_old_sprint() {
+        let dir = std::env::temp_dir().join(format!("done-older-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("done.db");
+        let (phone, cloud) = (store(), store());
+        let mac = Store::open(&path).unwrap();
+        let id = 5_000_000_000_001;
+        save_project(&mac, Project { id, name: "Launch".into(), color: 2, space_id: None, sprint: sprint(false) });
+        round(&mac, &cloud);
+        round(&phone, &cloud);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        save_project(&phone, Project { sprint: sprint(true), ..first_project(&phone) });
+        round(&phone, &cloud);
+
+        // An older app opens the Mac's file and pulls the phone's row: it
+        // takes the row's name and stamp, cannot store its sprint, and moves
+        // the sync position past it.
+        as_an_older_app_opens_it(&mac);
+        let out = mac.outbox().unwrap();
+        let mut reply = cloud.exchange(&out).unwrap();
+        for p in &mut reply.rows.projects {
+            p.row.sprint = None;
+        }
+        mac.inbox(&reply, out.upto).unwrap();
+        drop(mac);
+
+        // The new app opens it again and renames the project before it syncs.
+        let mac = Store::open(&path).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        save_project(&mac, Project { name: "Renamed".into(), ..first_project(&mac) });
+        round(&mac, &cloud);
+        round(&phone, &cloud);
+        for (who, s) in [("cloud", &cloud), ("phone", &phone), ("mac", &mac)] {
+            let p = first_project(s);
+            assert_eq!(p.name, "Renamed", "{who}");
+            assert_eq!(p.sprint, sprint(true), "{who}: the phone's completion survives");
+        }
+
+        // Settled: opened again by the new app alone, nothing is fetched again.
+        let pulled = mac.outbox().unwrap().pulled;
+        assert!(pulled > 0);
+        drop(mac);
+        let mac = Store::open(&path).unwrap();
+        assert_eq!(mac.outbox().unwrap().pulled, pulled);
+        assert_eq!(first_project(&mac).sprint, sprint(true));
+        drop(mac);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
