@@ -30,7 +30,7 @@ import {
 import { useApp, colorStyle } from '@/lib/app-context'
 import { TODAY } from '@/lib/days'
 import { tick } from '@/lib/haptics'
-import { colorIndex, counts, isSubtask, openTasks, type View } from '@/lib/tasks'
+import { colorIndex, completedSprint, counts, isSubtask, openTasks, type Project, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // The three lists that are tabs of their own. Everything else is reached from
@@ -324,6 +324,18 @@ export function ListsScreen() {
     tick()
     openView(view)
   }
+  const completed = shown.projects.filter(completedSprint)
+  const active = shown.projects.filter((project) => !completedSprint(project))
+  const projectRow = (project: Project) => (
+    <div key={project.id} style={colorStyle(colorIndex(shown.projects, project.id))} className="contents">
+      <GroupRow
+        icon={<ListIcon className="size-4" strokeWidth={2.6} />}
+        name={project.name}
+        count={count.project(project.id)}
+        onClick={() => go({ kind: 'project', id: project.id })}
+      />
+    </div>
+  )
   const more: [View['kind'], string, LucideIcon, string][] = [
     ['notes', 'Notes', NotebookPenIcon, 'bg-project-6'],
     ['board', 'Board', ColumnsIcon, 'bg-project-5'],
@@ -354,19 +366,20 @@ export function ListsScreen() {
       </div>
       <section className="flex flex-col gap-2">
         <h2 className="px-1 text-title font-bold">My Lists</h2>
-        <Group>
-          {shown.projects.map((p) => (
-            <div key={p.id} style={colorStyle(colorIndex(shown.projects, p.id))} className="contents">
-              <GroupRow
-                icon={<ListIcon className="size-4" strokeWidth={2.6} />}
-                name={p.name}
-                count={count.project(p.id)}
-                onClick={() => go({ kind: 'project', id: p.id })}
-              />
-            </div>
-          ))}
-          {shown.projects.length === 0 && <p className="px-4 py-3 text-subhead text-tertiary">No lists yet.</p>}
-        </Group>
+        {(active.length > 0 || completed.length === 0) && (
+          <Group>
+            {active.map(projectRow)}
+            {shown.projects.length === 0 && <p className="px-4 py-3 text-subhead text-tertiary">No lists yet.</p>}
+          </Group>
+        )}
+        {completed.length > 0 && (
+          <details>
+            <summary className="min-h-11 cursor-pointer px-1 py-3 text-subhead text-tertiary">
+              Completed sprints ({completed.length})
+            </summary>
+            <Group>{completed.map(projectRow)}</Group>
+          </details>
+        )}
         <button type="button" onClick={newProject} className="-mr-2 h-11 self-end px-2 text-body text-primary active:opacity-40">
           Add List
         </button>

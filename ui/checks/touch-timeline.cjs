@@ -19,7 +19,7 @@ const day = (n) => {
   return d.toLocaleDateString('sv-SE')
 }
 
-// 15 dated tasks over three weeks in three projects, and three with no date.
+// Dated tasks over three weeks, one with only a start, and three with no date.
 const spec = [
   ['Fix the onboarding crash on older iPhones', 1, -7, -2],
   ['Write the launch announcement', 1, null, 0],
@@ -52,9 +52,10 @@ for (const [id, title, projectId] of [
   [18, 'Clean the garage', 3],
 ])
   tasks.push({ id, title, notes: '', projectId, start: null, due: null, priority: 4 })
+tasks.push({ id: 19, title: 'Set up the venue', notes: '', projectId: 1, start: day(0), due: null, priority: 4 })
 const state = {
   rev: 1,
-  nextId: 19,
+  nextId: 20,
   projects: [
     { id: 1, name: 'Hop launch', color: 1 },
     { id: 2, name: 'Website', color: 3 },
@@ -136,7 +137,19 @@ async function check() {
     const cdp = await context.newCDPSession(page)
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] })
     const centreOf = async (title) => {
-      const r = await page.locator(`[title^="${title},"]`).boundingBox()
+      const bar = page.locator(`[data-timeline-bar][title^="${title}"]`)
+      // A DOM rectangle can extend under the fixed phone tab bar. Bring the
+      // task into the chart vertically without changing its date on screen.
+      await bar.evaluate((el) => {
+        const chart = el.closest('[data-timeline-scroller]')
+        const header = chart.querySelector('.sticky.top-0')
+        const { top, bottom } = chart.getBoundingClientRect()
+        const box = el.getBoundingClientRect()
+        const first = top + header.getBoundingClientRect().height
+        if (box.top < first) chart.scrollTop -= first - box.top + 16
+        if (box.bottom > bottom - 24) chart.scrollTop += box.bottom - bottom + 40
+      })
+      const r = await bar.boundingBox()
       return { x: r.x + r.width / 2, y: r.y + r.height / 2, box: r }
     }
     // Held still for `ms`, then moved `dx` in steps, then let go.
@@ -210,6 +223,14 @@ async function check() {
       await settled()
       expect(changed(2)[0]?.due === day(1), `a hold and a drag of one day saved ${JSON.stringify(changed(2)[0]?.due)}, not ${day(1)}`)
       expect(others(2).length === 0, 'a hold and a drag changed another task')
+    })
+
+    await scenario('a task with a start but no due date', async ({ page, centreOf, hold, settled, changed }) => {
+      const { dayPx } = await measure(page)
+      await hold(await centreOf('Set up the venue'), 600, dayPx)
+      await settled()
+      const moved = changed(19)[0]
+      expect(moved?.start === day(1) && moved.due === null, 'dragging a start-only task did not move only its start by one day')
     })
 
     await scenario('a long hold, then a drag', async ({ page, touch, centreOf, settled, changed, menuShown }) => {

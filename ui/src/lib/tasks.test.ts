@@ -134,6 +134,12 @@ describe('timelineGroups', () => {
     expect(ids(groups[0].tasks)).toEqual([3, 2, 1])
   })
 
+  it('keeps the header of a deadline-only sprint in project order', () => {
+    const projects = [{ id: 8, name: 'Sprint' }, { id: 9, name: 'Home' }, { id: 10, name: 'Empty' }]
+    const groups = timelineGroups(projects, [task(1, { projectId: 9 })], 'project', new Set([8]))
+    expect(groups.map((group) => [group.id, group.tasks.length])).toEqual([[8, 0], [9, 1]])
+  })
+
   it('by date, lists every project in one list by day, a tie by project then priority, undated last', () => {
     const projects = [
       { id: 8, name: 'Hop' },
@@ -205,6 +211,13 @@ describe('tidyDates', () => {
 })
 
 describe('dragBar', () => {
+  it('moves a start-only task and allows a due date to be stretched from its end', () => {
+    const startOnly = task(1, { start: '2026-11-14', due: null })
+    expect(dragBar(startOnly, 'move', 2)).toEqual({ start: '2026-11-16', due: null })
+    expect(dragBar(startOnly, 'end', 2)).toEqual({ start: '2026-11-14', due: '2026-11-16' })
+    expect(dragBar(startOnly, 'end', -1)).toEqual({ start: '2026-11-14', due: null })
+  })
+
   const span = task(1, { start: '2026-11-10', due: '2026-11-14' })
   const single = task(2, { due: '2026-11-14' })
 

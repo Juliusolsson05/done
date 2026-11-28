@@ -21,7 +21,7 @@
 
 use deadpool_postgres::{Client, GenericClient, Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
 use done_core::{
-    check, check_entry, clean_folder, is_day, Assign, Assignee, Change, Cursor, Entry, Gone, NewEntry, Note, Outbox, Project, Refused, Reply, Rows,
+    check, check_entry, check_project, clean_folder, is_day, Assign, Assignee, Change, Cursor, Entry, Gone, NewEntry, Note, Outbox, Project, Refused, Reply, Rows,
     SaveNote, Stamped, State, Task,
 };
 use serde::Serialize;
@@ -119,6 +119,7 @@ CREATE INDEX IF NOT EXISTS notification_account ON notification (account_id, cre
 CREATE TABLE IF NOT EXISTS project (
   id BIGINT PRIMARY KEY, space_id BIGINT NOT NULL, name TEXT NOT NULL, color BIGINT NOT NULL DEFAULT 0,
   changed BIGINT NOT NULL, seq BIGINT NOT NULL);
+ALTER TABLE project ADD COLUMN IF NOT EXISTS sprint TEXT;
 CREATE TABLE IF NOT EXISTS task (
   id BIGINT PRIMARY KEY, space_id BIGINT NOT NULL, title TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', project_id BIGINT,
   start TEXT, due TEXT, priority BIGINT NOT NULL DEFAULT 4, status TEXT, done_day TEXT, goal_day TEXT, goal_by TEXT,
@@ -378,9 +379,10 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
     let mut refuse = |kind: &str, id: i64| refused.push(Refused { kind: kind.into(), id });
     for Stamped { row: p, changed } in &rows.projects {
         let changed = stamp(*changed);
-        if p.name.trim().is_empty() {
+        if check_project(p).is_err() {
             continue;
         }
+        let sprint = p.sprint.as_ref().map(done_core::Sprint::stored);
         let here = tx.query_opt("SELECT space_id, changed FROM project WHERE id = $1", &[&p.id]).await?;
         match here {
             Some(r) => {
@@ -394,8 +396,9 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 }
                 let seq = bump(tx, space).await?;
                 tx.execute(
-                    "UPDATE project SET name = $2, color = $3, changed = $4, seq = $5 WHERE id = $1",
-                    &[&p.id, &p.name.trim(), &p.color, &changed, &seq],
+                    "UPDATE project SET name = $2, color = $3, changed = $4, seq = $5,
+                       sprint = coalesce($6, sprint) WHERE id = $1",
+                    &[&p.id, &p.name.trim(), &p.color, &changed, &seq, &sprint],
                 )
                 .await?;
             }
@@ -413,8 +416,8 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 };
                 let seq = bump(tx, space).await?;
                 tx.execute(
-                    "INSERT INTO project (id, space_id, name, color, changed, seq) VALUES ($1, $2, $3, $4, $5, $6)",
-                    &[&p.id, &space, &p.name.trim(), &p.color, &changed, &seq],
+                    "INSERT INTO project (id, space_id, name, color, changed, seq, sprint) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    &[&p.id, &space, &p.name.trim(), &p.color, &changed, &seq, &sprint],
                 )
                 .await?;
                 tx.execute("DELETE FROM tombstone WHERE kind = 'project' AND id = $1 AND space_id = $2", &[&p.id, &space]).await?;
@@ -768,11 +771,20 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
     Ok(applied)
 }
 
+fn project_of(row: &tokio_postgres::Row) -> Result<Project, Fail> {
+    let sprint = row
+        .get::<_, Option<String>>(4)
+        .map(|encoded| serde_json::from_str(&encoded))
+        .transpose()
+        .map_err(|e| Fail::Down(format!("Could not read project sprint: {e}")))?;
+    Ok(Project { id: row.get(0), name: row.get(1), color: row.get(2), space_id: Some(row.get(3)), sprint })
+}
+
 /// What changed in one space after `from`, up to and including `upto`.
 async fn rows_since(tx: &impl GenericClient, space: i64, from: i64, upto: i64, rows: &mut Rows) -> Result<(), Fail> {
     let range: [&(dyn tokio_postgres::types::ToSql + Sync); 3] = [&space, &from, &upto];
-    for r in tx.query("SELECT id, name, color, space_id, changed FROM project WHERE space_id = $1 AND seq > $2 AND seq <= $3 ORDER BY id", &range).await? {
-        rows.projects.push(Stamped { row: Project { id: r.get(0), name: r.get(1), color: r.get(2), space_id: Some(r.get(3)) }, changed: r.get(4) });
+    for r in tx.query("SELECT id, name, color, space_id, sprint, changed FROM project WHERE space_id = $1 AND seq > $2 AND seq <= $3 ORDER BY id", &range).await? {
+        rows.projects.push(Stamped { row: project_of(&r)?, changed: r.get(5) });
     }
     for r in tx.query(&format!("SELECT {TASK} FROM task WHERE space_id = $1 AND seq > $2 AND seq <= $3 ORDER BY id"), &range).await? {
         let (row, changed) = task_of(&r);
@@ -1003,11 +1015,11 @@ impl Db {
         let spaces = spaces_of(&client, &me.id).await?;
         let ids: Vec<i64> = spaces.iter().map(|s| s.id).collect();
         let projects = client
-            .query("SELECT id, name, color, space_id FROM project WHERE space_id = ANY($1) ORDER BY id", &[&ids])
+            .query("SELECT id, name, color, space_id, sprint FROM project WHERE space_id = ANY($1) ORDER BY id", &[&ids])
             .await?
             .iter()
-            .map(|r| Project { id: r.get(0), name: r.get(1), color: r.get(2), space_id: Some(r.get(3)) })
-            .collect();
+            .map(project_of)
+            .collect::<Result<_, _>>()?;
         let mut tasks: Vec<Task> = client
             .query(
                 &format!(
@@ -1053,9 +1065,7 @@ impl Db {
     /// stale would throw edits away every time someone else typed).
     pub async fn sync(&self, me: &Me, change: Change) -> Result<i64, Fail> {
         for project in &change.projects {
-            if project.name.trim().is_empty() {
-                return invalid("A project needs a name.");
-            }
+            check_project(project).map_err(|e| Fail::Invalid(e.to_string()))?;
         }
         for task in &change.tasks {
             check(task).map_err(|e| Fail::Invalid(e.to_string()))?;
@@ -1583,8 +1593,8 @@ impl Db {
         let space = personal;
         for (Stamped { row: p, changed }, seq) in file.rows.projects.iter().zip(file.seqs.projects.iter().map(|s| (*s).max(1))) {
             tx.execute(
-                "INSERT INTO project (id, space_id, name, color, changed, seq) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING",
-                &[&p.id, &space, &p.name, &p.color, changed, &seq],
+                "INSERT INTO project (id, space_id, name, color, changed, seq, sprint) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
+                &[&p.id, &space, &p.name, &p.color, changed, &seq, &p.sprint.as_ref().map(done_core::Sprint::stored)],
             )
             .await?;
         }
@@ -1988,14 +1998,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_sprint_round_trips_and_a_legacy_edit_preserves_it() {
+        let db = testing::db().await;
+        let (owner, _) = people(&db).await;
+        let (mac, phone) = (device(), device());
+        let id = next(&mac);
+        let mut project = Project { id, name: "Launch".into(), color: 3, space_id: None, sprint: None };
+        change(&mac, |c| c.projects.push(project.clone()));
+        round(&mac, &db, &owner).await;
+        round(&phone, &db, &owner).await;
+
+        project.sprint = Some(done_core::Sprint { enabled: true, deadline: Some("2026-12-04".into()), completed: true });
+        change(&mac, |c| c.projects.push(project.clone()));
+        round(&mac, &db, &owner).await;
+        round(&phone, &db, &owner).await;
+        assert_eq!(phone.state(TODAY).unwrap().projects[0].sprint, project.sprint);
+
+        let mut legacy = project.clone();
+        legacy.name = "Release".into();
+        legacy.sprint = None;
+        let rows = Rows { projects: vec![Stamped { row: legacy, changed: now_ms() + 1_000 }], ..Default::default() };
+        db.exchange(&owner, &Outbox { rows, ..Default::default() }).await.unwrap();
+        let web = db.state(&owner, TODAY).await.unwrap();
+        assert_eq!(web.projects[0].name, "Release");
+        assert_eq!(web.projects[0].sprint, project.sprint);
+        round(&phone, &db, &owner).await;
+        assert_eq!(phone.state(TODAY).unwrap().projects[0].sprint, project.sprint);
+
+        project.sprint.as_mut().unwrap().deadline = Some("Friday".into());
+        let invalid = db.sync(&owner, Change { projects: vec![project], ..Default::default() }).await;
+        assert!(matches!(invalid, Err(Fail::Invalid(message)) if message.contains("sprint deadline")));
+    }
+
+    #[tokio::test]
     async fn a_project_moved_into_a_workspace_reaches_the_other_member_whole() {
         let db = testing::db().await;
         let (julius, geart) = people(&db).await;
         let (mac, phone) = (device(), device());
         let launch = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
-            c.projects.push(Project { id: launch + 1, name: "Home".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None, sprint: None });
+            c.projects.push(Project { id: launch + 1, name: "Home".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(launch), ..task(launch + 2, "Order equipment") });
             c.tasks.push(Task { project_id: Some(launch), parent_id: Some(launch + 2), ..task(launch + 3, "Batteries") });
             c.tasks.push(Task { project_id: Some(launch + 1), ..task(launch + 4, "Call the landlord") });
@@ -2030,7 +2073,7 @@ mod tests {
         let mac = device();
         let home = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: home, name: "Home".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: home, name: "Home".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(home), ..task(home + 1, "Renew passport") });
         });
         mac.save_note(SaveNote { id: None, text: "Private".into(), updated_at: 1, project_id: None, folder: None, space_id: None }).unwrap();
@@ -2039,7 +2082,7 @@ mod tests {
 
         // Geart, not in any space with Julius, guesses every id.
         let stranger = Rows {
-            projects: vec![Stamped { row: Project { id: home, name: "Mine now".into(), color: 0, space_id: Some(julius.personal) }, changed: now_ms() }],
+            projects: vec![Stamped { row: Project { id: home, name: "Mine now".into(), color: 0, space_id: Some(julius.personal), sprint: None }, changed: now_ms() }],
             tasks: vec![
                 Stamped { row: task(home + 1, "Overwritten"), changed: now_ms() },
                 Stamped { row: Task { project_id: Some(home), ..task(home + 50, "Planted in Julius's project") }, changed: now_ms() },
@@ -2083,7 +2126,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Open the bank account") });
         });
         round(&mac, &db, &julius).await;
@@ -2123,7 +2166,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Ship it") });
             c.assign.push(Assign { task_id: p + 1, account_id: geart.id.clone(), on: true });
         });
@@ -2150,7 +2193,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Ship it") });
             c.tasks.push(Task { project_id: Some(p), parent_id: Some(p + 1), ..task(p + 2, "Part") });
             c.assign.push(Assign { task_id: p + 1, account_id: geart.id.clone(), on: true });
@@ -2177,7 +2220,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(task(p + 1, "From my inbox"));
             c.tasks.push(Task { parent_id: Some(p + 1), ..task(p + 2, "Its part") });
         });
@@ -2203,7 +2246,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), goal_day: Some(TODAY.into()), ..task(p + 1, "Julius's goal") });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 2, "Geart's goal") });
         });
@@ -2271,7 +2314,7 @@ mod tests {
         let (mac, old) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Home".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: p, name: "Home".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "One") });
             c.tasks.push(task(p + 2, "Two"));
         });
@@ -2326,7 +2369,7 @@ mod tests {
         let phone = device();
         let p = next(&phone);
         change(&phone, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Ship it") });
         });
         round(&phone, &db, &geart).await;
@@ -2353,7 +2396,7 @@ mod tests {
         let mac = device();
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Shared") });
             c.assign.push(Assign { task_id: p + 1, account_id: geart.id.clone(), on: true });
         });
@@ -2374,8 +2417,8 @@ mod tests {
         let mac = device();
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Mine".into(), color: 3, space_id: None });
-            c.projects.push(Project { id: p + 1, name: "Hop".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Mine".into(), color: 3, space_id: None, sprint: None });
+            c.projects.push(Project { id: p + 1, name: "Hop".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 2, "Parent") });
             c.tasks.push(Task { project_id: Some(p), parent_id: Some(p + 2), ..task(p + 3, "Child") });
         });
@@ -2428,7 +2471,7 @@ mod tests {
         let (mac, phone) = (device(), device());
         let p = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) });
+            c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(p + 1, "Hop's") });
         });
         round(&mac, &db, &julius).await;
@@ -2436,7 +2479,7 @@ mod tests {
         // Geart puts it under a project of his own.
         let mine = next(&phone);
         change(&phone, |c| {
-            c.projects.push(Project { id: mine, name: "Geart's".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: mine, name: "Geart's".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(mine), ..task(p + 1, "Hop's, renamed") });
         });
         round(&phone, &db, &geart).await;
@@ -2451,7 +2494,7 @@ mod tests {
         change(&mac, |c| c.tasks.push(Task { project_id: None, ..task(p + 1, "Hop's, renamed") }));
         let own = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: own, name: "Julius's".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: own, name: "Julius's".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(own), ..task(p + 1, "Hop's, renamed") });
         });
         round(&mac, &db, &julius).await;
@@ -2466,7 +2509,7 @@ mod tests {
         let space = hop(&db, &julius, &geart).await;
         let (mac, phone) = (device(), device());
         let p = next(&mac);
-        change(&mac, |c| c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space) }));
+        change(&mac, |c| c.projects.push(Project { id: p, name: "Launch".into(), color: 3, space_id: Some(space), sprint: None }));
         round(&mac, &db, &julius).await;
         round(&phone, &db, &geart).await;
         // Geart adds a task to Hop's project on his phone: it has no space there yet.
@@ -2515,7 +2558,7 @@ mod tests {
         let phone = device();
         let home = next(&phone);
         change(&phone, |c| {
-            c.projects.push(Project { id: home, name: "Home".into(), color: 1, space_id: None });
+            c.projects.push(Project { id: home, name: "Home".into(), color: 1, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(home), ..task(home + 1, "Renew passport") });
             c.tasks.push(task(home + 2, "Inbox thing"));
         });
@@ -2604,7 +2647,7 @@ mod tests {
         let mac = device();
         let launch = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(launch), due: Some(TODAY.into()), ..task(launch + 1, "Julius's private-to-Hop task") });
         });
         as_app(&mac, &db, &julius, false).await.unwrap();
@@ -2663,7 +2706,7 @@ mod tests {
         let mac = device();
         let launch = next(&mac);
         change(&mac, |c| {
-            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None, sprint: None });
             c.tasks.push(Task { project_id: Some(launch), ..task(launch + 1, "Ship the site") });
             c.tasks.push(Task { project_id: Some(launch), ..task(launch + 2, "Write the post") });
         });

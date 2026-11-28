@@ -4,12 +4,21 @@
 import { addDays, describeDay, fullDay, type Day } from '@/lib/days'
 import type { Team } from '@/lib/team'
 
+export interface Sprint {
+  enabled: boolean
+  deadline: Day | null
+  completed: boolean
+}
+
+export const completedSprint = (project: Project) => project.sprint?.enabled === true && project.sprint.completed
+
 export interface Project {
   id: number
   name: string
   color?: number | null
   // The space it lives in (see lib/team.ts); absent until the server has seen it.
   spaceId?: number | null
+  sprint?: Sprint | null
 }
 
 export interface Task {
@@ -227,7 +236,12 @@ export interface TimelineGroup {
 
 const firstDay = (t: Task): string => t.start ?? t.due ?? ''
 
-export function timelineGroups(projects: Project[], all: Task[], order: TimelineOrder = 'project'): TimelineGroup[] {
+export function timelineGroups(
+  projects: Project[],
+  all: Task[],
+  order: TimelineOrder = 'project',
+  includeProjects?: ReadonlySet<number | null>,
+): TimelineGroup[] {
   const open = openTasks(all)
   const groups: TimelineGroup[] =
     order === 'project'
@@ -252,7 +266,7 @@ export function timelineGroups(projects: Project[], all: Task[], order: Timeline
             { key: 'undated', name: 'No date', tasks: open.filter((t) => !t.due).sort(byProject) },
           ]
         })()
-  return groups.filter((g) => g.tasks.length > 0)
+  return groups.filter((g) => g.tasks.length > 0 || (g.id !== undefined && includeProjects?.has(g.id)))
 }
 
 // ---------- Changes ----------
@@ -329,7 +343,11 @@ export function tidyDates(start: Day | null, due: Day | null): { start: Day | nu
 // The caller keeps an end from being dragged past the other.
 export type DragMode = 'move' | 'start' | 'end'
 export function dragBar(task: Task, mode: DragMode, days: number): { start: Day | null; due: Day | null } {
-  if (!task.due) return { start: task.start, due: task.due }
+  if (!task.due) {
+    if (task.start && mode === 'move') return { start: addDays(task.start, days), due: null }
+    if (task.start && mode === 'end' && days > 0) return { start: task.start, due: addDays(task.start, days) }
+    return { start: task.start, due: null }
+  }
   const first = task.start ?? task.due
   let start = task.start
   let due = task.due

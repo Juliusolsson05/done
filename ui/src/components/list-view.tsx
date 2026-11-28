@@ -1,8 +1,9 @@
 // Inbox, Today, Upcoming and a project: the views that are a list of tasks.
 import { useEffect, useState, type ReactNode } from 'react'
-import { NotebookPenIcon } from 'lucide-react'
+import { CalendarDaysIcon, CheckIcon, EllipsisIcon, NotebookPenIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { ProjectDot } from '@/components/marks'
 import { PhoneHeader } from '@/components/phone'
@@ -18,7 +19,7 @@ import { fullDay, TODAY } from '@/lib/days'
 import { byNewest, isBlank, titleOf, whenText, type Note } from '@/lib/notes'
 import { tagOf } from '@/lib/quick-add'
 import { play } from '@/lib/sounds'
-import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
+import { goalTask, patchProject, projectName, sections, type Sprint } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // On an iPad with the sidebar put away, the button that brings it back starts
@@ -65,6 +66,43 @@ export const IN_HEADER = 'wide:pointer-coarse:-my-1.5'
 export function HeaderButton({ danger = false, ...props }: { danger?: boolean; onClick: () => void; children: ReactNode }) {
   // 44 points tall for a finger (they were 28 on iPhone and iPad, #109).
   return <Button variant="ghost" size="sm" className={cn('pointer-coarse:h-11', danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground')} {...props} />
+}
+
+type ProjectAction = { label: string; run: () => void; danger?: boolean }
+
+function ProjectOptions({ actions }: { actions: ProjectAction[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="More project options"
+          title="More project options"
+          className={cn(IN_HEADER, 'text-muted-foreground pointer-coarse:size-11')}
+        >
+          <EllipsisIcon />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Project options" className="w-44 p-1">
+        {actions.map(({ label, run, danger }) => (
+          <Button
+            key={label}
+            variant="ghost"
+            size="sm"
+            className={cn('w-full justify-start pointer-coarse:h-11', danger && 'text-destructive hover:text-destructive')}
+            onClick={() => {
+              setOpen(false)
+              run()
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 // Today's goal: the one thing that has to happen today. It is the only task
@@ -153,9 +191,22 @@ function readOnlyMe(): boolean {
 }
 
 export function ListView() {
-  const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject } = useApp()
+  const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject, update } = useApp()
   const isMobile = useIsMobile()
   const view = ui.view
+  const project = view.kind === 'project' ? data.projects.find((p) => p.id === view.id) : undefined
+  const sprint = project?.sprint?.enabled ? project.sprint : undefined
+  const changeSprint = (settings: Sprint) => {
+    if (project) update((current) => patchProject(current, project.id, { sprint: settings }))
+  }
+  const projectActions: ProjectAction[] = [
+    { label: 'Rename', run: rename },
+    ...(project ? [{
+      label: sprint ? 'Turn off sprint' : 'Make sprint',
+      run: () => changeSprint({ enabled: !sprint, deadline: null, completed: false }),
+    }] : []),
+    { label: 'Delete project', run: askDelete, danger: true },
+  ]
   const [onlyMe, setOnlyMe] = useState(readOnlyMe)
   const toggleOnlyMe = () => {
     const next = !onlyMe
@@ -231,11 +282,14 @@ export function ListView() {
               </HeaderButton>
               <HeaderButton onClick={closeAll}>Keep it</HeaderButton>
             </>
+          ) : isMobile ? (
+            projectActions.map(({ label, run, danger }) => (
+              <HeaderButton key={label} onClick={run} danger={danger}>{label}</HeaderButton>
+            ))
           ) : (
             <>
-              <HeaderButton onClick={rename}>Rename</HeaderButton>
-              <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
-              {!isMobile && <FilterButton className={IN_HEADER} />}
+              <FilterButton className={IN_HEADER} />
+              <ProjectOptions key={view.id} actions={projectActions} />
             </>
           )}
         </ViewHeader>
@@ -246,6 +300,48 @@ export function ListView() {
         <div className="-mt-1 mb-2 -ml-2.5 flex">
           <FilterButton className={IN_HEADER} />
         </div>
+      )}
+      {sprint && (
+        <section aria-label="Sprint" className="mb-4 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-muted/30 px-3 py-2 sm:flex sm:gap-x-4">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {sprint.completed ? <CheckIcon className="size-4 text-primary" /> : <CalendarDaysIcon className="size-4 text-primary" />}
+            {sprint.completed ? 'Sprint complete' : 'Sprint'}
+          </div>
+          <div className="order-last col-span-2 flex min-w-0 items-center gap-1 sm:order-none">
+            <label className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              Deadline
+              <Input
+                type="date"
+                min="0001-01-01"
+                max="9999-12-31"
+                value={sprint.deadline ?? ''}
+                onChange={(event) => {
+                  if (event.target.validity.valid) changeSprint({ ...sprint, deadline: event.target.value || null })
+                }}
+                className="h-8 w-auto min-w-0 text-foreground pointer-coarse:h-11"
+              />
+            </label>
+            {sprint.deadline && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Clear deadline"
+                onClick={() => changeSprint({ ...sprint, deadline: null })}
+                className="text-muted-foreground pointer-coarse:size-11"
+              >
+                <XIcon />
+              </Button>
+            )}
+          </div>
+          <Button
+            variant={sprint.completed ? 'ghost' : 'outline'}
+            size="sm"
+            onClick={() => changeSprint({ ...sprint, completed: !sprint.completed })}
+            className="ml-auto pointer-coarse:h-11"
+          >
+            {sprint.completed ? 'Reopen sprint' : 'Complete sprint'}
+          </Button>
+        </section>
       )}
       <FilterBar shown={count} total={total} />
 

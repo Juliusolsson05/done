@@ -14,13 +14,19 @@ import { Button } from '@/components/ui/button'
 import { HeaderButton, ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
+import { ProjectTimelineMarks, ProjectTimelineRows, SprintCaption } from '@/components/timeline-project-rows'
 import { TaskCheck, useFinish } from '@/components/task-row'
+import { TimelineCompletedTask } from '@/components/timeline-completed-task'
+import { PastHiddenChip, TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
 import { play } from '@/lib/sounds'
 import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
+import { completedByProject, completedItems, completionDates } from '@/lib/timeline-completion'
 import { DAY_PX, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
+import { hidePast, isWhollyPast, withoutPastProjects } from '@/lib/timeline-past'
+import { projectTimelines, timelineProjectDates } from '@/lib/timeline-projects'
 import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
 import { cn } from '@/lib/utils'
 
@@ -112,17 +118,32 @@ export function TimelineDesktop() {
   const px = DAY_PX[zoom]
 
   const filter = useTaskFilter()
-  const visible = filter.apply(inScope.tasks)
-  const groups = timelineGroups(inScope.projects, visible, 'project')
+  const completion = useTimelineCompletion()
+  // Past tasks, when hidden, go before anything is counted, grouped or spanned.
+  const matching = filter.apply(inScope.tasks)
+  const matchingCompleted = filter.apply(completion.completed)
+  const visible = completion.hidePast ? hidePast(matching, TODAY) : matching
+  const visibleCompleted = completion.hidePast ? hidePast(matchingCompleted, TODAY) : matchingCompleted
+  const allProjectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
+  const projectRows = completion.hidePast
+    ? withoutPastProjects(allProjectRows, [...visible, ...visibleCompleted], [...matching, ...matchingCompleted].filter((t) => isWhollyPast(t, TODAY)), TODAY)
+    : allProjectRows
+  const projectSpans = new Map(projectRows.map((row) => [row.project.id, row]))
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
   const undated = open.filter((t) => !t.due && !t.start)
-  const shown = open.length
-  const total = openTasks(inScope.tasks).length
 
-  // The days drawn: a week before the earliest task to four weeks after the
-  // latest, all at once, so the scrollbar shows the whole range.
-  const span = useMemo(() => spanFor(dated, TODAY), [dated.map((t) => `${t.start}|${t.due}`).join(',')])
+  // The days drawn include recent completions so a quiet week still shows work finished.
+  const span = spanFor([...dated, ...timelineProjectDates(projectRows, TODAY), ...completionDates(visibleCompleted, TODAY)], TODAY)
+  const finishedItems = completedItems(visibleCompleted, span)
+  const finishedByProject = completedByProject(finishedItems)
+  const groups = timelineGroups(inScope.projects, visible, 'project', new Set([...projectSpans.keys(), ...finishedByProject.keys()]))
+  const shown = open.length + finishedItems.length
+  // The total is what the chart would hold with nothing hidden, so hidden past tasks show in "x of y".
+  const countSpan = completion.hidePast
+    ? spanFor([...dated, ...timelineProjectDates(projectTimelines(inScope.projects, [...matching, ...matchingCompleted], filter.filter), TODAY), ...completionDates(matchingCompleted, TODAY)], TODAY)
+    : span
+  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, countSpan).length
   const days = useMemo(() => Array.from({ length: span.days }, (_, i) => addDays(span.start, i)), [span.start, span.days])
   const width = span.days * px
   const x = (day: Day) => daysBetween(span.start, day) * px
@@ -181,11 +202,11 @@ export function TimelineDesktop() {
   }
   const bar = {
     down(event: PointerEvent<HTMLDivElement>, task: Task) {
-      if (event.button !== 0 || !task.due) return
-      if ((event.target as HTMLElement).closest('[data-check]')) return
+      const first = task.start ?? task.due
+      if (event.button !== 0 || !first || (event.target as HTMLElement).closest('[data-check]')) return
       const grip = (event.target as HTMLElement).dataset.grip
       const mode: DragMode = grip === 'start' || grip === 'end' ? grip : 'move'
-      setDrag({ id: task.id, mode, x: event.clientX, days: 0, length: daysBetween(task.start ?? task.due, task.due) + 1 })
+      setDrag({ id: task.id, mode, x: event.clientX, days: 0, length: daysBetween(first, task.due ?? first) + 1 })
       dragging.current = true
       event.currentTarget.setPointerCapture(event.pointerId)
       event.preventDefault()
@@ -309,6 +330,7 @@ export function TimelineDesktop() {
 
   // A task on the chart: a pill for a day, a bar for longer.
   const item = ({ task, from }: Placed) => {
+    if (task.done) return <TimelineCompletedTask key={task.id} task={task} start={span.start} dayWidth={px} width={width} showProject={!byProject} afterProjectColumn={byProject} />
     const moved = drag?.id === task.id ? drag : null
     const first = task.start ?? task.due ?? from
     const length = task.due ? daysBetween(first, task.due) + 1 : 1
@@ -339,7 +361,7 @@ export function TimelineDesktop() {
   // The rows of tasks.
   const laneRows = (lanes: Placed[][]) =>
     lanes.map((lane, i) => (
-      <div key={i} className="relative flex h-8">
+      <div key={i} className={cn('relative flex', lane[0].task.done ? 'h-12' : 'h-8')}>
         <div className={cn('sticky left-0 z-30 shrink-0 border-r bg-background', side)} />
         <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
           {lane.map(item)}
@@ -350,35 +372,37 @@ export function TimelineDesktop() {
 
   const rows = !byProject
     ? // One timeline for everything, packed by date; each task says its project.
-      [<div key="all" className="pt-1 pb-2">{laneRows(oneEach(placedAll(groups.flatMap((g) => g.tasks))))}</div>]
+      [<div key="all" className="pt-1 pb-2">{laneRows(oneEach([...placedAll(groups.flatMap((g) => g.tasks)), ...finishedItems]))}</div>]
     : groups.map((group) => {
-    const key = String(group.id ?? 'inbox')
-    const items = placedAll(group.tasks)
-    const lanes = oneEach(items)
-    const isFolded = folded.has(key)
-    return (
-      <div key={key} className="border-b border-border/60">
-        {/* The project: its name, and how many of its tasks are on the chart. */}
-        <div className="relative flex h-9">
-          <button
-            type="button"
-            onClick={() => toggleFold(key)}
-            aria-expanded={!isFolded}
-            className="sticky left-0 z-30 flex w-52 shrink-0 items-center gap-1.5 border-r bg-background px-2 text-left text-sm font-medium max-md:w-32"
-          >
-            <ChevronRightIcon className={cn('size-3.5 shrink-0 text-faint transition-transform', !isFolded && 'rotate-90')} />
-            {group.id !== undefined && <ProjectDot id={group.id} className="shrink-0" />}
-            <span className="min-w-0 flex-1 truncate">{group.name}</span>
-            <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{items.length}</span>
-          </button>
-          <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
+        const key = String(group.id ?? 'inbox')
+        const items = [...placedAll(group.tasks), ...(finishedByProject.get(group.id ?? null) ?? [])]
+        const projectSpan = group.id != null ? projectSpans.get(group.id) : undefined
+        const isFolded = folded.has(key)
+        return (
+          <div key={key} className="border-b border-border/60">
+            <div className={cn('relative flex', projectSpan?.project.sprint?.enabled ? 'h-12' : 'h-9')}>
+              <button
+                type="button"
+                onClick={() => toggleFold(key)}
+                aria-expanded={!isFolded}
+                className="sticky left-0 z-30 flex w-52 shrink-0 items-center gap-1.5 border-r bg-background px-2 text-left text-sm font-medium max-md:w-32"
+              >
+                <ChevronRightIcon className={cn('size-3.5 shrink-0 text-faint transition-transform', !isFolded && 'rotate-90')} />
+                {group.id !== undefined && <ProjectDot id={group.id} className="shrink-0" />}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{group.name}</span>
+                  {projectSpan && <SprintCaption row={projectSpan} />}
+                </span>
+                <span className="shrink-0 text-xs font-normal text-faint tabular-nums">{items.length}</span>
+              </button>
+              <div className="relative shrink-0" style={{ width }} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDropDay(null)}>
+                {projectSpan && <ProjectTimelineMarks row={projectSpan} start={span.start} dayWidth={px} width={width} />}
+              </div>
+            </div>
+            {!isFolded && laneRows(oneEach(items))}
           </div>
-        </div>
-        {/* Its tasks, in as few lines as fit them. */}
-        {!isFolded && laneRows(lanes)}
-      </div>
-    )
-  })
+        )
+      })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -408,6 +432,7 @@ export function TimelineDesktop() {
         </Button>
         <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
         <FilterButton />
+        <TimelineCompletionOption {...completion} />
         <Button
           variant="ghost"
           size="sm"
@@ -420,9 +445,9 @@ export function TimelineDesktop() {
           {undated.length > 0 && <span className="tabular-nums">{undated.length}</span>}
         </Button>
       </ViewHeader>
-      <FilterBar shown={shown} total={total} />
+      <FilterBar shown={shown} total={total} extra={completion.hidePast && <PastHiddenChip setHidePast={completion.setHidePast} />} />
 
-      {filter.on && shown === 0 ? (
+      {filter.on && shown === 0 && projectRows.length === 0 ? (
         <NothingMatches />
       ) : (
         <div className="flex min-h-0 flex-1">
@@ -434,6 +459,7 @@ export function TimelineDesktop() {
                   {columns}
                   {dropDay && <div className="absolute inset-y-0 bg-primary/10" style={{ left: x(dropDay), width: px }} />}
                 </div>
+                {!byProject && <ProjectTimelineRows rows={projectRows} start={span.start} dayWidth={px} width={width} />}
                 {rows}
               </div>
             </div>

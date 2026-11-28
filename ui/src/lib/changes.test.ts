@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changeSet, picture } from '@/lib/changes'
-import { addTask, deleteTask, markDone, markOpen, patchTask, setAssignees, setGoal, toggleAssignee, type Data } from '@/lib/tasks'
+import { revert } from '@/lib/undo'
+import { addTask, deleteTask, markDone, markOpen, patchProject, patchTask, setAssignees, setGoal, toggleAssignee, type Data } from '@/lib/tasks'
 
 const before: Data = {
   rev: 4,
@@ -46,6 +47,15 @@ describe('changeSet', () => {
   it('sends nothing for a change that was undone before it was saved', () => {
     const renamed = patchTask(before, 2, { title: 'Changed' })
     expect(diff(patchTask(renamed, 2, { title: 'One' }))).toBeNull()
+  })
+
+  it('sends an explicit reset after undoing a saved conversion to sprint', () => {
+    const enabled = patchProject(before, 1, { sprint: { enabled: true, deadline: '2026-12-01', completed: false } })
+    const undone = revert(before, enabled, enabled)
+    expect(changeSet(picture(enabled), picture(undone), 5)?.projects).toEqual([
+      { ...before.projects[0], sprint: { enabled: false, deadline: null, completed: false } },
+    ])
+    expect(diff(undone)).toBeNull()
   })
 
   it('still counts a change made while an earlier save was in flight', () => {
