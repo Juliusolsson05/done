@@ -3,7 +3,7 @@
 // nowhere else; the rest of the interface cannot tell them apart.
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
-import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInInSheet, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
+import { CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInFromApp, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
@@ -231,14 +231,24 @@ export const REMOTE_MCP: string | null = tauri
 // hands the finished sign-in back as a link (`onSignedIn`). An iPhone or iPad
 // stays in the app (a sheet over it, DoneNative.swift) and starts over signed
 // in when the sheet closes; closing it by hand changes nothing.
-export const signIn = async (): Promise<void> => {
-  if (!isIosApp) {
-    await beginSignIn((url) => tauri!.core.invoke<void>('open_in_browser', { url })).catch(() => {
-      throw new Error('Your browser could not be opened.')
+// One at a time: a second tap while the first is under way would start a
+// second sign-in with a new secret, and the first sheet's answer would then
+// be refused after the person had finished with Google. It gets the first's
+// promise instead.
+let signingIn: Promise<void> | null = null
+export const signIn = (): Promise<void> => {
+  signingIn ??= signInFromApp({
+    ios: isIosApp,
+    openBrowser: (url) => tauri!.core.invoke<void>('open_in_browser', { url }),
+    presentSheet: (url) => tauri!.core.invoke<SheetAnswer>('web_sign_in', { url }),
+  })
+    .then((signedIn) => {
+      if (signedIn) location.reload()
     })
-    return
-  }
-  if (await signInInSheet((url) => tauri!.core.invoke<SheetAnswer>('web_sign_in', { url }))) location.reload()
+    .finally(() => {
+      signingIn = null
+    })
+  return signingIn
 }
 
 // Sign in with Apple: the iPhone and iPad app only, where the App Store asks

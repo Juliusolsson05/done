@@ -22,6 +22,66 @@ const app = async (status = 200) => {
   return { cloud: await import('@/lib/cloud'), fetched }
 }
 
+describe('which way an app signs in with Google', () => {
+  const ways = () => ({
+    openBrowser: vi.fn(async (_url: string) => undefined),
+    presentSheet: vi.fn(async (_url: string) => ({ link: 'done://auth?code=abc' })),
+  })
+
+  // Why: sending an iPhone to Safari to sign in is what App Review rejected
+  // (guideline 4.0). This fails if the phone is routed to the browser again.
+  it('keeps an iPhone or iPad in the app: the sheet, never the browser', async () => {
+    const { cloud } = await app()
+    const { openBrowser, presentSheet } = ways()
+    expect(await cloud.signInFromApp({ ios: true, openBrowser, presentSheet })).toBe(true)
+    expect(presentSheet).toHaveBeenCalledOnce()
+    expect(openBrowser).not.toHaveBeenCalled()
+  })
+
+  it('opens the browser on a Mac or PC and is not signed in until the link comes back', async () => {
+    const { cloud, fetched } = await app()
+    const { openBrowser, presentSheet } = ways()
+    expect(await cloud.signInFromApp({ ios: false, openBrowser, presentSheet })).toBe(false)
+    expect(openBrowser).toHaveBeenCalledOnce()
+    expect(presentSheet).not.toHaveBeenCalled()
+    expect(fetched).not.toHaveBeenCalled()
+    openBrowser.mockRejectedValueOnce('no browser')
+    await expect(cloud.signInFromApp({ ios: false, openBrowser, presentSheet })).rejects.toThrow('Your browser could not be opened.')
+  })
+
+  it("shows only the hosted server's sign-in page in the sheet", async () => {
+    const { cloud } = await app()
+    expect(cloud.isSignInPage('https://example.test/auth/google?app_challenge=abc')).toBe(true)
+    expect(cloud.isSignInPage('https://example.test.evil.example/auth/google?app_challenge=abc')).toBe(false)
+    expect(cloud.isSignInPage('https://example.test/elsewhere?app_challenge=abc')).toBe(false)
+    expect(cloud.isSignInPage('https://evil.example/?https://example.test/auth/google?')).toBe(false)
+  })
+
+  // Why: two sign-ins under way share one stored secret, so the first sheet's
+  // answer would be refused after the person had finished with Google.
+  it('answers a second tap with the sign-in already under way, on the phone, in the sheet', async () => {
+    await app()
+    vi.stubGlobal('navigator', { userAgent: 'iPhone', maxTouchPoints: 5 })
+    const reload = vi.fn()
+    vi.stubGlobal('location', { reload })
+    let close: (answer: { link: string }) => void = () => {
+      throw new Error('No sheet is up')
+    }
+    const invoke = vi.fn((_command: string, _args?: Record<string, unknown>) => new Promise<unknown>((resolve) => (close = resolve)))
+    vi.stubGlobal('window', { __TAURI__: { core: { invoke }, event: { listen: async () => () => {} } } })
+    const { signIn } = await import('@/lib/backend')
+    const first = signIn()
+    expect(signIn()).toBe(first)
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce())
+    expect(invoke.mock.calls[0][0]).toBe('web_sign_in')
+    close({ link: 'done://auth?code=abc' })
+    await first
+    expect(reload).toHaveBeenCalledOnce()
+    expect(invoke).toHaveBeenCalledOnce()
+    expect(signIn()).not.toBe(first)
+  })
+})
+
 describe('signing in with Google inside the iPhone app', () => {
   // Why the pairing matters: the server only gives a session to the app that
   // holds the secret behind the challenge the sheet was opened with.

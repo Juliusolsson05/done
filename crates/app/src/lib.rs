@@ -231,10 +231,14 @@ extern "C" fn web_answered(json: *const std::os::raw::c_char) {
 #[cfg(target_os = "ios")]
 #[tauri::command]
 async fn web_sign_in(url: String) -> serde_json::Value {
-    // Web pages only, as in `open_in_browser`; the sheet also raises an
-    // exception, which would end the app, for any other kind of address.
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return serde_json::json!({ "error": "Only web pages can be opened." });
+    // A sign-in page only: a web address (the sheet raises an exception,
+    // which would end the app, for any other kind) whose path is the hosted
+    // server's sign-in. Which server is not known here: its address is built
+    // into the interface (VITE_DONE_CLOUD_URL), not into this crate, so the
+    // interface checks that part (`isSignInPage`, ui/src/lib/cloud.ts).
+    let sign_in_page = tauri::Url::parse(&url).is_ok_and(|page| matches!(page.scheme(), "https" | "http") && page.path().ends_with("/auth/google"));
+    if !sign_in_page {
+        return serde_json::json!({ "error": "Only the sign-in page can be opened." });
     }
     let Ok(url) = std::ffi::CString::new(url) else {
         return serde_json::json!({ "error": "failed" });
