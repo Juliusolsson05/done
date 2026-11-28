@@ -1,13 +1,15 @@
 // The Timeline on a phone (390×844, touch): the days are the main thing, a
-// day is wide enough for a finger, today is on screen when it opens, a hold
-// and a drag moves a bar by a day, and a plain swipe scrolls without moving
-// anything, and a tap opens the task. docs/plans/2026-11-27-phone-timeline.md.
+// day is wide enough for a finger, today is on screen when it opens; and
+// every press does what it should: a swipe scrolls, a tap opens, a hold and
+// a drag moves a bar a day, a hold let go in place opens the task's menu
+// (drag on move, menu on release in place, as on the Board), a tremble moves
+// nothing, an off-screen bar is not dragged. docs/plans/2026-11-27-phone-timeline.md.
+// Each expectation is reported; it exits 1 if any fails.
 //
 // Run against the built UI (npm run build) with Playwright's Chromium:
 //   NODE_PATH=<a node_modules with playwright-core> node checks/touch-timeline.cjs
 // CHROME_CHANNEL picks the installed browser (default 'chrome'; '' for
 // Playwright's own Chromium).
-const assert = require('node:assert/strict')
 const path = require('node:path')
 const { chromium } = require('playwright-core')
 
@@ -61,11 +63,53 @@ const state = {
   tasks,
 }
 
+const failures = []
+let passed = 0
+const expect = (ok, what) => {
+  if (ok) passed++
+  else failures.push(what)
+}
+
+const scroller = `[...document.querySelectorAll('div')].find((d) => /overflow-auto/.test(d.className) && /overscroll-contain/.test(d.className))`
+// The chart: the days' part of the scroller (less any column of names held
+// at its left), the width of a day, and whether today is in it.
+const measure = (page) =>
+  page.evaluate((find) => {
+    const el = eval(find)
+    const box = el.getBoundingClientRect()
+    const header = [...el.querySelectorAll('div')].find((d) => /sticky/.test(d.className) && /top-0/.test(d.className))
+    const headerHeight = header.getBoundingClientRect().height
+    const names = [...header.querySelectorAll('*')].filter(
+      (e) => getComputedStyle(e).position === 'sticky' && e.getBoundingClientRect().height > headerHeight * 0.8,
+    )
+    const gridLeft = Math.max(box.left, ...names.map((e) => e.getBoundingClientRect().right))
+    const dates = [...header.querySelectorAll('span')].filter((s) => /^\d{1,2}$/.test(s.textContent.trim()))
+    const centres = dates
+      .map((s) => s.getBoundingClientRect())
+      .map((r) => r.left + r.width / 2)
+      .sort((a, b) => a - b)
+    let dayPx = Infinity
+    for (let i = 1; i < centres.length; i++) dayPx = Math.min(dayPx, centres[i] - centres[i - 1])
+    const today = dates.find((s) => /bg-primary/.test(s.className))?.getBoundingClientRect()
+    return {
+      viewport: document.documentElement.clientWidth,
+      grid: box.right - gridLeft,
+      dayPx,
+      todayOnScreen: !!today && today.left >= gridLeft && today.right <= box.right,
+      scrollLeft: el.scrollLeft,
+    }
+  }, scroller)
+
 async function check() {
   const channel = process.env.CHROME_CHANNEL ?? 'chrome'
   const browser = await chromium.launch(channel ? { channel } : {})
-  try {
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 })
+  const contexts = []
+
+  // A fresh phone with the Timeline open; `context` keeps one across a reload.
+  async function open(context) {
+    context ??= await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 })
+    contexts.push(context)
+    const page = await context.newPage()
     page.setDefaultTimeout(5000)
     const syncs = []
     // Isolated from any installed server or real tasks.
@@ -86,102 +130,185 @@ async function check() {
     await page.getByRole('button', { name: 'Timeline', exact: true }).tap()
     await page.locator('[title^="Write the launch announcement,"]').waitFor()
     await page.waitForTimeout(400)
-
-    // The chart: the days' part of the scroller (less any column of names
-    // held at its left), the width of a day, and whether today is in it.
-    const measure = () =>
-      page.evaluate(() => {
-        const scroller = [...document.querySelectorAll('div')].find(
-          (d) => /overflow-auto/.test(d.className) && /overscroll-contain/.test(d.className),
-        )
-        const box = scroller.getBoundingClientRect()
-        const header = [...scroller.querySelectorAll('div')].find((d) => /sticky/.test(d.className) && /top-0/.test(d.className))
-        const headerHeight = header.getBoundingClientRect().height
-        const names = [...header.querySelectorAll('*')].filter(
-          (e) => getComputedStyle(e).position === 'sticky' && e.getBoundingClientRect().height > headerHeight * 0.8,
-        )
-        const gridLeft = Math.max(box.left, ...names.map((e) => e.getBoundingClientRect().right))
-        const dates = [...header.querySelectorAll('span')].filter((s) => /^\d{1,2}$/.test(s.textContent.trim()))
-        const centres = dates
-          .map((s) => s.getBoundingClientRect())
-          .map((r) => r.left + r.width / 2)
-          .sort((a, b) => a - b)
-        let dayPx = Infinity
-        for (let i = 1; i < centres.length; i++) dayPx = Math.min(dayPx, centres[i] - centres[i - 1])
-        const today = dates.find((s) => /bg-primary/.test(s.className)).getBoundingClientRect()
-        return {
-          viewport: document.documentElement.clientWidth,
-          grid: box.right - gridLeft,
-          dayPx,
-          todayOnScreen: today.left >= gridLeft && today.right <= box.right,
-          scrollLeft: scroller.scrollLeft,
-        }
-      })
-    const opened = await measure()
-    assert.ok(opened.grid >= 0.75 * opened.viewport, `the days get ${Math.round(opened.grid)} of ${opened.viewport} px, under 75 %`)
-    assert.ok(opened.dayPx >= 44, `a day is ${opened.dayPx} px, under 44`)
-    assert.ok(opened.todayOnScreen, 'today is not on screen when the Timeline opens')
-
-    // A finger, by the DevTools protocol: Playwright's touchscreen only taps.
-    const cdp = await page.context().newCDPSession(page)
+    // A finger, by the DevTools protocol: Playwright's touchscreen only taps,
+    // and its tap checks hit-testing against a layout the phone emulation
+    // widens (see the plan).
+    const cdp = await context.newCDPSession(page)
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] })
     const centreOf = async (title) => {
       const r = await page.locator(`[title^="${title},"]`).boundingBox()
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, box: r }
     }
-
-    // A plain swipe on a bar scrolls the chart and changes no task.
-    let from = await centreOf('Record the demo video')
-    await touch('touchStart', from.x, from.y)
-    for (let i = 1; i <= 10; i++) {
-      await touch('touchMove', from.x - i * 15, from.y)
-      await page.waitForTimeout(16)
+    // Held still for `ms`, then moved `dx` in steps, then let go.
+    const hold = async (at, ms, dx) => {
+      await touch('touchStart', at.x, at.y)
+      await page.waitForTimeout(ms)
+      for (let i = 1; i <= 8 && dx; i++) {
+        await touch('touchMove', at.x + (dx * i) / 8, at.y)
+        await page.waitForTimeout(16)
+      }
+      return touch('touchEnd')
     }
-    await touch('touchEnd')
-    await page.waitForTimeout(1200)
-    const swiped = await measure()
-    assert.ok(Math.abs(swiped.scrollLeft - opened.scrollLeft) >= 50, `a swipe scrolled the chart ${swiped.scrollLeft - opened.scrollLeft} px`)
-    assert.equal(syncs.length, 0, 'a swipe changed a task')
-
-    // Back to today, then hold a bar and drag it one day later.
-    await page.locator('header').getByRole('button', { name: 'Today', exact: true }).tap()
-    await page.waitForTimeout(800)
-    from = await centreOf('Write the launch announcement')
-    await touch('touchStart', from.x, from.y)
-    await page.waitForTimeout(600)
-    const steps = 8
-    for (let i = 1; i <= steps; i++) {
-      await touch('touchMove', from.x + (opened.dayPx * i) / steps, from.y)
-      await page.waitForTimeout(16)
+    const settled = async () => {
+      for (let waited = 0; !syncs.length && waited < 1500; waited += 100) await page.waitForTimeout(100)
     }
-    await touch('touchEnd')
-    // Saved through the store's change(), which syncs it with the server.
-    for (let waited = 0; !syncs.length && waited < 3000; waited += 100) await page.waitForTimeout(100)
-    const moved = syncs.flatMap((s) => s.tasks).find((t) => t.id === 2)
-    assert.ok(moved, 'the held bar was not saved')
-    assert.equal(moved.due, day(1), 'the held bar did not move by one day')
-    assert.equal(syncs.flatMap((s) => s.tasks).filter((t) => t.id !== 2).length, 0, 'another task changed')
+    const changed = (id) => syncs.flatMap((s) => s.tasks).filter((t) => t.id === id)
+    const others = (id) => syncs.flatMap((s) => s.tasks).filter((t) => t.id !== id)
+    const menuShown = () => page.evaluate(() => !!document.querySelector('[role="menu"]'))
+    const sheetShown = async () => (await page.getByRole('dialog', { name: 'Details' }).count()) > 0
+    const header = page.locator('header')
+    return { page, context, syncs, touch, centreOf, hold, settled, changed, others, menuShown, sheetShown, header }
+  }
 
-    // A tap on a bar opens the task, and its sheet stays up.
-    const groceries = page.locator('[title^="Buy groceries,"]')
-    await groceries.evaluate((e) => e.scrollIntoView({ block: 'center', inline: 'center' }))
-    await page.waitForTimeout(300)
-    // A plain touch, as for the swipe: Playwright's tap checks hit-testing
-    // against a layout that the phone emulation widens (see the plan).
-    const at = await centreOf('Buy groceries')
-    await touch('touchStart', at.x, at.y)
-    await page.waitForTimeout(60)
-    await touch('touchEnd')
-    await page.waitForTimeout(500)
-    assert.equal(await page.getByRole('dialog', { name: 'Details' }).count(), 1, 'a tap on a bar did not open the task')
+  async function scenario(name, run) {
+    try {
+      await run(await open())
+    } catch (error) {
+      failures.push(`${name}: ${String(error.message).split('\n')[0]}`)
+    }
+  }
+
+  try {
+    await scenario('layout', async ({ page }) => {
+      const m = await measure(page)
+      expect(m.grid >= 0.75 * m.viewport, `the days get ${Math.round(m.grid)} of ${m.viewport} px, under 75 %`)
+      expect(m.dayPx >= 44, `a day is ${m.dayPx} px, under 44`)
+      expect(m.todayOnScreen, 'today is not on screen when the Timeline opens')
+    })
+
+    await scenario('the check above a bar', async ({ page, centreOf }) => {
+      // The top corner of a bar is the bar, not the check of its name line.
+      const { box } = await centreOf('Write the launch announcement')
+      const hit = await page.evaluate(
+        ({ x, y }) => {
+          const e = document.elementFromPoint(x, y)
+          return e?.closest('[title^="Write the launch announcement,"]') ? 'bar' : `${e?.tagName} ${e?.getAttribute('aria-label') ?? ''}`
+        },
+        { x: box.x + 2, y: box.y + 2 },
+      )
+      expect(hit === 'bar', `the top edge of a bar is taken by ${hit}`)
+    })
+
+    await scenario('swipe', async ({ page, touch, centreOf, syncs }) => {
+      const before = await measure(page)
+      const from = await centreOf('Record the demo video')
+      await touch('touchStart', from.x, from.y)
+      for (let i = 1; i <= 10; i++) {
+        await touch('touchMove', from.x - i * 15, from.y)
+        await page.waitForTimeout(16)
+      }
+      await touch('touchEnd')
+      await page.waitForTimeout(1200)
+      const after = await measure(page)
+      expect(Math.abs(after.scrollLeft - before.scrollLeft) >= 50, `a swipe scrolled the chart ${after.scrollLeft - before.scrollLeft} px`)
+      expect(syncs.length === 0, 'a swipe changed a task')
+    })
+
+    await scenario('hold and drag', async ({ page, centreOf, hold, settled, changed, others }) => {
+      const { dayPx } = await measure(page)
+      await hold(await centreOf('Write the launch announcement'), 600, dayPx)
+      await settled()
+      expect(changed(2)[0]?.due === day(1), `a hold and a drag of one day saved ${JSON.stringify(changed(2)[0]?.due)}, not ${day(1)}`)
+      expect(others(2).length === 0, 'a hold and a drag changed another task')
+    })
+
+    await scenario('a long hold, then a drag', async ({ page, touch, centreOf, settled, changed, menuShown }) => {
+      const { dayPx } = await measure(page)
+      const at = await centreOf('Write the launch announcement')
+      await touch('touchStart', at.x, at.y)
+      await page.waitForTimeout(1000)
+      expect(!(await menuShown()), 'held a second, the window’s long-press menu opened while the bar was lifted')
+      for (let i = 1; i <= 8; i++) {
+        await touch('touchMove', at.x + (dayPx * i) / 8, at.y)
+        await page.waitForTimeout(16)
+      }
+      await touch('touchEnd')
+      await settled()
+      expect(!(await menuShown()) && changed(2)[0]?.due === day(1), 'held a second then dragged: the menu opened or the bar did not move one day')
+    })
+
+    await scenario('a hold let go in place', async ({ page, centreOf, hold, syncs, menuShown, sheetShown }) => {
+      await hold(await centreOf('Write the launch announcement'), 600, 0)
+      await page.waitForTimeout(500)
+      expect((await menuShown()) && syncs.length === 0 && !(await sheetShown()), 'a hold let go in place did not open the task’s menu alone')
+    })
+
+    await scenario('tap', async ({ page, touch, centreOf, sheetShown }) => {
+      const at = await centreOf('Buy groceries')
+      await touch('touchStart', at.x, at.y)
+      await page.waitForTimeout(60)
+      await touch('touchEnd')
+      await page.waitForTimeout(500)
+      expect(await sheetShown(), 'a tap on a bar did not open the task')
+    })
+
+    await scenario('stretch an end', async ({ page, centreOf, hold, settled, changed }) => {
+      const { dayPx } = await measure(page)
+      const { box } = await centreOf('Record the demo video')
+      // The end's grip reaches past the bar's end.
+      await hold({ x: box.x + box.width + 4, y: box.y + box.height / 2 }, 600, dayPx)
+      await settled()
+      const t = changed(3)[0]
+      expect(t?.start === day(-1) && t?.due === day(3), `stretching the end by a day saved ${t?.start} to ${t?.due}`)
+    })
+
+    await scenario('a tremble at Quarter', async ({ page, centreOf, hold, settled, syncs, header }) => {
+      await header.getByRole('radio', { name: 'Quarter' }).tap()
+      await page.waitForTimeout(500)
+      await hold(await centreOf('Write the launch announcement'), 600, 3)
+      await settled()
+      expect(syncs.length === 0, 'a hold let go 3 px away at Quarter moved the task')
+    })
+
+    await scenario('Quarter and back', async ({ page, header }) => {
+      await header.getByRole('radio', { name: 'Quarter' }).tap()
+      await page.waitForTimeout(400)
+      await header.getByRole('radio', { name: 'Week' }).tap()
+      await page.waitForTimeout(400)
+      expect((await measure(page)).todayOnScreen, 'after Quarter and back to Week, today is off screen')
+    })
+
+    await scenario('an off-screen bar', async ({ page, hold, settled, syncs }) => {
+      // Ended two days ago: off the left edge, its name held there.
+      const name = page.locator('[data-timeline-title]').filter({ hasText: 'Fix the onboarding crash' })
+      const r = await name.boundingBox()
+      await hold({ x: r.x + 20, y: r.y + r.height / 2 }, 600, 120)
+      await settled()
+      expect(syncs.length === 0, 'a hold on the name of a bar that is off screen moved it')
+    })
+
+    await scenario('keyboard', async ({ page, header }) => {
+      const stops = await header.getByRole('radio').evaluateAll((all) => all.filter((e) => e.tabIndex >= 0).length)
+      expect(stops === 1, `the zoom takes ${stops} tab stops, not one`)
+      await header.getByRole('radio', { name: 'Week' }).focus()
+      await page.keyboard.press('ArrowRight')
+      expect(
+        (await header.getByRole('radio', { name: 'Month' }).getAttribute('aria-checked')) === 'true',
+        'an arrow key did not choose the next zoom',
+      )
+      const barStop = await page.locator('[title^="Write the launch announcement,"]').evaluate((e) => e.tabIndex)
+      expect(barStop < 0, 'a bar is a second tab stop for the task its name already opens')
+    })
+
+    // The zoom is remembered across a reload.
+    try {
+      const first = await open()
+      await first.header.getByRole('radio', { name: 'Day' }).tap()
+      await first.page.waitForTimeout(300)
+      await first.page.close()
+      const again = await open(first.context)
+      expect((await again.header.getByRole('radio', { name: 'Day' }).getAttribute('aria-checked')) === 'true', 'Day zoom was not remembered')
+    } catch (error) {
+      failures.push(`remembered zoom: ${String(error.message).split('\n')[0]}`)
+    }
   } finally {
     await browser.close()
   }
+  console.log(`touch-timeline: ${passed} passed, ${failures.length} failed`)
+  for (const f of failures) console.log(`  - ${f}`)
+  if (failures.length) process.exitCode = 1
 }
-check().then(
-  () => console.log('touch-timeline: ok'),
-  (error) => {
-    console.error(error)
-    process.exitCode = 1
-  },
-)
+check().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
