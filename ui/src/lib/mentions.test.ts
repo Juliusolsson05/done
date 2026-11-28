@@ -260,3 +260,13 @@ describe('the notes offered after an @', () => {
     expect(noteSuggestions(notes, '', null, 2).map((n) => n.id)).toEqual([4, 2])
   })
 })
+
+describe('the @ list matches as Cmd+K and the filter do', () => {
+  it('ignores accents, in tasks and in notes', () => {
+    const tasks = [task(1, 'Book the Café'), task(2, 'Cafeteria menu'), task(3, 'Call the bank')]
+    expect(suggestions(tasks, 'cafe').map((t) => t.id).sort()).toEqual([1, 2])
+    expect(suggestions(tasks, 'CAFÉ book').map((t) => t.id)).toEqual([1])
+    const notes = [{ id: 1, title: 'Résumé draft', updatedAt: 1 }, { id: 2, title: 'Shopping', updatedAt: 2 }]
+    expect(noteSuggestions(notes, 'resume', null).map((n) => n.id)).toEqual([1])
+  })
+})

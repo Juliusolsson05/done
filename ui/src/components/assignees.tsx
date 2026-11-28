@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useApp } from '@/lib/app-context'
 import { play } from '@/lib/sounds'
+import { matchesQuery } from '@/lib/search'
 import { setAssignees, toggleAssignee, type Task } from '@/lib/tasks'
 import { firstName, namesOf, spaceOfTask, workspaceOf, type Member, type Space } from '@/lib/team'
 import { cn } from '@/lib/utils'
@@ -37,8 +38,8 @@ export function TaskFaces({ task, ring }: { task: Task; ring?: string }) {
 function MemberChecks({ task, space, query = '', big = false }: { task: Task; space: Space; query?: string; big?: boolean }) {
   const { me, update } = useApp()
   const on = task.assignees ?? []
-  const wanted = query.trim().toLowerCase()
-  const members = space.members.filter((m) => !wanted || m.name.toLowerCase().includes(wanted) || m.email.toLowerCase().includes(wanted))
+  // Matched as everything else is: every word, case and accents ignored.
+  const members = space.members.filter((m) => matchesQuery(`${m.name}\n${m.email}`, query))
   const row = cn('flex w-full items-center gap-2.5 rounded-md px-2 text-left hover:bg-accent', big ? 'min-h-11 text-body' : 'h-8 text-sm')
   return (
     <div className="flex flex-col">
@@ -64,7 +65,7 @@ function MemberChecks({ task, space, query = '', big = false }: { task: Task; sp
         )
       })}
       {members.length === 0 && <p className="px-2 py-1.5 text-sm text-muted-foreground">Nobody by that name is in {space.name}.</p>}
-      {!wanted && (
+      {!query.trim() && (
         <button
           type="button"
           onClick={() => {
