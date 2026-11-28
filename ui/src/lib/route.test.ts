@@ -173,7 +173,8 @@ describe('arriving at an address', () => {
       { id: 201, title: 'Step', notes: '', projectId: null, parentId: 200, start: null, due: null, priority: 4, status: null, done: false },
     ],
   }
-  const go = (address: string, scope: 'all' | 'personal' | number = 'personal', phone = false) => resolve(parseRoute(address)!, data, team, scope, phone)
+  const go = (address: string, scope: 'all' | 'personal' | number = 'personal', phone = false) =>
+    resolve(parseRoute(address)!, data, team, scope, phone)
 
   it('opens a place that is there as it is', () => {
     expect(go('/project/10')).toEqual({ route: at({ kind: 'project', id: 10 }) })

@@ -223,8 +223,16 @@ export function Notes() {
   // whatever folder it is in. One in another of your spaces moves the picker
   // there; one that is not yours, or is gone, is said and not opened.
   const asked = ui.view.kind === 'notes' ? ui.view.id : undefined
+  // Whether the next note shown was tapped, and the note last told to the
+  // app for the address (see below).
+  const tapped = useRef(false)
+  const reported = useRef<number | null | undefined>(undefined)
+  // The ask last acted on. Only a new ask is acted on: the notes changing
+  // under a note the page opened itself (Undo, a new note) is not one.
+  const handled = useRef<number | null | undefined>(null)
   useEffect(() => {
-    if (!notes) return
+    if (!notes || asked === handled.current) return
+    handled.current = asked
     if (asked === undefined) {
       // Back from a note to the list of notes. A wide screen always shows a
       // note, so there the address takes the open one instead.
@@ -242,24 +250,29 @@ export function Notes() {
       return
     }
     const elsewhere = stored?.find((n) => n.id === asked)
-    if (elsewhere) return setScope(scopeFor(spaceOfNote(elsewhere, data.projects), team))
+    if (elsewhere) {
+      // Asked again once the picker has moved and the note is listed.
+      handled.current = null
+      return setScope(scopeFor(spaceOfNote(elsewhere, data.projects), team))
+    }
     say(NO_ACCESS)
     showNote(null, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, notes])
 
   // The address follows the open note. One opened by a tap is a step Back
-  // goes through; one the page opened by itself is not. Starts from the note
-  // the address asked for, so the address is not cleared before it opens.
-  const tapped = useRef(false)
-  const reported = useRef<number | null>(asked ?? null)
+  // goes through; one the page opened by itself is not. Nothing is said
+  // before a note has been open (undefined): the address may be asking for
+  // one that is about to open.
   useEffect(() => {
-    if (!notes || openId === reported.current) return
+    if (!notes || openId === reported.current || (reported.current === undefined && openId === null)) return
     reported.current = openId
     showNote(openId, !tapped.current)
     tapped.current = false
+    // Only a change of the open note is reported: the notes arriving, with
+    // the asked-for note not open yet, is not a change to report.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openId, notes !== null])
+  }, [openId])
 
   // On a wide screen a note is always open when the chosen folder has one:
   // the one asked for if any, otherwise the folder's newest.
@@ -283,10 +296,10 @@ export function Notes() {
   }, [reading])
 
   const open = (id: number | null, auto = false) => {
-    tapped.current = !auto
     setReading(false)
     setSheet(false)
     if (id === openId) return
+    tapped.current = !auto
     leave(openId)
     setFresh(null)
     setOpenId(id)

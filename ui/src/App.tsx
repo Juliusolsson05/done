@@ -36,7 +36,7 @@ import { caughtUp, change, getSnapshot, load, onLost, refresh, replicateNow, sub
 import { getScope, setScope, useScope } from '@/lib/scope-store'
 import { forMe, shownFor, validScope } from '@/lib/team'
 import { forgetLast, undoLast } from '@/lib/undo'
-import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
+import { deleteProject, deleteTask, finishesBig, markDone, markOpen, sections, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 import { setFilterOpen } from '@/lib/view-filter-store'
 import { formatRoute, HOME, parseRoute, resolve, titleOf, type Route } from '@/lib/route'
@@ -226,10 +226,14 @@ export default function App() {
       const to = router.back({ view: { kind: 'lists' }, task: null })
       if (to) setUi((u) => ({ ...u, ...CLOSED, view: to.view, history: [] }))
     },
-    showNote: (id, auto = false) => {
-      if (auto) replaceNext.current = true
-      setUi((u) => (u.view.kind !== 'notes' || u.view.id === (id ?? undefined) ? u : { ...u, view: { kind: 'notes', id: id ?? undefined } }))
-    },
+    showNote: (id, auto = false) =>
+      setUi((u) => {
+        if (u.view.kind !== 'notes' || u.view.id === (id ?? undefined)) return u
+        // Only for a step that happens: a flag left set would turn the next
+        // move, made by the person, into a replace.
+        if (auto) replaceNext.current = true
+        return { ...u, view: { kind: 'notes', id: id ?? undefined } }
+      }),
     // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
       setUi((u) => ({
@@ -322,21 +326,24 @@ export default function App() {
     if (r.said) toSay.current = r.said
     if (route === null || r.said || formatRoute(r.route) !== formatRoute(route)) replaceNext.current = true
     setUi((u) => ({ ...u, ...CLOSED, view: r.route.view, editing: r.route.task, history: behind(prev) }))
-    // A task opened in a list it is not in (a link to Today kept after its
-    // date moved): its own list, where it is, takes the place.
-    const id = r.route.task
-    const v = r.route.view
-    if (id === null || isMobile || v.kind === 'timeline' || v.kind === 'board') return
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        if (document.querySelector(`[data-task="${id}"]`)) return
-        const found = current.tasks.find((t) => t.id === id)
-        const home = found?.parentId != null ? (current.tasks.find((t) => t.id === found.parentId) ?? found) : found
-        if (!home) return
-        replaceNext.current = true
-        setUi((u) => ({ ...u, view: home.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: home.projectId } }))
-      }),
-    )
+    lookFor.current = r.route.task
+  }
+  // A task opened in a list it is not in (a link to Today kept after its
+  // date moved): once the page is drawn, its own list takes the place. A
+  // window edits a task in its row; Timeline, Board and a phone open it over any page.
+  const lookFor = useRef<number | null>(null)
+  const findOpenTask = () => {
+    const id = lookFor.current
+    lookFor.current = null
+    const v = ui.view
+    if (id === null || id !== ui.editing || isMobile || v.kind === 'timeline' || v.kind === 'board') return
+    const found = data.tasks.find((t) => t.id === id)
+    const home = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
+    if (!home) return
+    const listed = sections(v, shown.tasks, TODAY, app.keep).some((s) => s.tasks.some((t) => t.id === home.id)) || (v.kind === 'today' && home.goalDay === TODAY)
+    if (listed) return
+    replaceNext.current = true
+    setUi((u) => ({ ...u, view: home.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: home.projectId } }))
   }
 
   // The listeners below are set up once, so they read what is current
@@ -366,6 +373,7 @@ export default function App() {
     document.title = titleOf(route)
     if (toSay.current) say(toSay.current)
     toSay.current = null
+    findOpenTask()
     const prev = behind(router.entry().prev)
     if (prev.length !== ui.history.length || (prev[0] && formatRoute({ view: prev[0], task: null }) !== formatRoute({ view: ui.history[0], task: null })))
       setUi((u) => ({ ...u, history: prev }))
