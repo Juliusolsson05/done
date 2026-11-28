@@ -1,23 +1,12 @@
-name: Windows desktop
-
+name: Verify Windows signed upgrade
 on:
-  pull_request:
-    paths:
-      - 'crates/app/**'
-      - 'crates/core/**'
-      - 'crates/mcp/**'
-      - 'ui/**'
-      - 'Cargo.*'
-      - '.github/workflows/windows.yml'
-      - '.github/workflows/release.yml'
-      - '.github/scripts/*windows*'
-  workflow_dispatch:
-
+  push:
+    branches: [qa/windows-signed-upgrade]
 permissions:
   contents: read
-
+  actions: read
 jobs:
-  installer:
+  check:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -33,39 +22,76 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Test the shared local database and MCP
-        id: core
-        continue-on-error: true
-        run: cargo test --locked -p done-core -p done-mcp --release
-      - name: Build the Windows installer
+      - name: Build an older client with a temporary updater key and loopback test feed
         working-directory: crates/app
-        env:
-          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
         run: |
-          $version = "0.1.$(git rev-list --count HEAD)"
-          $config = Join-Path $env:RUNNER_TEMP 'candidate.json'
-          @{ version = $version } | ConvertTo-Json | Set-Content -Encoding utf8 $config
+          $config = Join-Path $env:RUNNER_TEMP 'updater-test-client.json'
+          $testKey = Join-Path $env:RUNNER_TEMP 'test-updater.key'
+          npx --yes @tauri-apps/cli@2 signer generate --ci -w $testKey | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $pubkey = (Get-Content "$testKey.pub" -Raw).Trim()
+          @{ version = '0.0.1'; bundle = @{windows = @{webviewInstallMode = @{type = 'skip'}}}; plugins = @{updater = @{
+            pubkey = $pubkey; endpoints = @('http://127.0.0.1:19877/latest.json'); dangerousInsecureTransportProtocol = $true
+          }}} | ConvertTo-Json -Depth 7 | Set-Content -Encoding utf8 $config
           npx --yes @tauri-apps/cli@2 build --ci --config $config
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $files = @(Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe)
-          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
-          Copy-Item $files[0] "$env:RUNNER_TEMP/done-windows-x64-setup.exe"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: done-windows-x64-installer
-          path: ${{ runner.temp }}/done-windows-x64-setup.exe
-          compression-level: 0
-          if-no-files-found: error
-      - name: Install, launch and reopen local data
-        run: ./.github/scripts/test-windows-installer.ps1 -Installer "$env:RUNNER_TEMP/done-windows-x64-setup.exe"
-      - name: Require shared database and MCP tests to pass
-        if: steps.core.outcome == 'failure'
-        run: throw 'The shared database or MCP tests failed.'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: windows-desktop-evidence
-          path: ${{ runner.temp }}/done-windows-evidence
-          if-no-files-found: ignore
+          $setup = Get-Item ../../target/release/bundle/nsis/*-setup.exe
+          $installed = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($installed.ExitCode) { throw "Initial setup failed $($installed.ExitCode)" }
+      - name: Fetch the installer produced by Windows CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $feed = New-Item -ItemType Directory "$env:RUNNER_TEMP/feed"
+          $deadline = (Get-Date).AddMinutes(15)
+          do {
+            $runs = gh api 'repos/Juliusolsson05/done/actions/runs?branch=feat%2Fwindows-desktop&per_page=15' | ConvertFrom-Json
+            foreach ($candidate in $runs.workflow_runs.Where({$_.path -eq '.github/workflows/windows.yml'})) {
+              $files = gh api "repos/Juliusolsson05/done/actions/runs/$($candidate.id)/artifacts" | ConvertFrom-Json
+              if ($files.artifacts.name -contains 'done-windows-x64-installer') {
+                gh run download $candidate.id -n done-windows-x64-installer -D $feed.FullName
+                if ($LASTEXITCODE) { exit $LASTEXITCODE }
+                Write-Host "Testing installer from run $($candidate.id), commit $($candidate.head_sha)"
+                break
+              }
+            }
+            if (Test-Path "$feed/done-windows-x64-setup.exe") { break }
+            if ((Get-Date) -gt $deadline) { throw 'No Windows candidate available' }
+            Start-Sleep 15
+          } while ($true)
+      - name: Sign the real candidate and install through the user-facing Restart button
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP 'feed'
+          $setup = Get-Item "$feed/done-windows-x64-setup.exe"
+          $version = $setup.VersionInfo.ProductVersion
+          if ($version -notmatch '^0\.1\.\d+$') { throw "Unexpected target version: $version" }
+          npx --yes @tauri-apps/cli@2 signer sign -f "$env:RUNNER_TEMP/test-updater.key" --app-version $version $setup.FullName | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $signature = (Get-Content "$setup.sig" -Raw).Trim()
+          @{version=$version; platforms=@{'windows-x86_64'=@{signature=$signature; url='http://127.0.0.1:19877/done-windows-x64-setup.exe'}}} | ConvertTo-Json -Depth 5 | Set-Content "$feed/latest.json"
+          $server = Start-Process python -ArgumentList '-m','http.server','19877','--bind','127.0.0.1','--directory',$feed -PassThru
+          try {
+            $handler = (Get-Item 'Registry::HKEY_CLASSES_ROOT\done\shell\open\command').GetValue('')
+            if ($handler -notmatch '^"([^"]+\.exe)"') { throw 'Missing installed binary' }
+            $exe=$Matches[1]
+            $fixture = (Get-Item $exe).VersionInfo.ProductVersion
+            Write-Host "Installed fixture $fixture, upgrading to $version"
+            if ($fixture -notmatch '^0\.0\.1\b') { throw 'Incorrect initial app version' }
+            $driver = Join-Path $env:RUNNER_TEMP 'done-ui-driver'
+            npm install --prefix $driver --no-save --no-audit --no-fund playwright-core@1.63.0
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $env:NODE_PATH = Join-Path $driver 'node_modules'
+            node .github/scripts/check-upgrade.cjs $exe
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $deadline = (Get-Date).AddSeconds(90)
+            do {
+              if ((Test-Path $exe) -and (Get-Item $exe).VersionInfo.ProductVersion -eq $version) { break }
+              if ((Get-Date) -gt $deadline) { throw 'Updated installed executable did not appear' }
+              Start-Sleep 1
+            } while ($true)
+            $reply = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tasks","arguments":{}}}' | & $exe mcp | Out-String
+            if ($reply -notmatch 'Keep my Windows task') { throw 'Data did not survive update' }
+            Write-Host "Verified signed upgrade to $version and existing task persistence"
+          } finally {
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          }
