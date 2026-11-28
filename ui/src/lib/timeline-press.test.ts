@@ -62,10 +62,14 @@ describe('the days a bar is dragged by', () => {
     expect(daysDragged(SLOP, 4, 'end', 3)).toBe(0)
   })
 
-  it('counts whole days once the pointer has gone past the slop', () => {
-    expect(daysDragged(SLOP + 1, 4, 'move', 1)).toBe(2)
+  it('counts whole days from past the slop, one day first even at Quarter', () => {
+    expect(daysDragged(SLOP + 1, 4, 'move', 1)).toBe(0)
+    expect(daysDragged(SLOP + 2, 4, 'move', 1)).toBe(1)
+    expect(daysDragged(SLOP + 4, 4, 'move', 1)).toBe(1)
+    expect(daysDragged(SLOP + 6, 4, 'move', 1)).toBe(2)
     expect(daysDragged(51, 51, 'move', 1)).toBe(1)
-    expect(daysDragged(-80, 51, 'move', 1)).toBe(-2)
+    expect(daysDragged(102, 51, 'move', 1)).toBe(2)
+    expect(daysDragged(-51, 51, 'move', 1)).toBe(-1)
   })
 
   it('never pulls an end past the other end', () => {

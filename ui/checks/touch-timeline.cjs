@@ -233,6 +233,39 @@ async function check() {
       expect((await menuShown()) && syncs.length === 0 && !(await sheetShown()), 'a hold let go in place did not open the task’s menu alone')
     })
 
+    // Let go a few pixels away, still in place: the menu opens under the
+    // finger and the click the release sends must not choose an item of it.
+    for (const wobble of [3, 4, 6]) {
+      await scenario(`a hold let go ${wobble} px away`, async ({ page, touch, centreOf, syncs, menuShown, sheetShown }) => {
+        const at = await centreOf('Write the launch announcement')
+        await touch('touchStart', at.x, at.y)
+        await page.waitForTimeout(450)
+        await touch('touchMove', at.x + wobble, at.y)
+        await page.waitForTimeout(30)
+        await touch('touchEnd')
+        await page.waitForTimeout(600)
+        expect(
+          (await menuShown()) && syncs.length === 0 && !(await sheetShown()),
+          `held, let go ${wobble} px away: the menu did not stay open, or an item of it was chosen`,
+        )
+      })
+    }
+
+    await scenario('a hold on the check', async ({ page, touch, syncs, menuShown }) => {
+      const check = page.getByRole('checkbox', { name: 'Complete: Write the launch announcement' })
+      const r = await check.boundingBox()
+      await touch('touchStart', r.x + r.width / 2, r.y + r.height / 2)
+      await page.waitForTimeout(1000)
+      expect(!(await menuShown()), 'held on the check, the window’s long-press menu opened while the finger was down')
+      await touch('touchEnd')
+      await page.waitForTimeout(600)
+      const checked = await check.getAttribute('aria-checked').catch(() => null)
+      expect(
+        (await menuShown()) && syncs.length === 0 && checked !== 'true',
+        'held on the check and let go: not the menu alone (or the task was completed)',
+      )
+    })
+
     await scenario('tap', async ({ page, touch, centreOf, sheetShown }) => {
       const at = await centreOf('Buy groceries')
       await touch('touchStart', at.x, at.y)

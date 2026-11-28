@@ -23,6 +23,7 @@ import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
 import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { placed, spanOf, type Placed } from '@/lib/timeline-layout'
+import { swallowClick } from '@/lib/swallow-click'
 import { daysDragged, HOLD_MS, IDLE, press, released, SLOP, type PressState } from '@/lib/timeline-press'
 import { dayWidth, daysToFill, parseZoom, ticks, TOUCH_ZOOMS, type TouchZoom } from '@/lib/timeline-touch'
 import { edgeOf, initialLeft, LEAD, leadFor, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
@@ -355,9 +356,12 @@ export function Timeline() {
       const moved = drag ? daysMoved(drag, event.clientX) : 0
       const mode = drag?.mode ?? 'move'
       const outcome = released(now.state, moved)
-      const heldInPlace = now.state.kind === 'dragging' && now.state.held && !now.travelled
+      const held = now.state.kind === 'dragging' && now.state.held
       stop()
-      if (heldInPlace) return openMenu(now.el, now.x, now.y)
+      // The click that follows a held bar's release is not a tap on what is
+      // under the finger: the task, or an item of the menu opened there.
+      if (held) swallowClick()
+      if (held && !now.travelled) return openMenu(now.el, now.x, now.y)
       // Opened by the click that follows (`tap`), not here: the task's sheet
       // would come up under the finger and that click would land on its
       // backdrop and shut it again.
@@ -698,8 +702,8 @@ export function Timeline() {
               // is given back, or the window would still scroll by it. Not
               // flexed: the page around it would otherwise stretch it again.
               flex: 'none',
-              height: 'calc(100svh - var(--safe-top) - 2.75rem - 3.0625rem - var(--safe-bottom))',
-              marginBottom: 'calc(3.0625rem - 8rem)',
+              height: 'calc(100svh - var(--safe-top) - var(--phone-nav) - var(--tab-bar) - var(--safe-bottom))',
+              marginBottom: 'calc(var(--tab-bar) - var(--phone-page-end))',
             }
           : undefined
       }
@@ -796,6 +800,52 @@ function pressHandlers({ onDown, onMove, onUp, onCancel, onTap }: Presses, point
   }
 }
 
+// A finger held still on a control (the check) and let go in place opens the
+// task's menu there, as a held bar does; the window's own long press is not
+// started, and the click the release sends is eaten so the control is not
+// also pressed. A mouse is left alone (its right click opens the menu).
+function useHoldMenu() {
+  const held = useRef<{ timer: number; x: number; y: number; held: boolean; moved: boolean } | null>(null)
+  const pointer = useRef('mouse')
+  const end = () => {
+    if (held.current) clearTimeout(held.current.timer)
+    held.current = null
+  }
+  return {
+    onPointerDown: (e: PointerEvent<HTMLElement>) => {
+      pointer.current = e.pointerType
+      if (e.pointerType === 'mouse' || e.button !== 0) return
+      e.stopPropagation()
+      end()
+      const now = { timer: 0, x: e.clientX, y: e.clientY, held: false, moved: false }
+      now.timer = window.setTimeout(() => {
+        now.held = true
+        feel({ impact: 'light' })
+      }, HOLD_MS)
+      held.current = now
+    },
+    onPointerMove: (e: PointerEvent<HTMLElement>) => {
+      const now = held.current
+      if (!now || Math.hypot(e.clientX - now.x, e.clientY - now.y) <= SLOP) return
+      now.moved = true
+      clearTimeout(now.timer)
+    },
+    onPointerUp: (e: PointerEvent<HTMLElement>) => {
+      const now = held.current
+      end()
+      if (!now?.held) return
+      swallowClick()
+      if (!now.moved) openMenu(e.currentTarget, now.x, now.y)
+    },
+    onPointerCancel: end,
+    onContextMenu: (e: MouseEvent<HTMLElement>) => {
+      if (pointer.current === 'mouse' || openingMenu) return
+      e.preventDefault()
+      e.stopPropagation()
+    },
+  }
+}
+
 // A task's name line, above its bar: the check, the project's dot (on one
 // timeline for everything), the name and who is on it. It starts where the
 // bar starts and is held on screen (sticky) when the bar runs off either
@@ -813,6 +863,7 @@ function NameLine({
   const [leaving, finish] = useFinish(task.id)
   const { on } = useTaskPeople(task)
   const pointer = useRef('mouse')
+  const checkHold = useHoldMenu()
   return (
     // The space before the name is a spacer, not a margin: a sticky box may
     // not move over its own margin, so with one it could not be held at the
@@ -828,14 +879,19 @@ function NameLine({
         )}
         style={{ maxWidth: room }}
       >
-        <TaskCheck
-          task={task}
-          checked={leaving}
-          onChange={finish}
-          // The same variant as TaskCheck's own phone hit area (max-md:), or
-          // that one wins and reaches into the bar below.
-          className="relative size-5.5 shrink-0 after:absolute after:-inset-x-3 after:-top-[9px] after:-bottom-[5px] max-md:after:-inset-x-3 max-md:after:-top-[9px] max-md:after:-bottom-[5px]"
-        />
+        {/* The check keeps the row's rule with the menu: a tap completes the
+            task, a hold let go in place opens its menu (and completes
+            nothing), a hold that moves does neither. */}
+        <span className="contents" {...checkHold}>
+          <TaskCheck
+            task={task}
+            checked={leaving}
+            onChange={finish}
+            // The same variant as TaskCheck's own phone hit area (max-md:), or
+            // that one wins and reaches into the bar below.
+            className="relative size-5.5 shrink-0 after:absolute after:-inset-x-3 after:-top-[9px] after:-bottom-[5px] max-md:after:-inset-x-3 max-md:after:-top-[9px] max-md:after:-bottom-[5px]"
+          />
+        </span>
         {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
         <button
           type="button"

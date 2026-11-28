@@ -53,12 +53,13 @@ export function released(state: PressState, days: number): 'open' | 'move' | 'no
 }
 
 // Whole days a bar is dragged by, from how far the pointer went (`dx`) at
-// `px` a day. None until it has gone past SLOP: at Quarter (4 px a day) or
-// Month a tremble on letting go would otherwise move the task a day. An end
-// is never pulled past the other end: `length` is the bar's days.
+// `px` a day. Counted from past SLOP: at Quarter (4 px a day) or Month a
+// tremble on letting go would otherwise move the task a day, and counting
+// from the start would make the first step at Quarter two days. An end is
+// never pulled past the other end: `length` is the bar's days.
 export function daysDragged(dx: number, px: number, mode: 'move' | 'start' | 'end', length: number): number {
   if (Math.abs(dx) <= SLOP) return 0
-  const moved = Math.round(dx / px)
+  const moved = Math.sign(dx) * Math.round((Math.abs(dx) - SLOP) / px)
   if (mode === 'end') return Math.max(moved, 1 - length)
   if (mode === 'start') return Math.min(moved, length - 1)
   return moved
