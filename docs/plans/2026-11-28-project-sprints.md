@@ -20,3 +20,9 @@ Timeline shows project-coloured spans for scheduled work in both layouts. A span
 Verified the More menu hides Rename and Delete until opened, focuses the rename field, and retains the delete confirmation. Desktop and phone browser checks confirmed always-visible project ranges, sprint deadlines and links from the Timeline to the project. The final frontend suite passed all 824 tests.
 
 With grouping on, each span and deadline sit in that project's collapsible header. The separate overview appears in the ungrouped view. Desktop and phone browser checks confirmed one span per project, a header for a sprint with only a deadline, and intact markers when a group is collapsed. All 825 frontend tests passed.
+
+## Completed work on Timeline
+
+Show recent completions by default from Done's existing completed-task history. Use the current workspace and filters. A quiet, unfilled dashed line connects the due date and the date the task was finished. Finishing early extends the line to the left, finishing late extends it to the right, and a task with no due date gets just its completion marker. Keep active tasks interactive. The Timeline options menu can hide completed tasks.
+
+Completed rows were verified for early, late, on-time and undated tasks on desktop and phone. The start-only drag reproduced in the prior build. The same gestures now persist the moved start with no due date. All 826 frontend tests and all 26 touch Timeline checks passed.

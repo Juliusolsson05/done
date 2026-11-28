@@ -15,6 +15,8 @@ import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
+import { TimelineCompletedTask } from '@/components/timeline-completed-task'
+import { TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
 import { ProjectTimelineMarks, ProjectTimelineRows, SprintCaption } from '@/components/timeline-project-rows'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -23,6 +25,7 @@ import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from
 import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
 import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
+import { completedByProject, completedItems, completionDates } from '@/lib/timeline-completion'
 import { placed, type Placed } from '@/lib/timeline-layout'
 import { projectTimelines, timelineProjectDates } from '@/lib/timeline-projects'
 import { swallowClick } from '@/lib/swallow-click'
@@ -146,33 +149,31 @@ export function Timeline() {
   const [dropDay, setDropDay] = useState<Day | null>(null)
 
   const filter = useTaskFilter()
+  const completion = useTimelineCompletion()
   const visible = filter.apply(inScope.tasks)
+  const visibleCompleted = filter.apply(completion.completed)
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
-  const projectRows = projectTimelines(inScope.projects, visible, filter.filter)
+  const projectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
   const projectSpans = new Map(projectRows.map((row) => [row.project.id, row]))
-  const groups = timelineGroups(inScope.projects, visible, 'project', new Set(projectSpans.keys()))
-  const timelineDates = [...dated, ...timelineProjectDates(projectRows, TODAY)]
+  const timelineDates = [...dated, ...timelineProjectDates(projectRows, TODAY), ...completionDates(visibleCompleted, TODAY)]
+  const naturalSpan = spanFor(timelineDates, TODAY)
+  const finishedItems = completedItems(visibleCompleted, naturalSpan)
+  const finishedByProject = completedByProject(finishedItems)
+  const groups = timelineGroups(inScope.projects, visible, 'project', new Set([...projectSpans.keys(), ...finishedByProject.keys()]))
   const undated = open.filter((t) => !t.due && !t.start)
-  const shown = open.length
-  const total = openTasks(inScope.tasks).length
-  // A filter that matches nothing replaces the chart; when it is cleared
-  // the chart comes back, scrolled to where it was (or to today).
+  const shown = open.length + finishedItems.length
+  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, naturalSpan).length
+  // A filter that matches nothing replaces the chart, including when none of
+  // the matching completions fall inside the date range.
   const chartShown = !filter.on || shown > 0 || projectRows.length > 0
-  // The chart's own width (the view less the No date column, if any): a day
-  // is fitted to it, and the names and No date are kept within it.
+  // Measure the pane after deciding if there is anything to show. The fitted
+  // width can extend the calendar without changing which completions count.
   const chartWidth = useWidth(scroller, chartShown)
   const px = dayWidth(zoom, chartWidth)
   const tick = ticks(px)
+  const span = { start: naturalSpan.start, days: daysToFill(naturalSpan.days, chartWidth, px) }
 
-  // Include sprint deadlines in the chart's scroll range, even when the
-  // sprint has no dated tasks of its own.
-  const datesKey = timelineDates.map((t) => `${"start" in t ? t.start : ""}|${t.due}`).join(',')
-  const span = useMemo(() => {
-    const need = spanFor(timelineDates, TODAY)
-    return { start: need.start, days: daysToFill(need.days, chartWidth, px) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datesKey, chartWidth, px])
   const earliest = timelineDates.reduce<Day | null>((first, t) => {
     const day = ("start" in t ? t.start : null) ?? t.due
     return day && (!first || day < first) ? day : first
@@ -275,9 +276,10 @@ export function Timeline() {
   }>(null)
   const daysMoved = (from: Drag, clientX: number) => daysDragged(clientX - from.x, px, from.mode, from.length)
   const take = (task: Task, mode: DragMode, x: number, held: boolean) => {
-    // A task with no due date has no bar to move; a tap still opens it.
-    if (!task.due) return
-    setDrag({ id: task.id, mode, x, days: 0, length: daysBetween(task.start ?? task.due, task.due) + 1, held })
+    const first = task.start ?? task.due
+    if (!first) return
+    const length = daysBetween(first, task.due ?? first) + 1
+    setDrag({ id: task.id, mode, x, days: 0, length, held })
     dragging.current = true
   }
   const stop = () => {
@@ -489,6 +491,13 @@ export function Timeline() {
 
   // A task's row: its name on a line above, its bar (as long as its days) below.
   const taskRow = ({ task }: Placed) => {
+    if (task.done) {
+      return (
+        <div key={task.id} className={cn('relative', ROW)} style={{ width }}>
+          <TimelineCompletedTask task={task} start={span.start} dayWidth={px} width={width} showProject={!byProject} />
+        </div>
+      )
+    }
     const moved = drag?.id === task.id ? drag : null
     const first = (task.start ?? task.due)!
     const length = task.due ? daysBetween(first, task.due) + 1 : 1
@@ -541,10 +550,10 @@ export function Timeline() {
 
   const rows: ReactNode = !byProject
     ? // One timeline for everything, in date order; each name says its project.
-      taskRows(placedAll(groups.flatMap((g) => g.tasks)))
+      taskRows([...placedAll(groups.flatMap((g) => g.tasks)), ...finishedItems])
     : groups.map((group) => {
         const key = String(group.id ?? 'inbox')
-        const items = placedAll(group.tasks)
+        const items = [...placedAll(group.tasks), ...(finishedByProject.get(group.id ?? null) ?? [])]
         const projectSpan = group.id != null ? projectSpans.get(group.id) : undefined
         if (!items.length && !projectSpan) return null
         const isFolded = folded.has(key)
@@ -661,6 +670,7 @@ export function Timeline() {
       <div className="flex items-center [&>button]:h-11 [&>button]:text-sm">
         <FilterButton />
       </div>
+      <TimelineCompletionOption showCompleted={completion.showCompleted} setShowCompleted={completion.setShowCompleted} />
       {layout.side && (
         <Button
           variant="ghost"

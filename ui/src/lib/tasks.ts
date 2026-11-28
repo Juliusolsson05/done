@@ -240,7 +240,7 @@ export function timelineGroups(
   projects: Project[],
   all: Task[],
   order: TimelineOrder = 'project',
-  includeProjects?: ReadonlySet<number>,
+  includeProjects?: ReadonlySet<number | null>,
 ): TimelineGroup[] {
   const open = openTasks(all)
   const groups: TimelineGroup[] =
@@ -266,7 +266,7 @@ export function timelineGroups(
             { key: 'undated', name: 'No date', tasks: open.filter((t) => !t.due).sort(byProject) },
           ]
         })()
-  return groups.filter((g) => g.tasks.length > 0 || (g.id != null && includeProjects?.has(g.id)))
+  return groups.filter((g) => g.tasks.length > 0 || (g.id !== undefined && includeProjects?.has(g.id)))
 }
 
 // ---------- Changes ----------
@@ -343,7 +343,11 @@ export function tidyDates(start: Day | null, due: Day | null): { start: Day | nu
 // The caller keeps an end from being dragged past the other.
 export type DragMode = 'move' | 'start' | 'end'
 export function dragBar(task: Task, mode: DragMode, days: number): { start: Day | null; due: Day | null } {
-  if (!task.due) return { start: task.start, due: task.due }
+  if (!task.due) {
+    if (task.start && mode === 'move') return { start: addDays(task.start, days), due: null }
+    if (task.start && mode === 'end' && days > 0) return { start: task.start, due: addDays(task.start, days) }
+    return { start: task.start, due: null }
+  }
   const first = task.start ?? task.due
   let start = task.start
   let due = task.due

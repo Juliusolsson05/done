@@ -211,6 +211,13 @@ describe('tidyDates', () => {
 })
 
 describe('dragBar', () => {
+  it('moves a start-only task and allows a due date to be stretched from its end', () => {
+    const startOnly = task(1, { start: '2026-11-14', due: null })
+    expect(dragBar(startOnly, 'move', 2)).toEqual({ start: '2026-11-16', due: null })
+    expect(dragBar(startOnly, 'end', 2)).toEqual({ start: '2026-11-14', due: '2026-11-16' })
+    expect(dragBar(startOnly, 'end', -1)).toEqual({ start: '2026-11-14', due: null })
+  })
+
   const span = task(1, { start: '2026-11-10', due: '2026-11-14' })
   const single = task(2, { due: '2026-11-14' })
 
