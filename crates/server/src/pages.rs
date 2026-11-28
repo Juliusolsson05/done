@@ -172,7 +172,10 @@ pub async fn invite(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedC
     let lasts = if days >= 1 { format!("This invite works for {days} more day{}.", if days == 1 { "" } else { "s" }) } else { "This invite runs out today.".into() };
     let people = format!("{space} has {} member{}.", invite.members, if invite.members == 1 { "" } else { "s" });
     let back = format!("/auth/google?then=/invite/{token}");
-    let session = signed_in(&headers, &jar, &cloud.config.key);
+    let session = match signed_in(&headers, &jar, &cloud).await {
+        Ok(session) => session,
+        Err(fail) => return crate::auth::down(fail),
+    };
     let html = match session {
         None => card(
             &picture,

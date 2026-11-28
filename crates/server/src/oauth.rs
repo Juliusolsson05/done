@@ -183,7 +183,11 @@ pub async fn authorize(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(a
         Ok(client) => client,
         Err(why) => return page("Not connected", &format!("<p>{}</p>", escape(why))),
     };
-    let Some(session) = auth::signed_in(&Default::default(), &jar, &cloud.config.key) else {
+    let session = match auth::signed_in(&Default::default(), &jar, &cloud).await {
+        Ok(session) => session,
+        Err(fail) => return auth::down(fail),
+    };
+    let Some(session) = session else {
         // Back here once signed in: the same ask, as a path on this server.
         let mut back = reqwest::Url::parse("http://x/oauth/authorize").expect("a valid address");
         back.query_pairs_mut().extend_pairs(ask.pairs());
@@ -244,7 +248,11 @@ pub async fn answer(State(cloud): State<Cloud>, jar: SignedCookieJar, Form(form)
     if let Err(why) = checked(&cloud, &q.ask) {
         return page("Not connected", &format!("<p>{}</p>", escape(why)));
     }
-    let Some(session) = auth::signed_in(&Default::default(), &jar, &cloud.config.key) else {
+    let session = match auth::signed_in(&Default::default(), &jar, &cloud).await {
+        Ok(session) => session,
+        Err(fail) => return auth::down(fail),
+    };
+    let Some(session) = session else {
         return page("Not connected", "<p>Sign in to done, then connect the app again.</p>");
     };
     let mut back = reqwest::Url::parse(&q.ask.redirect_uri).expect("checked above");
@@ -290,7 +298,12 @@ fn grant_refused() -> Response {
     (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid_grant" }))).into_response()
 }
 
-fn tokens(cloud: &Cloud, session: Session) -> Response {
+async fn tokens(cloud: &Cloud, session: Session) -> Response {
+    match session.account(cloud).await {
+        Ok(Some(_)) => (),
+        Ok(None) => return grant_refused(),
+        Err(fail) => return auth::down(fail),
+    }
     let access = Session { exp: now() + THIRTY_DAYS, ..session.clone() };
     let refresh = Refresh { refresh: Session { exp: now() + A_YEAR, ..session } };
     (
@@ -318,10 +331,10 @@ pub async fn token(State(cloud): State<Cloud>, Form(q): Form<TokenAsk>) -> Respo
             if code.exp <= now() || shown != code.challenge || code.redirect_uri != q.redirect_uri || code.client_id != q.client_id {
                 return grant_refused();
             }
-            tokens(&cloud, code.session)
+            tokens(&cloud, code.session).await
         }
         "refresh_token" => match unwrap::<Refresh>(key, &q.refresh_token) {
-            Some(r) if r.refresh.exp > now() => tokens(&cloud, r.refresh),
+            Some(r) if r.refresh.exp > now() => tokens(&cloud, r.refresh).await,
             _ => grant_refused(),
         },
         _ => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "unsupported_grant_type" }))).into_response(),

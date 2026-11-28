@@ -66,6 +66,8 @@ pub fn now() -> u64 {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Ticket {
     pub account: String,
+    #[serde(default)]
+    pub generation: Option<i64>,
     pub name: String,
     #[serde(default)]
     pub picture: String,
@@ -468,9 +470,9 @@ impl Collab {
                     empty.push(room.clone());
                 }
                 if round % CHECK_EVERY == 0 {
-                    let people: Vec<(u64, String)> = inner.peers.iter().map(|(id, p)| (*id, p.who.account.clone())).collect();
-                    for (id, account) in people {
-                        if let Ok(false) = self.db.in_workspace(&account, room.space).await {
+                    let people: Vec<_> = inner.peers.iter().map(|(id, p)| (*id, p.who.account.clone(), p.who.generation)).collect();
+                    for (id, account, generation) in people {
+                        if let Ok(false) = self.db.in_workspace(&account, generation, room.space).await {
                             if let Some(peer) = inner.peers.get(&id) {
                                 let _ = peer.tx.send(Out::Close);
                             }
@@ -597,6 +599,14 @@ pub struct WithTicket {
     ticket: String,
 }
 
+async fn ticket_member(collab: &Collab, who: &Ticket) -> Result<(), StatusCode> {
+    match collab.db.in_workspace(&who.account, who.generation, who.space).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+    }
+}
+
 async fn open_note(
     State(collab): State<Arc<Collab>>,
     Path(note): Path<i64>,
@@ -610,6 +620,9 @@ async fn open_note(
     let Some(who) = check(&collab.key, &q.ticket).filter(|t| t.note == Some(note)) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if let Err(status) = ticket_member(&collab, &who).await {
+        return status.into_response();
+    }
     // Refused before the upgrade when the note is not where the ticket says.
     if let Err(status) = collab.room(note, who.space).await {
         return status.into_response();
@@ -624,6 +637,9 @@ async fn presence(State(collab): State<Arc<Collab>>, Query(q): Query<WithTicket>
     let Some(who) = check(&collab.key, &q.ticket).filter(|t| t.note.is_none()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    if let Err(status) = ticket_member(&collab, &who).await {
+        return status.into_response();
+    }
     Json(serde_json::json!({ "notes": collab.presence(who.space).await })).into_response()
 }
 
@@ -681,7 +697,7 @@ mod tests {
     }
 
     fn ticket(who: &Me, space: i64, note: i64, life: i64) -> String {
-        let t = Ticket { account: who.id.clone(), name: "Someone".into(), picture: String::new(), space, note: Some(note), exp: (now() as i64 + life) as u64 };
+        let t = Ticket { account: who.id.clone(), generation: who.generation, name: "Someone".into(), picture: String::new(), space, note: Some(note), exp: (now() as i64 + life) as u64 };
         issue(&Key::from(&KEY), &t)
     }
 
@@ -810,7 +826,7 @@ mod tests {
         assert_eq!(refused(open(base.clone()).await), 401, "no ticket");
         assert_eq!(refused(open(with_ticket(&base, "made-up")).await), 401, "forged");
         assert_eq!(refused(open(with_ticket(&base, &ticket(&p.geart, p.space, p.note, -1))).await), 401, "expired");
-        let other_key = issue(&Key::from(&[8u8; 64]), &Ticket { account: "1002".into(), name: String::new(), picture: String::new(), space: p.space, note: Some(p.note), exp: now() + 60 });
+        let other_key = issue(&Key::from(&[8u8; 64]), &Ticket { account: "1002".into(), generation: None, name: String::new(), picture: String::new(), space: p.space, note: Some(p.note), exp: now() + 60 });
         assert_eq!(refused(open(with_ticket(&base, &other_key)).await), 401, "signed by another server");
         assert_eq!(refused(open(with_ticket(&format!("{}/notes/{}", p.at, p.note + 1), &ticket(&p.geart, p.space, p.note, 60))).await), 401, "for another note");
         assert_eq!(refused(open(with_ticket(&base, &ticket(&p.geart, p.geart.personal, p.note, 60))).await), 404, "the note is not in that space");
@@ -822,6 +838,12 @@ mod tests {
         let mut request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(with_ticket(&base, &ticket(&p.geart, p.space, p.note, 60))).unwrap();
         request.headers_mut().insert("origin", "https://evil.example.com".parse().unwrap());
         assert!(matches!(tokio_tungstenite::connect_async(request).await, Err(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status() == 403));
+        let before_deletion = ticket(&p.geart, p.space, p.note, 60);
+        p.db.delete_account(&p.geart).await.unwrap();
+        let replacement = p.db.me(&p.geart.id, &p.geart.email, "Geart", "").await.unwrap();
+        let invite = p.db.invite(&p.julius, p.space, &replacement.email, "").await.unwrap();
+        p.db.accept(&replacement, Some(invite.invite), None).await.unwrap();
+        assert_eq!(refused(open(with_ticket(&base, &before_deletion)).await), 404);
     }
 
     #[tokio::test]
@@ -933,7 +955,7 @@ mod tests {
     #[test]
     fn a_ticket_is_only_good_signed_here_and_in_time() {
         let key = Key::from(&KEY);
-        let t = Ticket { account: "1".into(), name: "A".into(), picture: String::new(), space: 2, note: Some(3), exp: now() + 60 };
+        let t = Ticket { account: "1".into(), generation: None, name: "A".into(), picture: String::new(), space: 2, note: Some(3), exp: now() + 60 };
         assert_eq!(check(&key, &issue(&key, &t)), Some(t.clone()));
         assert_eq!(check(&key, &issue(&key, &Ticket { exp: now() - 1, ..t.clone() })), None);
         assert_eq!(check(&Key::from(&[9u8; 64]), &issue(&key, &t)), None);

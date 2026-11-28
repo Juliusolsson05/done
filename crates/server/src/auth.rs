@@ -134,6 +134,8 @@ impl FromRef<Cloud> for Key {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Session {
     pub sub: String,
+    #[serde(default)]
+    pub generation: Option<i64>,
     pub email: String,
     #[serde(default)]
     pub name: String,
@@ -204,37 +206,58 @@ pub(crate) fn bearer(headers: &HeaderMap, key: &Key) -> Option<Session> {
 
 /// Whoever is signed in, by token or cookie, without turning anyone away:
 /// for pages that show something different to each.
-pub fn signed_in(headers: &HeaderMap, jar: &SignedCookieJar, key: &Key) -> Option<Session> {
-    bearer(headers, key).or_else(|| session_in(jar))
+pub async fn signed_in(headers: &HeaderMap, jar: &SignedCookieJar, cloud: &Cloud) -> Result<Option<Session>, Fail> {
+    let Some(session) = bearer(headers, &cloud.config.key).or_else(|| session_in(jar)) else { return Ok(None) };
+    Ok(session.account(cloud).await?.map(|_| session))
+}
+
+impl Session {
+    pub async fn account(&self, cloud: &Cloud) -> Result<Option<Me>, Fail> {
+        cloud.db.session_account(&self.sub, self.generation).await
+    }
+
+    async fn start(cloud: &Cloud, sub: String, email: String, name: String, picture: String) -> Result<Self, Fail> {
+        let me = cloud.db.me(&sub, &email, &name, &picture).await?;
+        Ok(Self { sub, email, name, picture, generation: me.generation, exp: now() + THIRTY_DAYS })
+    }
 }
 
 fn signed_out() -> Response {
     (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "signed out" }))).into_response()
 }
 
-// Asking for a Session in a handler is what keeps it to signed-in people:
-// without a valid cookie the handler is never run.
+/// Resolve the identity and its current account once, including for handlers
+/// that need both the provider profile and the personal space.
+async fn authenticated(parts: &mut Parts, cloud: &Cloud) -> Result<(Session, Me), Response> {
+    if let Some(pair) = parts.extensions.get::<(Session, Me)>() {
+        return Ok(pair.clone());
+    }
+    let session = match bearer(&parts.headers, &cloud.config.key) {
+        Some(session) => session,
+        None => {
+            let jar = SignedCookieJar::<Key>::from_request_parts(parts, cloud).await.map_err(|_| signed_out())?;
+            session_in(&jar).ok_or_else(signed_out)?
+        }
+    };
+    let me = session.account(cloud).await.map_err(down)?.ok_or_else(signed_out)?;
+    let pair = (session, me);
+    parts.extensions.insert(pair.clone());
+    Ok(pair)
+}
+
 impl FromRequestParts<Cloud> for Session {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, cloud: &Cloud) -> Result<Self, Self::Rejection> {
-        if let Some(session) = bearer(&parts.headers, &cloud.config.key) {
-            return Ok(session);
-        }
-        let jar = SignedCookieJar::<Key>::from_request_parts(parts, cloud).await.map_err(|_| signed_out())?;
-        session_in(&jar).ok_or_else(signed_out)
+        Ok(authenticated(parts, cloud).await?.0)
     }
 }
 
-/// The signed-in person as the database knows them: asking for this in a
-/// handler is asking for a session, and writes the account down on its
-/// first visit (with its own space).
 impl FromRequestParts<Cloud> for Me {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, cloud: &Cloud) -> Result<Self, Self::Rejection> {
-        let session = Session::from_request_parts(parts, cloud).await?;
-        cloud.db.me(&session.sub, &session.email, &session.name, &session.picture).await.map_err(down)
+        Ok(authenticated(parts, cloud).await?.1)
     }
 }
 
@@ -399,7 +422,10 @@ pub async fn back(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Qu
         // Google's are digits only.
         return (jar, refuse("the account has no verified email or no usable id")).into_response();
     }
-    let session = Session { sub: claims.sub, email: claims.email, name: claims.name, picture: claims.picture, exp: now() + THIRTY_DAYS };
+    let session = match Session::start(&cloud, claims.sub, claims.email, claims.name, claims.picture).await {
+        Ok(session) => session,
+        Err(fail) => return down(fail),
+    };
     let then = remembered.as_ref().and_then(|r| back_to(r.then.clone())).unwrap_or_else(|| "/".into());
     // An app started this: the browser is only the way to Google and back,
     // so it gets no session. It gets a link that hands the app a code.
@@ -470,6 +496,11 @@ pub async fn exchange(State(cloud): State<Cloud>, Json(q): Json<Exchange>) -> Re
         return refused();
     }
     let s = &code.session;
+    match s.account(&cloud).await {
+        Ok(Some(_)) => (),
+        Ok(None) => return refused(),
+        Err(fail) => return down(fail),
+    }
     let account = serde_json::json!({ "id": s.sub, "email": s.email, "name": s.name, "picture": s.picture });
     let token = seal(key, serde_json::to_string(&code.session).expect("plain text fields"));
     Json(serde_json::json!({ "token": token, "account": account })).into_response()
@@ -482,7 +513,10 @@ pub async fn sign_out(jar: SignedCookieJar, Json(_): Json<serde_json::Value>) ->
 /// Who the interface is talking to. Answers without a session too: that is
 /// how the interface learns it has to show the sign-in screen.
 pub async fn me(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCookieJar) -> Response {
-    let session = bearer(&headers, &cloud.config.key).or_else(|| session_in(&jar));
+    let session = match signed_in(&headers, &jar, &cloud).await {
+        Ok(session) => session,
+        Err(fail) => return down(fail),
+    };
     let account = session.map(|s| serde_json::json!({ "id": s.sub, "email": s.email, "name": s.name, "picture": s.picture }));
     Json(serde_json::json!({ "mode": "cloud", "account": account })).into_response()
 }
@@ -517,7 +551,10 @@ pub async fn dev(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Que
         "ana" => ("dev3", "ana@studio.se", "Ana Lind"),
         _ => ("dev1", "julius@hop.dev", "Julius Olsson"),
     };
-    let session = Session { sub: sub.into(), email: email.into(), name: name.into(), picture: String::new(), exp: now() + THIRTY_DAYS };
+    let session = match Session::start(&cloud, sub.into(), email.into(), name.into(), String::new()).await {
+        Ok(session) => session,
+        Err(fail) => return down(fail),
+    };
     let value = serde_json::to_string(&session).expect("plain text fields");
     (jar.add(cookie(SESSION, value, &cloud.config, THIRTY_DAYS)), Redirect::to(back_to(q.then).as_deref().unwrap_or("/"))).into_response()
 }
@@ -613,7 +650,10 @@ pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Re
     if name.is_empty() {
         name = cloud.db.name_of(&id).await.ok().flatten().unwrap_or_default();
     }
-    let session = Session { sub: id, email: claims.email, name, picture: String::new(), exp: now() + THIRTY_DAYS };
+    let session = match Session::start(&cloud, id, claims.email, name, String::new()).await {
+        Ok(session) => session,
+        Err(fail) => return down(fail),
+    };
     app_session(&config.key, &session)
 }
 
@@ -638,7 +678,10 @@ pub async fn review(State(cloud): State<Cloud>, jar: SignedCookieJar, Json(q): J
     if q.username.trim() != "review" || !right {
         return not_signed_in("That username and password do not match.");
     }
-    let session = Session { sub: "review".into(), email: "review@thedone.app".into(), name: "App Review".into(), picture: String::new(), exp: now() + THIRTY_DAYS };
+    let session = match Session::start(&cloud, "review".into(), "review@thedone.app".into(), "App Review".into(), String::new()).await {
+        Ok(session) => session,
+        Err(fail) => return down(fail),
+    };
     // The cookie too, so the same login works on the web app.
     let value = serde_json::to_string(&session).expect("plain text fields");
     (jar.add(cookie(SESSION, value, config, THIRTY_DAYS)), app_session(&config.key, &session)).into_response()
