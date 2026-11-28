@@ -76,15 +76,21 @@ export function PhoneHeader({ title, sub, children }: { title: ReactNode; sub?: 
       frame = 0
       const barBottom = bar.current?.getBoundingClientRect().bottom ?? 0
       const titleBottom = big.current?.getBoundingClientRect().bottom ?? Infinity
-      setUnder(window.scrollY <= 0 ? 0 : titleBottom <= barBottom ? 2 : 1)
+      // A large title its view does not draw (the Board on a phone held
+      // sideways) counts as gone: the bar names the view instead.
+      const hidden = big.current !== null && big.current.getClientRects().length === 0
+      setUnder(hidden ? 2 : window.scrollY <= 0 ? 0 : titleBottom <= barBottom ? 2 : 1)
     }
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(measure)
     }
     measure()
     window.addEventListener('scroll', onScroll, { passive: true })
+    // Turning the phone may hide or show the large title.
+    window.addEventListener('resize', onScroll)
     return () => {
       window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
       cancelAnimationFrame(frame)
     }
   }, [])
@@ -213,7 +219,7 @@ export function TabBar() {
     // Edge to edge, with its tabs inside the safe area on every side.
     <nav
       aria-label="Views"
-      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
+      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(var(--tab-bar)+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
     >
       {tab('today', 'Today', CalendarIcon, late)}
       {tab('inbox', 'Inbox', InboxIcon)}

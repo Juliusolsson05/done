@@ -531,14 +531,22 @@ fn inbox(store: tauri::State<Store>, reply: done_core::Reply, upto: i64, account
 
 // The account leaving this device: marked first, done after, and finished
 // on the next load if a reload came between (crates/core/src/account.rs).
+// `by`: the app writing or finishing the mark, so another app on the same
+// file (the "done next" preview) never finishes it.
 #[tauri::command]
-fn mark_leaving(store: tauri::State<Store>, how: Option<done_core::Leaving>) -> Result<(), String> {
-    store.mark_leaving(how).map_err(|e| e.to_string())
+fn mark_leaving(store: tauri::State<Store>, how: Option<done_core::Leaving>, by: Option<String>) -> Result<(), String> {
+    store.mark_leaving(how, by.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn finish_leaving(store: tauri::State<Store>) -> Result<Option<done_core::Left>, String> {
-    store.finish_leaving().map_err(|e| e.to_string())
+fn finish_leaving(store: tauri::State<Store>, by: Option<String>) -> Result<Option<done_core::Left>, String> {
+    store.finish_leaving(by.as_deref()).map_err(|e| e.to_string())
+}
+
+// A signed-in app starting: its own mark left by a crash, to complete.
+#[tauri::command]
+fn own_mark(store: tauri::State<Store>, by: Option<String>) -> Result<Option<done_core::Leaving>, String> {
+    store.own_mark(by.as_deref()).map_err(|e| e.to_string())
 }
 
 // Signed out with changes waiting for an account.
@@ -631,7 +639,7 @@ pub fn run() {
         .manage(OpenedLink::default())
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, take_over, mark_leaving, finish_leaving, waiting, info, restart, focus_set, open_in_browser, take_opened_link, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, take_over, mark_leaving, finish_leaving, own_mark, waiting, info, restart, focus_set, open_in_browser, take_opened_link, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]
