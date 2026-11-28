@@ -1,17 +1,20 @@
 // Focus: one countdown on one task. Before a session it asks what and for how
 // long; during one it shows the time left, as large as the type scale goes.
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
-import { XIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronRightIcon, XIcon } from 'lucide-react'
+import { FocusPicker } from '@/components/focus-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ViewHeader } from '@/components/list-view'
 import { UpNext } from '@/components/up-next'
 import { useApp } from '@/lib/app-context'
-import { TODAY } from '@/lib/days'
-import { chosenMinutes, clockText, focusTasks, MAX_MINUTES, presetLabel, PRESETS, timeLeft, type Session } from '@/lib/focus'
+import { loadEntries } from '@/lib/backend'
+import { addDays, TODAY } from '@/lib/days'
+import { chosenMinutes, clockText, COMMON, focusTasks, MAX_MINUTES, optionsSummary, presetLabel, PRESETS, timeLeft, type Session } from '@/lib/focus'
+import { recentTaskIds } from '@/lib/focus-picker'
 import {
   addReminder,
   continueFocus,
@@ -45,8 +48,10 @@ export function Countdown({ session }: { session: Session }) {
   return read()
 }
 
-// A select cannot have an empty value, so "no task" has a name.
+// The chosen task is kept as a string, where "no task" has a name.
 const NOTHING = 'none'
+// How far back "Recent" in the picker looks.
+const RECENT_DAYS = 7
 const FIELD_LABEL = 'text-xs text-muted-foreground'
 
 // What to be told during a session, and how often. The list is remembered
@@ -131,14 +136,151 @@ function StartNext({ variant }: { variant: 'default' | 'outline' }) {
 // time planned, which is the point of the time sheet.
 const MORE = [5, 10, 15]
 
+// The tasks focused on in the last week, from the time sheet: true on every
+// device, where something kept in this window would not be. A day that fails
+// to load just adds nothing.
+function useRecent(): number[] {
+  const [recent, setRecent] = useState<number[]>([])
+  useEffect(() => {
+    let live = true
+    const days = Array.from({ length: RECENT_DAYS }, (_, i) => addDays(TODAY, -i))
+    Promise.allSettled(days.map(loadEntries)).then((results) => {
+      if (live) setRecent(recentTaskIds(results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))))
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  return recent
+}
+
+// Three lengths most sessions use, and "Other" for the rest: the other
+// presets and a length of your own. Other names the length when it is the
+// one chosen, so a choice made there is seen without opening it.
+function Length() {
+  const { ui, chooseFocus } = useApp()
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const other = !COMMON.includes(ui.focusMinutes)
+  const choose = (focusMinutes: number) => {
+    chooseFocus({ focusMinutes })
+    setOpen(false)
+    setTyped('')
+  }
+  const own = (event: FormEvent) => {
+    event.preventDefault()
+    if (typed.trim()) choose(chosenMinutes(typed, ui.focusMinutes))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label id="focus-length" className={FIELD_LABEL}>
+        For how long?
+      </Label>
+      <div className="flex items-center gap-1">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          spacing={1}
+          aria-labelledby="focus-length"
+          value={other ? '' : String(ui.focusMinutes)}
+          // Pressing the chosen one again would leave no length at all.
+          onValueChange={(value) => value && choose(Number(value))}
+        >
+          {COMMON.map((minutes) => (
+            <ToggleGroupItem key={minutes} value={String(minutes)} className="touch:h-10 touch:px-3">
+              {presetLabel(minutes)}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" aria-pressed={other} className="aria-pressed:bg-muted touch:h-10 touch:px-3">
+              {other ? minutesText(ui.focusMinutes * 60000) : 'Other'}
+              <ChevronDownIcon className="text-muted-foreground" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="flex w-64 flex-col gap-3 p-3">
+            <div className="grid grid-cols-2 gap-1">
+              {PRESETS.filter((minutes) => !COMMON.includes(minutes)).map((minutes) => (
+                <Button
+                  key={minutes}
+                  variant="outline"
+                  aria-pressed={ui.focusMinutes === minutes}
+                  className="aria-pressed:bg-muted touch:h-11"
+                  onClick={() => choose(minutes)}
+                >
+                  {presetLabel(minutes)}
+                </Button>
+              ))}
+            </div>
+            <form onSubmit={own} className="flex items-center gap-1">
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={MAX_MINUTES}
+                placeholder="Minutes"
+                aria-label="Minutes"
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                className="flex-1 text-base md:text-sm touch:h-11"
+              />
+              <Button type="submit" variant="outline" className="touch:h-11">
+                Set
+              </Button>
+            </form>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  )
+}
+
+// Reminders and Up next, folded away: most sessions need neither. What is
+// set shows on the folded line, so nothing set is ever out of sight.
+function Options() {
+  const reminders = useSyncExternalStore(subscribeFocus, getReminders)
+  const blocks = useSyncExternalStore(subscribeFocus, getUpNext)
+  const [open, setOpen] = useState(false)
+  const summary = optionsSummary(reminders, blocks)
+
+  return (
+    <section className="flex flex-col gap-4 border-t pt-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="focus-options"
+        onClick={() => setOpen((o) => !o)}
+        className="-mx-2 flex min-h-11 min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-muted"
+      >
+        <ChevronRightIcon className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+        <span className="shrink-0 font-medium">Options</span>
+        <span className={cn('min-w-0 truncate', summary ? 'text-muted-foreground' : 'text-faint')}>{summary || 'Reminders and Up next'}</span>
+      </button>
+      {open && (
+        <div id="focus-options" className="flex flex-col gap-6 pb-2">
+          <Reminders />
+          <div className="flex flex-col items-start gap-2">
+            <Label className={FIELD_LABEL}>After this block</Label>
+            <UpNext />
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function Setup() {
   const { shown, me, ui, chooseFocus } = useApp()
-  const [typed, setTyped] = useState('')
+  const recent = useRecent()
   const tasks = focusTasks(shown.tasks, TODAY)
   const goal = goalTask(shown.tasks, TODAY, me)
-  const wanted = ui.focusPick ?? (goal && !goal.done ? String(goal.id) : NOTHING)
+  const goalId = goal && !goal.done ? goal.id : null
+  const wanted = ui.focusPick ?? (goalId !== null ? String(goalId) : NOTHING)
   // The task chosen earlier may have been finished or deleted since.
-  const pick = tasks.some((t) => String(t.id) === wanted) ? wanted : NOTHING
+  const chosen = tasks.find((t) => String(t.id) === wanted) ?? null
 
   return (
     <div className="flex max-w-lg flex-col gap-6">
@@ -146,68 +288,25 @@ function Setup() {
         <Label htmlFor="focus-task" className={FIELD_LABEL}>
           What are you working on?
         </Label>
-        <Select value={pick} onValueChange={(focusPick) => chooseFocus({ focusPick })}>
-          <SelectTrigger id="focus-task" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NOTHING}>Nothing in particular</SelectItem>
-            {tasks.map((t) => (
-              <SelectItem key={t.id} value={String(t.id)}>
-                {t.title}
-                {t.goalDay === TODAY && ' (today’s goal)'}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <FocusPicker
+          id="focus-task"
+          tasks={shown.tasks}
+          recent={recent}
+          goalId={goalId}
+          chosen={chosen}
+          onChoose={(task) => chooseFocus({ focusPick: task ? String(task.id) : NOTHING })}
+        />
       </div>
-      <div className="flex flex-col gap-2">
-        <Label id="focus-length" className={FIELD_LABEL}>
-          For how long?
-        </Label>
-        <div className="flex flex-wrap items-center gap-1">
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            size="sm"
-            spacing={1}
-            aria-labelledby="focus-length"
-            className="flex-wrap"
-            value={String(ui.focusMinutes)}
-            onValueChange={(value) => {
-              // Pressing the chosen one again would leave no length at all.
-              if (value) chooseFocus({ focusMinutes: Number(value) })
-              // The field wins when filled, so choosing a button empties it.
-              setTyped('')
-            }}
-          >
-            {PRESETS.map((minutes) => (
-              <ToggleGroupItem key={minutes} value={String(minutes)}>
-                {presetLabel(minutes)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-          <Input
-            type="number"
-            min={1}
-            max={MAX_MINUTES}
-            placeholder="min"
-            aria-label="Minutes"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            className="h-7 w-20"
-          />
-        </div>
-      </div>
-      <Reminders />
+      <Length />
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => startFocus(tasks.find((t) => String(t.id) === pick) ?? null, chosenMinutes(typed, ui.focusMinutes))}>
+        <Button className="touch:h-11 touch:px-5" onClick={() => startFocus(chosen, ui.focusMinutes)}>
           Start focus
         </Button>
         {/* With blocks queued, the first of them can be started from here too:
             after a Stop, or to begin a day already planned. */}
         <StartNext variant="outline" />
       </div>
+      <Options />
     </div>
   )
 }
@@ -291,9 +390,9 @@ export function FocusView() {
   const { focus } = useApp()
   return (
     <>
-      <ViewHeader title="Focus">
-        <UpNext />
-      </ViewHeader>
+      {/* Before a session, Up next is under Options; during one it stays at
+          hand, to plan what follows while the clock runs. */}
+      <ViewHeader title="Focus">{focus && <UpNext />}</ViewHeader>
       {focus ? <Running session={focus} /> : <Setup />}
     </>
   )

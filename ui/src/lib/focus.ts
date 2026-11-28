@@ -60,6 +60,9 @@ export const PRESETS = [15, 25, 30, 45, 60, 90, 120]
 export const DEFAULT_MINUTES = 25
 export const MAX_MINUTES = 600
 export const presetLabel = (minutes: number): string => (minutes < 60 ? `${minutes} min` : `${minutes / 60} h`)
+// The lengths most sessions use, shown as buttons; the other presets and a
+// length of your own are one tap further, behind "Other".
+export const COMMON = [25, 45, 60]
 
 const MINUTE = 60000
 
@@ -193,6 +196,16 @@ export function chosenMinutes(typed: string, preset: number): number {
 export function focusTasks(tasks: Task[], today: Day): Task[] {
   const rank = (t: Task) => (t.goalDay === today ? 0 : t.due !== null && t.due <= today ? 1 : 2)
   return openTasks(tasks).sort((a, b) => rank(a) - rank(b) || byPriority(a, b))
+}
+
+// One line saying what the Focus page's folded options hold, so they need
+// not be opened to know. Empty when nothing is set.
+export function optionsSummary(reminders: Reminder[], blocks: Block[]): string {
+  const said: string[] = []
+  if (reminders.length === 1) said.push(`${reminders[0].label} every ${reminders[0].intervalMinutes} min`)
+  if (reminders.length > 1) said.push(`${reminders.length} reminders`)
+  if (blocks.length) said.push(`${blocks.length} ${blocks.length === 1 ? 'block' : 'blocks'} up next`)
+  return said.join(' · ')
 }
 
 // ---------- The time sheet and Up next ----------

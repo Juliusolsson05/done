@@ -15,6 +15,7 @@ import {
   isDue,
   newReminder,
   nextReminderAt,
+  optionsSummary,
   start,
   timeLeft,
   toggle,
@@ -340,5 +341,25 @@ describe('Up next', () => {
     const finished = task(4, { title: 'call the bank', done: true, doneDay: '2026-11-16' })
     expect(startBlock(block, [finished], t0)).toMatchObject({ taskId: null, title: 'call the bank' })
     expect(startBlock(block, [], t0)).toMatchObject({ taskId: null, title: 'call the bank' })
+  })
+})
+
+describe('optionsSummary', () => {
+  const stretch: Reminder = { id: 'a', label: 'Stand up and stretch', intervalMinutes: 30 }
+  const water: Reminder = { id: 'b', label: 'Drink water', intervalMinutes: 45 }
+  const block = (id: string): Block => ({ id, taskId: null, title: 'Focus', minutes: 25 })
+
+  it('says nothing when nothing is set', () => {
+    expect(optionsSummary([], [])).toBe('')
+  })
+
+  it('names a single reminder, and counts several', () => {
+    expect(optionsSummary([stretch], [])).toBe('Stand up and stretch every 30 min')
+    expect(optionsSummary([stretch, water], [])).toBe('2 reminders')
+  })
+
+  it('counts the blocks up next', () => {
+    expect(optionsSummary([], [block('1')])).toBe('1 block up next')
+    expect(optionsSummary([stretch], [block('1'), block('2')])).toBe('Stand up and stretch every 30 min · 2 blocks up next')
   })
 })
