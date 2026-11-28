@@ -16,6 +16,7 @@ import { useApp } from '@/lib/app-context'
 import { edgeStep } from '@/lib/board-drag'
 import { describeDay, TODAY } from '@/lib/days'
 import { feel } from '@/lib/haptics'
+import { swallowClick } from '@/lib/swallow-click'
 import { play } from '@/lib/sounds'
 import { HOLD_MS, IDLE, SLOP, press, type PressState } from '@/lib/timeline-press'
 import { isSubtask, laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
@@ -138,22 +139,6 @@ interface Pressing {
   x: number
   y: number
   travelled: boolean
-}
-
-// Eats the one click the browser sends after a held card is let go, so the
-// release is not also a tap on the check or the title under the finger.
-function swallowClick() {
-  const eat = (event: Event) => {
-    event.stopPropagation()
-    event.preventDefault()
-    done()
-  }
-  const done = () => {
-    window.removeEventListener('click', eat, true)
-    clearTimeout(timer)
-  }
-  window.addEventListener('click', eat, true)
-  const timer = window.setTimeout(done, 400)
 }
 
 // Which column is under a point, from the columns' own marks.

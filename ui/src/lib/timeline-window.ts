@@ -68,23 +68,19 @@ export function initialLeft(span: Span, today: Day, earliest: Day | null, viewDa
   return Math.max(0, Math.min(left, span.days - Math.ceil(viewDays)))
 }
 
-// How the Timeline divides the width it has: the column of titles on the
-// left, whether its controls go into one View menu, and whether the tasks
-// with no date get a column of their own on the right. Decided by the width
-// the view has, not the window's: a Mac window with the sidebar open and an
-// iPad in portrait have the same room.
+// How the Timeline uses the width it has: whether its controls fit beside
+// the title, whether the tasks with no date get a column of their own on the
+// right, and whether a row has room for the project dot and who is on the
+// task. Decided by the width the view has, not the window's: a Mac window with
+// the sidebar open and an iPad in portrait have the same room. The days take
+// the whole width of the chart; each task's name is on its own row, above its
+// bar (docs/plans/2026-11-27-phone-timeline.md).
 export const SIDE_PANEL = 240
-export function paneLayout(width: number): { left: number; compact: boolean; side: boolean; narrow: boolean } {
-  // A phone in portrait gives the titles about half: a third left them a
-  // couple of words ("Hop H…"), and the chart scrolls anyway. Its rows also
-  // drop the project dot and the faces (`narrow`), so the title has the
-  // room. A bit over a third up to 700, never so little that a title cannot
-  // be read; from 700 the column is as wide as on the Mac.
+export function paneLayout(width: number): { compact: boolean; side: boolean; narrow: boolean } {
   const narrow = width < 500
-  const left = narrow ? Math.max(170, Math.round(width * 0.52)) : width < 700 ? Math.min(260, Math.max(140, Math.round(width * 0.38))) : 260
   // Zoom, grouping, Today, Filter and No date fit beside the title from 880.
   const wide = width >= 880
-  return { left, compact: !wide, side: wide, narrow }
+  return { compact: !wide, side: wide, narrow }
 }
 
 // Whether a bar lies wholly off the days on screen, and on which side, so its

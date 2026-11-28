@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HOLD_MS, IDLE, press, released, SLOP } from '@/lib/timeline-press'
+import { daysDragged, HOLD_MS, IDLE, press, released, SLOP } from '@/lib/timeline-press'
 
 const down = (pointer: string) => press(IDLE, { type: 'down', x: 100, y: 50, pointer })
 
@@ -51,5 +51,29 @@ describe('what letting go of a bar does', () => {
     expect(released(press(down('touch'), { type: 'hold' }), 0)).toBe('nothing')
     expect(released({ kind: 'scrolling' }, 0)).toBe('nothing')
     expect(released(IDLE, 0)).toBe('nothing')
+  })
+})
+
+describe('the days a bar is dragged by', () => {
+  it('counts none for a tremble, even where a day is a few pixels', () => {
+    // Quarter on a phone: 4 px a day; Month: 12.
+    expect(daysDragged(2, 4, 'move', 1)).toBe(0)
+    expect(daysDragged(-6, 12, 'move', 1)).toBe(0)
+    expect(daysDragged(SLOP, 4, 'end', 3)).toBe(0)
+  })
+
+  it('counts whole days from past the slop, one day first even at Quarter', () => {
+    expect(daysDragged(SLOP + 1, 4, 'move', 1)).toBe(0)
+    expect(daysDragged(SLOP + 2, 4, 'move', 1)).toBe(1)
+    expect(daysDragged(SLOP + 4, 4, 'move', 1)).toBe(1)
+    expect(daysDragged(SLOP + 6, 4, 'move', 1)).toBe(2)
+    expect(daysDragged(51, 51, 'move', 1)).toBe(1)
+    expect(daysDragged(102, 51, 'move', 1)).toBe(2)
+    expect(daysDragged(-51, 51, 'move', 1)).toBe(-1)
+  })
+
+  it('never pulls an end past the other end', () => {
+    expect(daysDragged(-200, 51, 'end', 3)).toBe(-2)
+    expect(daysDragged(200, 51, 'start', 3)).toBe(2)
   })
 })
