@@ -13,6 +13,7 @@ import { ListView } from '@/components/list-view'
 import { isTab, ListsScreen, NewTaskButton, TabBar, useEdgeSwipeBack } from '@/components/phone'
 import { MobileQuickAdd } from '@/components/quick-add'
 import { MoveProjectDialog } from '@/components/move-project'
+import { HeldDialog } from '@/components/held-dialog'
 import { NotificationsScreen } from '@/components/notifications'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
@@ -23,7 +24,8 @@ import { TimeSheet } from '@/components/time-sheet'
 import { Timeline } from '@/components/timeline'
 import { TimelineDesktop } from '@/components/timeline-desktop'
 import { AppContext, type App as AppValue, type Ui } from '@/lib/app-context'
-import { isDesktop, isIosApp, onMenuBarCommand, sendWidgetSnapshot, setWebviewZoom } from '@/lib/backend'
+import { isDesktop, isIosApp, leftOnLoad, onMenuBarCommand, sendWidgetSnapshot, setWebviewZoom } from '@/lib/backend'
+import { endedMessage } from '@/lib/account-switch'
 import { widgetSnapshot } from '@/lib/widget-snapshot'
 import { addDays, dayOf, TODAY } from '@/lib/days'
 import { useIsMobile, useLayout } from '@/hooks/use-mobile'
@@ -453,6 +455,16 @@ export default function App() {
     }
   }, [])
 
+  // Loaded after the session ended (a 401): said once, with a way to sign in.
+  // What was unsent stays on this device (crates/core/src/account.rs).
+  useEffect(() => {
+    if (!ready) return
+    void leftOnLoad().then((left) => {
+      const text = endedMessage(left)
+      if (text) toast(text, { id: 'ended', duration: 15000, action: { label: 'Sign in', onClick: () => latest.current.openView({ kind: 'settings' }) } })
+    })
+  }, [ready])
+
   // The Home and Lock Screen widgets show Today as this window does
   // (lib/widget-snapshot.ts); they are told when it changes. Held back a
   // moment, so a burst of edits or a sync writes the widgets' file once.
@@ -572,6 +584,7 @@ export default function App() {
                 </div>
                 <TaskEditorDialog task={editing} />
                 <MoveProjectDialog />
+                <HeldDialog />
                 <SearchDialog />
                 <FindBar />
               </SidebarInset>

@@ -21,7 +21,7 @@
 
 use deadpool_postgres::{Client, GenericClient, Manager, ManagerConfig, Pool, RecyclingMethod, Transaction};
 use done_core::{
-    check, check_entry, clean_folder, is_day, Assign, Assignee, Change, Cursor, Entry, Gone, NewEntry, Note, Outbox, Project, Reply, Rows,
+    check, check_entry, clean_folder, is_day, Assign, Assignee, Change, Cursor, Entry, Gone, NewEntry, Note, Outbox, Project, Refused, Reply, Rows,
     SaveNote, Stamped, State, Task,
 };
 use serde::Serialize;
@@ -358,8 +358,10 @@ async fn rehome_note(tx: &Transaction<'_>, id: i64, from: i64, to: i64, at: i64)
 /// Writes rows from a device or a browser window where they are newer than
 /// what is here, each in the space the rules give it. A row that breaks a
 /// rule, or points into a space the writer is not in, is skipped, not the
-/// whole batch: one bad row must not stop a device from ever syncing.
-async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i64) -> Result<usize, Fail> {
+/// whole batch: one bad row must not stop a device from ever syncing. The
+/// ones skipped for the space are put in `refused`, so the device does not
+/// count them as sent (replica.rs `inbox_in`).
+async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i64, refused: &mut Vec<Refused>) -> Result<usize, Fail> {
     let member: HashMap<i64, &In> = spaces.iter().map(|s| (s.id, s)).collect();
     let is_in = |space: i64| member.contains_key(&space);
     let stamp = |changed: i64| if changed > now + AHEAD { now } else { changed };
@@ -370,6 +372,7 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         Ok::<Option<i64>, Fail>(row.and_then(|r| r.get(0)))
     };
 
+    let mut refuse = |kind: &str, id: i64| refused.push(Refused { kind: kind.into(), id });
     for Stamped { row: p, changed } in &rows.projects {
         let changed = stamp(*changed);
         if p.name.trim().is_empty() {
@@ -379,7 +382,11 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         match here {
             Some(r) => {
                 let (space, at): (i64, i64) = (r.get(0), r.get(1));
-                if !is_in(space) || changed <= at {
+                if !is_in(space) {
+                    refuse("project", p.id);
+                    continue;
+                }
+                if changed <= at {
                     continue;
                 }
                 let seq = bump(tx, space).await?;
@@ -395,7 +402,10 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 }
                 let space = match p.space_id {
                     Some(s) if is_in(s) => s,
-                    Some(_) => continue,
+                    Some(_) => {
+                        refuse("project", p.id);
+                        continue;
+                    }
                     None => me.personal,
                 };
                 let seq = bump(tx, space).await?;
@@ -419,7 +429,11 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         let kept: Option<(Option<i64>, Option<i64>)> = here.as_ref().map(|r| (r.get(4), r.get(5)));
         let here: Option<(i64, i64, Option<String>, Option<String>)> = here.map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)));
         if let Some((space, at, _, _)) = &here {
-            if !is_in(*space) || changed <= *at {
+            if !is_in(*space) {
+                refuse("task", t.id);
+                continue;
+            }
+            if changed <= *at {
                 continue;
             }
         } else if buried("task", t.id).await?.is_some_and(|b| b >= changed) {
@@ -435,6 +449,7 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 Some(r) => {
                     let space: i64 = r.get(0);
                     if !is_in(space) {
+                        refuse("task", t.id);
                         continue;
                     }
                     target = Some(space);
@@ -453,6 +468,7 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 Some(r) => {
                     let space: i64 = r.get(0);
                     if !is_in(space) {
+                        refuse("task", t.id);
                         continue;
                     }
                     match target {
@@ -561,7 +577,11 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         let kept_project: Option<i64> = here.as_ref().and_then(|r| r.get(2));
         let here: Option<(i64, i64)> = here.map(|r| (r.get(0), r.get(1)));
         if let Some((space, at)) = here {
-            if !is_in(space) || changed <= at {
+            if !is_in(space) {
+                refuse("note", n.id);
+                continue;
+            }
+            if changed <= at {
                 continue;
             }
         } else if buried("note", n.id).await?.is_some_and(|b| b >= changed) {
@@ -574,6 +594,7 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
                 Some(r) => {
                     let space: i64 = r.get(0);
                     if !is_in(space) {
+                        refuse("note", n.id);
                         continue;
                     }
                     target = Some(space);
@@ -633,7 +654,11 @@ async fn merge(tx: &Transaction<'_>, me: &Me, spaces: &[In], rows: &Rows, now: i
         let here = tx.query_opt("SELECT space_id, changed FROM entry WHERE id = $1", &[&e.id]).await?;
         if let Some(r) = here {
             let (space, at): (i64, i64) = (r.get(0), r.get(1));
-            if space != me.personal || changed <= at {
+            if space != me.personal {
+                refuse("entry", e.id);
+                continue;
+            }
+            if changed <= at {
                 continue;
             }
         } else if buried("entry", e.id).await?.is_some_and(|b| b >= changed) {
@@ -920,9 +945,7 @@ impl Db {
     /// spaces out. An app from before workspaces (no cursors) is answered
     /// about its own space only, in the shape it knows.
     pub async fn exchange(&self, me: &Me, outbox: &Outbox) -> Result<Reply, Fail> {
-        if !outbox.rows.is_empty() {
-            self.write(me, outbox.rows.clone()).await?;
-        }
+        let refused = if outbox.rows.is_empty() { Vec::new() } else { self.write(me, outbox.rows.clone()).await? };
         // Read in one snapshot across every space: a project moved between
         // two of them in the meantime shows up in both or in neither, never
         // as a tombstone in one without the row in the other.
@@ -954,7 +977,7 @@ impl Db {
         }
         let team = if legacy { None } else { Some(team_in(&tx, me, &spaces).await?) };
         tx.commit().await?;
-        Ok(Reply { upto: own, rows, spaces: (!legacy).then_some(upto), team })
+        Ok(Reply { upto: own, rows, spaces: (!legacy).then_some(upto), team, refused })
     }
 
     /// Everything a browser window shows, from every space the person is in.
@@ -998,16 +1021,18 @@ impl Db {
         Ok(State { rev, next_id: fresh_id(), projects, tasks, team: Some(team) })
     }
 
-    async fn write(&self, me: &Me, rows: Rows) -> Result<usize, Fail> {
+    /// Returns the rows refused for their space (see `merge`).
+    async fn write(&self, me: &Me, rows: Rows) -> Result<Vec<Refused>, Fail> {
         let mut client = self.pool.get().await?;
         let tx = account_write(&mut client, me).await?;
         let spaces = spaces_of(&tx, &me.id).await?;
         lock(&tx, &spaces).await?;
         // Read again once locked: someone removed while this waited is out.
         let spaces = spaces_of(&tx, &me.id).await?;
-        let merged = merge(&tx, me, &spaces, &rows, now_ms()).await?;
+        let mut refused = Vec::new();
+        merge(&tx, me, &spaces, &rows, now_ms(), &mut refused).await?;
         tx.commit().await?;
-        Ok(merged)
+        Ok(refused)
     }
 
     /// A browser window's changes, row by row, last write wins (see the
@@ -1800,7 +1825,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use done_core::Store;
+    use done_core::{Account, Held, Leaving, Store};
     use std::path::Path;
 
     const TODAY: &str = "2026-11-23";
@@ -1994,6 +2019,11 @@ mod tests {
         assert!(reply.rows.projects.iter().all(|p| p.row.id != home));
         assert!(reply.rows.tasks.iter().all(|t| t.row.title != "Renew passport"));
         assert!(reply.spaces.unwrap().iter().all(|c| c.space != julius.personal));
+        // What was refused is named back, so a device does not count it as
+        // sent; only ids Geart sent himself (which the reply's silence about
+        // them already gave away).
+        let refused: Vec<(&str, i64)> = reply.refused.iter().map(|r| (r.kind.as_str(), r.id)).collect();
+        assert_eq!(refused, vec![("project", home), ("task", home + 1), ("task", home + 50)]);
         // And Julius's things are exactly as they were.
         round(&mac, &db, &julius).await;
         assert_eq!(titles(&mac), vec!["Renew passport"]);
@@ -2410,5 +2440,282 @@ mod tests {
         db.leave(&geart, space).await.unwrap();
         round(&phone, &db, &geart).await;
         assert!(titles(&phone).is_empty(), "{:?}", titles(&phone));
+    }
+
+    fn account(me: &Me) -> Account {
+        Account { id: Some(me.id.clone()), email: me.email.clone(), personal: None }
+    }
+
+    /// One round as an app does it now: nothing is sent while the file holds
+    /// another account's tasks (the person is asked instead), unless
+    /// `take_over` is their answer to take them off this device.
+    async fn as_app(d: &Store, db: &Db, me: &Me, take_over: bool) -> Result<Reply, Held> {
+        if take_over {
+            d.take_over(&account(me)).unwrap();
+        }
+        let out = d.outbox_for(&account(me)).unwrap();
+        if let Some(held) = out.held {
+            return Err(held);
+        }
+        let reply = db.exchange(me, &out).await.unwrap();
+        d.inbox_for(&reply, out.upto, &account(me)).unwrap();
+        Ok(reply)
+    }
+
+    async fn web(db: &Db, me: &Me) -> Vec<String> {
+        let mut t: Vec<String> = db.state(me, TODAY).await.unwrap().tasks.into_iter().map(|t| t.title).collect();
+        t.sort();
+        t
+    }
+
+    // Audit F1: signing out of one account and in as another on the same
+    // phone lost the first one's unsent changes: they were sent to the
+    // second account, refused there, counted as sent and dropped.
+    #[tokio::test]
+    async fn signing_in_as_another_account_keeps_the_first_account_s_unsent_changes() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let phone = device();
+        let home = next(&phone);
+        change(&phone, |c| {
+            c.projects.push(Project { id: home, name: "Home".into(), color: 1, space_id: None });
+            c.tasks.push(Task { project_id: Some(home), ..task(home + 1, "Renew passport") });
+            c.tasks.push(task(home + 2, "Inbox thing"));
+        });
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        let (passport, inbox) = {
+            let tasks = phone.state(TODAY).unwrap().tasks;
+            let id = |title: &str| tasks.iter().find(|t| t.title == title).unwrap().id;
+            (id("Renew passport"), id("Inbox thing"))
+        };
+        // Offline, still signed in: edits that do not reach the server.
+        change(&phone, |c| {
+            c.tasks.push(Task { project_id: Some(home), ..task(passport, "Renew passport EDITED OFFLINE") });
+            c.tasks.push(task(inbox, "Inbox thing EDITED OFFLINE"));
+        });
+        // The last round fails; the person is told and signs out anyway.
+        phone.leave_account(Leaving::SignedOut).unwrap();
+        let added = next(&phone);
+        change(&phone, |c| c.tasks.push(Task { project_id: Some(home), ..task(added, "Added after sign-out") }));
+        let ours = ["Added after sign-out", "Inbox thing EDITED OFFLINE", "Renew passport EDITED OFFLINE"];
+
+        // Geart signs in on the same phone: nothing is sent, he is asked.
+        let held = as_app(&phone, &db, &geart, false).await.unwrap_err();
+        assert_eq!((held.account.id.as_deref(), held.unsent), (Some("1001"), 3));
+        assert_eq!(titles(&phone), ours);
+        assert!(web(&db, &geart).await.is_empty());
+        assert_eq!(web(&db, &julius).await, ["Inbox thing", "Renew passport"]);
+
+        // Julius signs back in: all of it reaches his account.
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ours);
+        assert!(phone.outbox().unwrap().rows.is_empty());
+
+        // Signed out again, Geart is told the tasks are Julius's and takes
+        // them off the phone: his account gets none of them.
+        phone.leave_account(Leaving::SignedOut).unwrap();
+        let held = as_app(&phone, &db, &geart, false).await.unwrap_err();
+        assert_eq!((held.rows, held.unsent), (4, 0));
+        as_app(&phone, &db, &geart, true).await.unwrap();
+        assert!(titles(&phone).is_empty());
+        assert!(web(&db, &geart).await.is_empty());
+        assert_eq!(web(&db, &julius).await, ours);
+    }
+
+    // Audit F3: a row the server would not take was counted as sent, so it
+    // was never sent again. It now stays unsent until the right account
+    // takes it, and keeps its space when edited in the Inbox.
+    #[tokio::test]
+    async fn a_row_the_server_would_not_take_is_still_unsent() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let phone = device();
+        let id = next(&phone);
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing")));
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        let id = phone.state(TODAY).unwrap().tasks[0].id;
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing EDITED")));
+        let space = phone.state(TODAY).unwrap().tasks[0].space_id;
+        assert_eq!(space, Some(julius.personal));
+        // Another account on this file: held, so still unsent.
+        assert!(as_app(&phone, &db, &geart, false).await.is_err());
+        assert_eq!(phone.outbox().unwrap().rows.tasks.len(), 1);
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ["Inbox thing EDITED"]);
+        assert!(web(&db, &geart).await.is_empty());
+
+        // An app from before this change sends to whoever signed in. The
+        // server names the row it refused, and a device on this version
+        // sends it again rather than count it as sent.
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing EDITED TWICE")));
+        let out = phone.outbox().unwrap();
+        let reply = db.exchange(&geart, &out).await.unwrap();
+        assert_eq!(reply.refused, vec![Refused { kind: "task".into(), id }]);
+        phone.inbox(&Reply { spaces: None, ..reply }, out.upto).unwrap();
+        assert_eq!(phone.outbox().unwrap().rows.tasks.len(), 1);
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ["Inbox thing EDITED TWICE"]);
+    }
+
+    // Audit F2: signing out, or deleting the account, left the workspace's
+    // tasks and its member list (names, emails) on the device.
+    #[tokio::test]
+    async fn leaving_takes_the_workspace_off_the_device_and_keeps_one_s_own() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let space = hop(&db, &julius, &geart).await;
+        let mac = device();
+        let launch = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
+            c.tasks.push(Task { project_id: Some(launch), due: Some(TODAY.into()), ..task(launch + 1, "Julius's private-to-Hop task") });
+        });
+        as_app(&mac, &db, &julius, false).await.unwrap();
+        db.move_project(&julius, launch, space).await.unwrap();
+        for deleted in [false, true] {
+            let phone = device();
+            let own = next(&phone);
+            change(&phone, |c| c.tasks.push(task(own, "Geart's own")));
+            as_app(&phone, &db, &geart, false).await.unwrap();
+            let hop_task = phone.state(TODAY).unwrap().tasks.into_iter().find(|t| t.space_id == Some(space)).unwrap().id;
+            change(&phone, |c| c.assign.push(Assign { task_id: hop_task, account_id: geart.id.clone(), on: true }));
+            assert!(phone.state(TODAY).unwrap().team.is_some());
+
+            if deleted {
+                db.delete_account(&geart).await.unwrap();
+            }
+            phone.leave_account(if deleted { Leaving::Deleted } else { Leaving::SignedOut }).unwrap();
+            let state = phone.state(TODAY).unwrap();
+            // Each phone added one; the second has the first's too.
+            let mine = if deleted { vec!["Geart's own", "Geart's own"] } else { vec!["Geart's own"] };
+            assert_eq!(state.tasks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), mine, "deleted: {deleted}");
+            assert!(state.projects.is_empty() && state.team.is_none());
+            assert!(state.tasks.iter().all(|t| t.assignees.is_empty()));
+            let file = phone.export().unwrap();
+            assert!(file.rows.assignees.is_empty());
+            assert!(!serde_json::to_string(&file.rows).unwrap().contains("hop.dev"));
+            if deleted {
+                // What is left is plain local data: the next account to sign
+                // in gets it, as at any first sign-in.
+                let ana = db.me("1003", "ana@hop.dev", "Ana", "").await.unwrap();
+                as_app(&phone, &db, &ana, false).await.unwrap();
+                assert_eq!(web(&db, &ana).await, mine);
+            }
+        }
+        // The workspace itself is untouched for those still in it.
+        assert_eq!(web(&db, &julius).await, ["Julius's private-to-Hop task"]);
+    }
+
+    /// What the app does to its file when a round is answered 401 (the
+    /// session ran out or was ended) and the window loads again signed out.
+    fn session_ended(d: &Store) {
+        d.mark_leaving(Some(Leaving::Ended)).unwrap();
+        d.finish_leaving().unwrap();
+    }
+
+    /// A window that is not signed in loads: the "done next" preview app on
+    /// the real tasks file, say.
+    fn plain_load(d: &Store) {
+        assert_eq!(d.finish_leaving().unwrap(), None);
+    }
+
+    /// Geart's phone in Hop, with Julius's project Launch and two of its tasks.
+    async fn geart_in_hop(db: &Db) -> (Me, Me, i64, Store) {
+        let (julius, geart) = people(db).await;
+        let space = hop(db, &julius, &geart).await;
+        let mac = device();
+        let launch = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
+            c.tasks.push(Task { project_id: Some(launch), ..task(launch + 1, "Ship the site") });
+            c.tasks.push(Task { project_id: Some(launch), ..task(launch + 2, "Write the post") });
+        });
+        as_app(&mac, db, &julius, false).await.unwrap();
+        db.move_project(&julius, launch, space).await.unwrap();
+        let phone = device();
+        as_app(&phone, db, &geart, false).await.unwrap();
+        (julius, geart, space, phone)
+    }
+
+    // Review of #112, 1: a session that runs out (tokens last 30 days) must
+    // not take unsent workspace edits with it. What was already sent goes.
+    #[tokio::test]
+    async fn a_session_that_ended_keeps_unsent_workspace_edits() {
+        let db = testing::db().await;
+        let (julius, geart, space, phone) = geart_in_hop(&db).await;
+        let state = phone.state(TODAY).unwrap();
+        let ship = state.tasks.iter().find(|t| t.title == "Ship the site").unwrap().clone();
+        let added = next(&phone);
+        change(&phone, |c| {
+            c.tasks.push(Task { title: "Ship the site EDITED OFFLINE".into(), ..ship.clone() });
+            c.tasks.push(Task { project_id: ship.project_id, ..task(added, "Added offline") });
+        });
+        session_ended(&phone);
+        assert_eq!(titles(&phone), ["Added offline", "Ship the site EDITED OFFLINE"]);
+        assert!(phone.state(TODAY).unwrap().team.is_none());
+        // Signed in again: both reach Hop.
+        as_app(&phone, &db, &geart, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ["Added offline", "Ship the site EDITED OFFLINE", "Write the post"]);
+        assert!(phone.state(TODAY).unwrap().tasks.iter().all(|t| t.space_id == Some(space)));
+    }
+
+    // Review of #112, 1: a window that is not signed in, loading, changes
+    // nothing ("done next" runs on the real file and is never signed in).
+    #[tokio::test]
+    async fn a_window_that_is_not_signed_in_changes_nothing_when_it_loads() {
+        let db = testing::db().await;
+        let (_, _, _, phone) = geart_in_hop(&db).await;
+        let ship = phone.state(TODAY).unwrap().tasks.into_iter().find(|t| t.title == "Ship the site").unwrap();
+        change(&phone, |c| c.tasks.push(Task { title: "Ship the site, edited".into(), ..ship }));
+        let before = phone.state(TODAY).unwrap();
+        plain_load(&phone);
+        let after = phone.state(TODAY).unwrap();
+        assert_eq!((after.rev, after.tasks.len(), after.team.is_some()), (before.rev, before.tasks.len(), true));
+        assert_eq!(phone.outbox().unwrap().rows.tasks.len(), 1);
+    }
+
+    // Review of #112, 2: an account deleted elsewhere and made again with the
+    // same login has the same id and a new space. The phone's own tasks must
+    // not be dropped for being in the old one.
+    #[tokio::test]
+    async fn an_account_made_again_keeps_the_phone_s_own_tasks() {
+        let db = testing::db().await;
+        let (_, geart) = people(&db).await;
+        let phone = device();
+        let own = next(&phone);
+        change(&phone, |c| c.tasks.push(task(own, "Geart's own")));
+        as_app(&phone, &db, &geart, false).await.unwrap();
+        db.delete_account(&geart).await.unwrap();
+        session_ended(&phone);
+        let again = db.me("1002", "geart@hop.dev", "Geart", "").await.unwrap();
+        assert_ne!(again.personal, geart.personal);
+        as_app(&phone, &db, &again, false).await.unwrap();
+        assert_eq!(titles(&phone), ["Geart's own"]);
+        as_app(&phone, &db, &again, false).await.unwrap();
+        assert_eq!(web(&db, &again).await, ["Geart's own"]);
+        assert!(phone.outbox().unwrap().rows.is_empty());
+    }
+
+    // Review of #112, 3: a row refused again after being sent again is not
+    // sent (or counted) for ever; it stays on the device as local data.
+    #[tokio::test]
+    async fn a_row_refused_twice_stays_on_the_device_and_is_not_sent_again() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let phone = device();
+        let id = next(&phone);
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing")));
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        let id = phone.state(TODAY).unwrap().tasks[0].id;
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing EDITED")));
+        // Sent, as an app from before this change would, to an account that cannot take it.
+        for _ in 0..2 {
+            let out = phone.outbox().unwrap();
+            let reply = db.exchange(&geart, &out).await.unwrap();
+            phone.inbox(&Reply { spaces: None, ..reply }, out.upto).unwrap();
+        }
+        assert!(phone.outbox().unwrap().rows.is_empty(), "still sent: {:?}", phone.outbox().unwrap().rows.tasks);
+        assert_eq!(titles(&phone), ["Inbox thing EDITED"]);
+        assert_eq!(phone.state(TODAY).unwrap().tasks[0].space_id, None);
     }
 }

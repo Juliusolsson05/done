@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod account;
 mod replica;
-pub use replica::{Assignee, Cursor, Exported, Gone, Outbox, Reply, Rows, Seqs, Stamped};
+pub use account::{Account, Held, Leaving, Left};
+pub use replica::{Assignee, Cursor, Exported, Gone, Outbox, Refused, Reply, Rows, Seqs, Stamped};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -740,6 +742,9 @@ impl Store {
             }
             // Its space follows its project, here as on the server, so the
             // window can show it in the right place before the next sync.
+            // With neither project nor parent it stays where it is: a task
+            // the server placed must not lose its space to an edit, or the
+            // edit could never be placed (audit F1).
             tx.execute(
                 "INSERT INTO task (id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, goal_by, space_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
@@ -748,7 +753,7 @@ impl Store {
                    project_id = excluded.project_id, start = excluded.start, due = excluded.due,
                    priority = excluded.priority, status = excluded.status, done_day = excluded.done_day,
                    goal_day = excluded.goal_day, parent_id = excluded.parent_id, goal_by = excluded.goal_by,
-                   space_id = excluded.space_id",
+                   space_id = coalesce(excluded.space_id, task.space_id)",
                 params![t.id, t.title.trim(), t.notes, t.project_id, t.start, t.due, t.priority, t.status, done_day, t.goal_day, t.parent_id, t.goal_by],
             )?;
         }

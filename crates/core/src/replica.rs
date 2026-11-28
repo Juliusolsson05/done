@@ -39,7 +39,7 @@ const NOW: &str = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 /// The tables that travel and the columns that are their content. A change to
 /// one of these columns is a change worth sending; `seq` and `changed` are
 /// bookkeeping and writing them must not count as one.
-const TABLES: [(&str, &str); 4] = [
+pub(crate) const TABLES: [(&str, &str); 4] = [
     ("project", "name, color, space_id"),
     ("task", "title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by"),
     ("note", "text, updated_at, project_id, folder, space_id"),
@@ -243,6 +243,20 @@ pub struct Outbox {
     /// before workspaces; the server then reads `pulled` as the person's own space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursors: Option<Vec<Cursor>>,
+    /// Set instead of rows when this file holds another account's tasks: the
+    /// app sends nothing and asks the person first (see account.rs). Never
+    /// sent to the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<crate::Held>,
+}
+
+/// A row the server would not take from this device, because it is in (or
+/// points into) a space the writer is not in. The device sends it again
+/// rather than count it as sent.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Refused {
+    pub kind: String,
+    pub id: i64,
 }
 
 /// What the server answers: what it wrote since `pulled`, and its counter now.
@@ -260,13 +274,17 @@ pub struct Reply {
     /// kept whole by the device and shown by the window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<Value>,
+    /// The device's rows the server refused (see `Refused`). Absent from a
+    /// server from before it, and ignored by an app from before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<Refused>,
 }
 
-fn meta(conn: &Connection, key: &str) -> Result<i64, Error> {
+pub(crate) fn meta(conn: &Connection, key: &str) -> Result<i64, Error> {
     Ok(conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))?)
 }
 
-fn set_meta(conn: &Connection, key: &str, value: i64) -> Result<(), Error> {
+pub(crate) fn set_meta(conn: &Connection, key: &str, value: i64) -> Result<(), Error> {
     conn.execute("UPDATE meta SET value = ?2 WHERE key = ?1", params![key, value])?;
     Ok(())
 }
@@ -622,6 +640,81 @@ fn take_spaces(tx: &Transaction, spaces: &[Cursor]) -> Result<usize, Error> {
     Ok(dropped)
 }
 
+/// What to send, inside a transaction of the caller's (see `Store::outbox`).
+pub(crate) fn outbox_in(tx: &Transaction) -> Result<Outbox, Error> {
+    let renumbered = rekey(tx)?;
+    if renumbered > 0 {
+        tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
+    }
+    let pushed = meta(tx, "pushed")?;
+    let cursors = tx
+        .prepare("SELECT space_id, pulled FROM space_cursor ORDER BY space_id")?
+        .query_map([], |r| Ok(Cursor { space: r.get(0)?, at: r.get(1)? }))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Outbox { pulled: meta(tx, "pulled")?, upto: meta(tx, "seq")?, rows: rows_since(tx, pushed)?, renumbered, cursors: Some(cursors), held: None })
+}
+
+/// Takes in a reply, inside a transaction of the caller's (see `Store::inbox`).
+pub(crate) fn inbox_in(tx: &Transaction, reply: &Reply, upto: i64) -> Result<bool, Error> {
+    let mut applied = merge(tx, &reply.rows, true)?;
+    // Everything written up to `upto` reached the server. Anything
+    // written since (while the request was out) has a higher counter and
+    // goes next time.
+    if upto > meta(tx, "pushed")? {
+        set_meta(tx, "pushed", upto)?;
+    }
+    set_meta(tx, "pulled", reply.upto)?;
+    if let Some(spaces) = &reply.spaces {
+        applied += take_spaces(tx, spaces)?;
+    }
+    // Reached the server is not taken: what it refused, and this device
+    // still has (a space it left is dropped above), is unsent again and goes
+    // once more next round. Refused again, it is kept here only: no longer
+    // sent, nor counted as unsent, and out of any space, so it stays in the
+    // list as this device's own (an edit of it later tries once more).
+    let before: Vec<Refused> =
+        tx.query_row("SELECT value FROM kv WHERE key = 'refused'", [], |r| r.get::<_, String>(0)).optional()?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    let mut again = Vec::new();
+    for r in &reply.refused {
+        if !TABLES.iter().any(|(t, _)| *t == r.kind) {
+            continue;
+        }
+        let here: bool = tx.query_row(&format!("SELECT EXISTS (SELECT 1 FROM {} WHERE id = ?1 AND seq <= ?2)", r.kind), params![r.id, upto], |row| row.get(0))?;
+        if !here {
+            continue;
+        }
+        if before.contains(r) {
+            if r.kind != "entry" {
+                tx.execute("UPDATE meta SET value = 1 WHERE key IN ('quiet', 'applying')", [])?;
+                applied += tx.execute(&format!("UPDATE {} SET space_id = NULL WHERE id = ?1 AND space_id IS NOT NULL", r.kind), [r.id])?;
+                tx.execute("UPDATE meta SET value = 0 WHERE key IN ('quiet', 'applying')", [])?;
+            }
+        } else {
+            tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'seq'", [])?;
+            tx.execute(&format!("UPDATE {} SET seq = (SELECT value FROM meta WHERE key = 'seq') WHERE id = ?1", r.kind), [r.id])?;
+            again.push(r.clone());
+        }
+    }
+    if again.is_empty() {
+        tx.execute("DELETE FROM kv WHERE key = 'refused'", [])?;
+    } else {
+        let text = serde_json::to_string(&again).map_err(|e| Error::Invalid(e.to_string()))?;
+        tx.execute("INSERT INTO kv (key, value) VALUES ('refused', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
+    }
+    if let Some(team) = &reply.team {
+        let text = team.to_string();
+        let before: Option<String> = tx.query_row("SELECT value FROM kv WHERE key = 'team'", [], |r| r.get(0)).optional()?;
+        if before.as_deref() != Some(text.as_str()) {
+            tx.execute("INSERT INTO kv (key, value) VALUES ('team', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
+            applied += 1;
+        }
+    }
+    if applied > 0 {
+        tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
+    }
+    Ok(applied > 0)
+}
+
 /// The `seq` of each row in an `Exported`, in the same order.
 #[derive(Default, Debug)]
 pub struct Seqs {
@@ -664,16 +757,7 @@ impl Store {
     pub fn outbox(&self) -> Result<Outbox, Error> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let renumbered = rekey(&tx)?;
-        if renumbered > 0 {
-            tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
-        }
-        let pushed = meta(&tx, "pushed")?;
-        let cursors = tx
-            .prepare("SELECT space_id, pulled FROM space_cursor ORDER BY space_id")?
-            .query_map([], |r| Ok(Cursor { space: r.get(0)?, at: r.get(1)? }))?
-            .collect::<Result<Vec<_>, _>>()?;
-        let out = Outbox { pulled: meta(&tx, "pulled")?, upto: meta(&tx, "seq")?, rows: rows_since(&tx, pushed)?, renumbered, cursors: Some(cursors) };
+        let out = outbox_in(&tx)?;
         tx.commit()?;
         Ok(out)
     }
@@ -683,32 +767,11 @@ impl Store {
     pub fn inbox(&self, reply: &Reply, upto: i64) -> Result<bool, Error> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let applied = merge(&tx, &reply.rows, true)?;
-        // Everything written up to `upto` reached the server. Anything
-        // written since (while the request was out) has a higher counter and
-        // goes next time.
-        if upto > meta(&tx, "pushed")? {
-            set_meta(&tx, "pushed", upto)?;
-        }
-        set_meta(&tx, "pulled", reply.upto)?;
-        let mut applied = applied;
-        if let Some(spaces) = &reply.spaces {
-            applied += take_spaces(&tx, spaces)?;
-        }
-        if let Some(team) = &reply.team {
-            let text = team.to_string();
-            let before: Option<String> = tx.query_row("SELECT value FROM kv WHERE key = 'team'", [], |r| r.get(0)).optional()?;
-            if before.as_deref() != Some(text.as_str()) {
-                tx.execute("INSERT INTO kv (key, value) VALUES ('team', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
-                applied += 1;
-            }
-        }
-        if applied > 0 {
-            tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
-        }
+        let changed = inbox_in(&tx, reply, upto)?;
         tx.commit().map_err(|e| Error::Db(e))?;
-        Ok(applied > 0)
+        Ok(changed)
     }
+
 
     /// On the server: takes in a device's rows and answers with everything
     /// written here since the device last asked (its own rows included; it
@@ -720,7 +783,7 @@ impl Store {
             // Windows of the web app open on this account load the new rows.
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'rev'", [])?;
         }
-        let reply = Reply { upto: meta(&tx, "seq")?, rows: rows_since(&tx, outbox.pulled)?, spaces: None, team: None };
+        let reply = Reply { upto: meta(&tx, "seq")?, rows: rows_since(&tx, outbox.pulled)?, spaces: None, team: None, refused: Vec::new() };
         tx.commit()?;
         Ok(reply)
     }

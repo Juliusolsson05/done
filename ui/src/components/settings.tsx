@@ -10,7 +10,9 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, WINDOWS_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, WINDOWS_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, waitingHere } from '@/lib/backend'
+import { deletionWarning, signOutQuestion, waitingMessage, type Held } from '@/lib/account-switch'
+import { deleteAccountHere, prepareToLeave, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -97,15 +99,27 @@ function AccountPane() {
   // Deleting takes two clicks. A dialog would be the usual way, but this is
   // the one place it would be used, and the second button says all it would.
   const [sure, setSure] = useState(false)
+  // Changes not sent when signing out was asked, and a sign-out under way.
+  const [unsent, setUnsent] = useState<number | null>(null)
+  const [leaving, setLeaving] = useState(false)
+  // Changes waiting for an account this app was signed out of (a session
+  // that ended, say), and those not sent when deleting was asked.
+  const [waiting, setWaiting] = useState<Held | null>(null)
+  const [deleteUnsent, setDeleteUnsent] = useState(0)
+  useEffect(() => {
+    if (!account) void waitingHere().then(setWaiting)
+  }, [account])
   if (!account) {
     // An app that could sign in and has not.
     if (!canSignIn) return null
+    const waits = waitingMessage(waiting)
     return (
       <Pane title="Account">
         <p className="text-muted-foreground">
           Your tasks are kept on this device. Sign in to have the same tasks here, at thedone.app and on your phone. Everything on this device
           goes up to your account, and it keeps working without a connection.
         </p>
+        {waits && <p className="font-medium">{waits}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {/* Apple's sign-in first and no smaller than Google's: the App
               Store's rule for apps that offer both (guideline 4.8), and
@@ -123,7 +137,16 @@ function AccountPane() {
       </Pane>
     )
   }
-  const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  const remove = () => void deleteAccountHere().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  // Signing out tries one last sync; if changes are still unsent, the
+  // person is asked (lib/store.ts signOutChecked).
+  const leave = (force: boolean) => {
+    setLeaving(true)
+    void signOutChecked(force)
+      .then((n) => setUnsent(n > 0 ? n : null))
+      .catch(() => say('Signing out did not work. Try again.'))
+      .finally(() => setLeaving(false))
+  }
   return (
     <Pane title="Account">
       {/* Your Google picture, as the people in your workspaces see it. */}
@@ -151,8 +174,8 @@ function AccountPane() {
             Verify Apple Account
           </Button>
         )}
-        <Button variant="outline" size="sm" onClick={() => void signOut()}>
-          Sign out
+        <Button variant="outline" size="sm" disabled={leaving} onClick={() => leave(false)}>
+          {leaving ? 'Signing out…' : 'Sign out'}
         </Button>
         {sure ? (
           <>
@@ -164,14 +187,37 @@ function AccountPane() {
             </Button>
           </>
         ) : (
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setSure(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => {
+              setSure(true)
+              // One last round, and what is still unsent is said below.
+              void prepareToLeave().then(setDeleteUnsent)
+            }}
+          >
             Delete my account
           </Button>
         )}
       </div>
+      {unsent !== null && (
+        <div className="space-y-2 text-sm">
+          <p className="text-muted-foreground">{signOutQuestion(unsent)}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="destructive" size="sm" disabled={leaving} onClick={() => leave(true)}>
+              Sign out anyway
+            </Button>
+            <Button variant="ghost" size="sm" disabled={leaving} onClick={() => setUnsent(null)}>
+              Stay signed in
+            </Button>
+          </div>
+        </div>
+      )}
       {sure && (
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>Your personal space and feedback will be deleted. Other members keep shared workspaces. This cannot be undone.</p>
+          {deletionWarning(deleteUnsent) && <p className="font-medium text-foreground">{deletionWarning(deleteUnsent)}</p>}
           {isDesktop && <p>Local copies stay on your devices.</p>}
           {account.id?.startsWith('apple') && (
             <p>Also disconnect done in your Apple Account under Sign in with Apple.{' '}
