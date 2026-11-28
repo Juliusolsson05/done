@@ -1073,6 +1073,7 @@ mod tests {
         s.sync(Change { rev: 0, tasks: vec![task(1, "Call the bank")], ..Default::default() }).unwrap();
         let copy = dir.join("copy.db");
         s.snapshot(&copy).unwrap();
+        drop(s);
         let again = Store::open(&copy).unwrap().state("2026-11-18").unwrap();
         assert_eq!(again.rev, 1);
         assert_eq!(again.tasks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), vec!["Call the bank"]);

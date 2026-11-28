@@ -1,6 +1,7 @@
 // The tasks live in one SQLite file, reached through the desktop app's
 // commands or the web app's /api. Which of the two is decided here and
 // nowhere else; the rest of the interface cannot tell them apart.
+import { toast } from 'sonner'
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
@@ -306,8 +307,12 @@ export const onSignedIn = (done: () => void): (() => void) => {
 export const BROWSER_INFO: Info = { version: null, mcpCommand: windowsDevice ? '' : '/Applications/done.app/Contents/MacOS/done', updateReady: null }
 export const loadInfo = (): Promise<Info> => (tauri ? tauri.core.invoke<Info>('info') : Promise.resolve(BROWSER_INFO))
 
-export const restart = (): void => {
-  void tauri?.core.invoke('restart')
+export const restart = async (): Promise<void> => {
+  try {
+    await tauri?.core.invoke('restart')
+  } catch (error) {
+    toast('Couldn’t install the update', { id: 'said', description: String(error) })
+  }
 }
 
 // Text size. Only the desktop app needs this: a browser has its own zoom on
