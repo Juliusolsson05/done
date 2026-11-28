@@ -122,6 +122,7 @@ targets:
       - sdk: ActivityKit.framework
         weak: true
       - sdk: CoreGraphics.framework
+      - sdk: libsqlite3.tbd
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework

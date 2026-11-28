@@ -27,8 +27,10 @@
 		AB8A00B797FFA39BAA9D971C /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7B5AF2469CE037F151CECF2E /* QuartzCore.framework */; };
 		B401EDBDBF818B6CBDA633A1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4D8DE9179E9A257A61DCCF6F /* Assets.xcassets */; };
 		C563B0B7C20306C65C9A7102 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = ABCD7FF19B3C6F2AFD27EB3A /* SwiftUI.framework */; };
+		D2A7AA6344B6F91A999B8A63 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BE7EAB21323BBBFAC0CC388 /* libsqlite3.tbd */; };
 		D8A7253ED928CFBDC760CC5B /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 40090A73884EE5FDE66DE995 /* ActivityKit.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		DC7622B98B29B65372CD4BE5 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 57E014AD4C6A613D4925DEEC /* libapp.a */; };
+		F2960AC247E5DE08F9AFFF4B /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 0E1DA58E62A07D1C32A33EC1 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +59,7 @@
 
 /* Begin PBXFileReference section */
 		033209D9A0BF1DF11018FD87 /* DoneWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneWidgets.swift; sourceTree = "<group>"; };
+		0E1DA58E62A07D1C32A33EC1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = "done-widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18A48479A76ACE8A28D57A47 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		21628AF0E753960D3449FAF5 /* done-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "done-app_iOS.entitlements"; sourceTree = "<group>"; };
@@ -73,6 +76,7 @@
 		778140358B750F7D65AD7742 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		7A67572AD166EAE042F9FC3D /* DoneNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneNative.swift; sourceTree = "<group>"; };
 		7B5AF2469CE037F151CECF2E /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		7BE7EAB21323BBBFAC0CC388 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		7F3D6FA5AD0C2A62D8C7AD16 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		8158583E8FC76035673C6808 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9A6C632E7716C947BBA93DC0 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -94,6 +98,7 @@
 				3800C94D89E8C5D513B77094 /* WidgetKit.framework in Frameworks */,
 				D8A7253ED928CFBDC760CC5B /* ActivityKit.framework in Frameworks */,
 				5A8B940D652003C523699C9C /* CoreGraphics.framework in Frameworks */,
+				D2A7AA6344B6F91A999B8A63 /* libsqlite3.tbd in Frameworks */,
 				7D000DB4CAE26E07613C0837 /* Metal.framework in Frameworks */,
 				70C8649522D7736390D02C07 /* MetalKit.framework in Frameworks */,
 				AB8A00B797FFA39BAA9D971C /* QuartzCore.framework in Frameworks */,
@@ -158,6 +163,7 @@
 			children = (
 				21628AF0E753960D3449FAF5 /* done-app_iOS.entitlements */,
 				3C967CB2903B38B6CF28E8AE /* Info.plist */,
+				0E1DA58E62A07D1C32A33EC1 /* PrivacyInfo.xcprivacy */,
 			);
 			path = "done-app_iOS";
 			sourceTree = "<group>";
@@ -203,6 +209,7 @@
 				40090A73884EE5FDE66DE995 /* ActivityKit.framework */,
 				56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */,
 				57E014AD4C6A613D4925DEEC /* libapp.a */,
+				7BE7EAB21323BBBFAC0CC388 /* libsqlite3.tbd */,
 				18A48479A76ACE8A28D57A47 /* Metal.framework */,
 				4A686B5647A23F372E043B9E /* MetalKit.framework */,
 				7B5AF2469CE037F151CECF2E /* QuartzCore.framework */,
@@ -334,6 +341,7 @@
 			files = (
 				B401EDBDBF818B6CBDA633A1 /* Assets.xcassets in Resources */,
 				AA92D656445D4780826D399C /* LaunchScreen.storyboard in Resources */,
+				F2960AC247E5DE08F9AFFF4B /* PrivacyInfo.xcprivacy in Resources */,
 				1762AFF8ABC2A9ED479B0076 /* assets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
