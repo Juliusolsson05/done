@@ -258,35 +258,37 @@ export function ListView() {
         </div>
       )}
       {sprint && (
-        <section aria-label="Sprint" className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/30 px-3 py-2 sm:flex-nowrap">
+        <section aria-label="Sprint" className="mb-4 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-muted/30 px-3 py-2 sm:flex sm:gap-x-4">
           <div className="flex items-center gap-1.5 text-sm font-medium">
             {sprint.completed ? <CheckIcon className="size-4 text-primary" /> : <CalendarDaysIcon className="size-4 text-primary" />}
             {sprint.completed ? 'Sprint complete' : 'Sprint'}
           </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            Deadline
-            <Input
-              type="date"
-              min="0001-01-01"
-              max="9999-12-31"
-              value={sprint.deadline ?? ''}
-              onChange={(event) => {
-                if (event.target.validity.valid) changeSprint({ ...sprint, deadline: event.target.value || null })
-              }}
-              className="h-8 w-auto min-w-32 text-foreground pointer-coarse:h-11"
-            />
-          </label>
-          {sprint.deadline && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Clear deadline"
-              onClick={() => changeSprint({ ...sprint, deadline: null })}
-              className="-ml-2 text-muted-foreground pointer-coarse:size-11"
-            >
-              <XIcon />
-            </Button>
-          )}
+          <div className="order-last col-span-2 flex min-w-0 items-center gap-1 sm:order-none">
+            <label className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              Deadline
+              <Input
+                type="date"
+                min="0001-01-01"
+                max="9999-12-31"
+                value={sprint.deadline ?? ''}
+                onChange={(event) => {
+                  if (event.target.validity.valid) changeSprint({ ...sprint, deadline: event.target.value || null })
+                }}
+                className="h-8 w-auto min-w-0 text-foreground pointer-coarse:h-11"
+              />
+            </label>
+            {sprint.deadline && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Clear deadline"
+                onClick={() => changeSprint({ ...sprint, deadline: null })}
+                className="text-muted-foreground pointer-coarse:size-11"
+              >
+                <XIcon />
+              </Button>
+            )}
+          </div>
           <Button
             variant={sprint.completed ? 'ghost' : 'outline'}
             size="sm"
