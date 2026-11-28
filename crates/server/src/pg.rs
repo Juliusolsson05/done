@@ -89,6 +89,9 @@ ALTER TABLE account ADD COLUMN IF NOT EXISTS session_generation BIGINT;
 CREATE SEQUENCE IF NOT EXISTS account_generation_seq;
 ALTER TABLE account ALTER COLUMN session_generation SET DEFAULT nextval('account_generation_seq');
 CREATE INDEX IF NOT EXISTS account_email ON account (lower(email));
+CREATE TABLE IF NOT EXISTS apple_refresh_grant (
+  account_id TEXT PRIMARY KEY REFERENCES account (id) ON DELETE CASCADE,
+  sealed BYTEA NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES account (id) ON DELETE CASCADE,
@@ -874,6 +877,12 @@ impl Db {
 
     /// Provision a personal space only when the identity provider has authenticated the owner.
     pub async fn me(&self, id: &str, email: &str, name: &str, picture: &str) -> Result<Me, Fail> {
+        self.me_with_apple_grant(id, email, name, picture, None).await
+    }
+
+    /// The same, keeping Apple's newest refresh grant for the account (sealed,
+    /// see `auth::apple_grants`) in place of any it had: one per account.
+    pub(crate) async fn me_with_apple_grant(&self, id: &str, email: &str, name: &str, picture: &str, grant: Option<&[u8]>) -> Result<Me, Fail> {
         let email = email.trim().to_lowercase();
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
@@ -884,6 +893,10 @@ impl Db {
              RETURNING session_generation",
             &[&id, &email, &name, &picture, &now],
         ).await?.get(0);
+        if let Some(grant) = grant {
+            tx.execute("INSERT INTO apple_refresh_grant (account_id, sealed) VALUES ($1, $2) ON CONFLICT (account_id) DO UPDATE SET sealed = EXCLUDED.sealed",
+                &[&id, &grant]).await?;
+        }
         let personal = self.personal_in(&tx, id).await?;
         tx.commit().await?;
         Ok(Me { id: id.into(), email, personal, generation })
@@ -1510,6 +1523,18 @@ impl Db {
         Ok(())
     }
 
+    /// The account's kept Apple grant, if it has one, for the session asking:
+    /// not found once the account's sessions were ended (as `delete_account`).
+    pub async fn apple_grant(&self, me: &Me) -> Result<Option<Vec<u8>>, Fail> {
+        let client = self.pool.get().await?;
+        let row = client.query_opt(
+            "SELECT g.sealed FROM account a LEFT JOIN apple_refresh_grant g ON g.account_id = a.id
+             WHERE a.id = $1 AND a.session_generation IS NOT DISTINCT FROM $2",
+            &[&me.id, &me.generation],
+        ).await?.ok_or(Fail::NotFound)?;
+        Ok(row.get(0))
+    }
+
     /// Deletes the account: its own space and everything in it, its places
     /// in workspaces, and the workspaces it owns that nobody else is in. A
     /// workspace others are in passes to the member who joined first.
@@ -1829,6 +1854,18 @@ pub mod testing {
 
     pub async fn db() -> Db {
         Db::connect(&database().await).await.unwrap()
+    }
+
+    pub async fn stored_apple_grants(db: &Db, account: &str) -> Vec<Vec<u8>> {
+        db.pool.get().await.unwrap()
+            .query("SELECT sealed FROM apple_refresh_grant WHERE account_id = $1", &[&account]).await.unwrap()
+            .into_iter().map(|row| row.get(0)).collect()
+    }
+
+    /// What a stored grant looks like to a server whose key changed.
+    pub async fn garble_apple_grants(db: &Db, account: &str) {
+        db.pool.get().await.unwrap()
+            .execute("UPDATE apple_refresh_grant SET sealed = '\\x01deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'::bytea WHERE account_id = $1", &[&account]).await.unwrap();
     }
 }
 
