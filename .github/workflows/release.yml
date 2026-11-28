@@ -104,8 +104,11 @@ jobs:
           compression-level: 0
           retention-days: 2
 
+  # Runs when the Windows build failed too: the Mac files and their update
+  # entry are published as they always were. Without the Mac files nothing is.
   publish:
     needs: [plan, build]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -118,28 +121,33 @@ jobs:
           pattern: release-*
           path: assets
           merge-multiple: true
-      - name: Publish both downloads and their update feed
+      - name: Publish the downloads and their update feed
         working-directory: assets
         run: |
           tag="v$VERSION"
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
-          for file in done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig done-windows-x64-setup.exe done-windows-x64-setup.exe.sig; do
-            test -s "$file"
+          for file in done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig; do
+            test -s "$file" || { echo "::error::The Mac build is missing $file; nothing is published."; exit 1; }
           done
-          jq -n \
-            --arg version "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg macURL "$base/done.app.tar.gz" --arg macSig "$(cat done.app.tar.gz.sig)" \
-            --arg winURL "$base/done-windows-x64-setup.exe" --arg winSig "$(cat done-windows-x64-setup.exe.sig)" \
-            '{version: $version, pub_date: $date, platforms: {
-              "darwin-aarch64": {signature: $macSig, url: $macURL},
-              "windows-x86_64": {signature: $winSig, url: $winURL}
-            }}' > latest.json
-          # An interrupted upload can resume on its draft. The public feed
-          # changes only after both platforms' files have uploaded.
+          platforms=$(jq -n --arg sig "$(cat done.app.tar.gz.sig)" --arg url "$base/done.app.tar.gz" '{"darwin-aarch64": {signature: $sig, url: $url}}')
+          if [[ -s done-windows-x64-setup.exe && -s done-windows-x64-setup.exe.sig ]]; then
+            platforms=$(jq --arg sig "$(cat done-windows-x64-setup.exe.sig)" --arg url "$base/done-windows-x64-setup.exe" '. + {"windows-x86_64": {signature: $sig, url: $url}}' <<<"$platforms")
+          else
+            # No Windows entry in the feed: installed Windows apps stay on their
+            # version. The download link (releases/latest/download/...) keeps
+            # working with the last good installer, which updates itself later.
+            echo "::warning::The Windows build failed; publishing the Mac release without a Windows update."
+            rm -f done-windows-x64-setup.exe done-windows-x64-setup.exe.sig
+            gh release download -R "$GITHUB_REPOSITORY" --pattern done-windows-x64-setup.exe || echo "::warning::No earlier Windows installer to carry over."
+          fi
+          jq -n --arg version "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson platforms "$platforms" \
+            '{version: $version, pub_date: $date, platforms: $platforms}' > latest.json
+          # A draft until every file is up: the public feed (latest.json of the
+          # latest release) changes only when the whole release is published.
           draft=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)
           if [[ "$draft" == false ]]; then exit 0; fi
           if [[ "$draft" != true ]]; then
             gh release create "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "done $VERSION" --generate-notes --draft
           fi
           gh release upload "$tag" -R "$GITHUB_REPOSITORY" --clobber ./*
-          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false
+          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false --latest
