@@ -71,6 +71,20 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, Erro
     })?)
 }
 
+// Replace an outdated trigger atomically: another connection can write to this same file.
+fn ensure_trigger(conn: &Connection, name: &str, definition: String) -> Result<(), Error> {
+    let sql = format!("CREATE TRIGGER {name} {definition}");
+    let existing: Option<String> = conn
+        .query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1", [name], |r| r.get(0))
+        .optional()?;
+    if existing.as_deref() != Some(sql.as_str()) {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}; {sql};"))?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
 /// Adds what keeping in step needs to a file that lacks it. Rows already in
 /// the file count as written and not yet sent (`seq` 1, `pushed` 0), so the
 /// first time a device signs in, everything it has goes up.
@@ -99,71 +113,47 @@ pub(crate) fn prepare(conn: &Connection) -> Result<(), Error> {
                  ALTER TABLE {table} ADD COLUMN changed INTEGER NOT NULL DEFAULT 0;"
             ))?;
         }
-        // The trigger that counts an edit names the columns it watches, and
-        // that list grows (a note's folder came after its trigger). A file
-        // from an older version keeps the old trigger, which would not count
-        // a change to a new column, so it would never be sent. So it is made
-        // again when its list is not the current one: inside one transaction,
-        // so no other process (the MCP server, the web app) can write in a
-        // moment with no trigger at all.
-        let edited: Option<String> = conn
-            .query_row("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1", [format!("{table}_edited")], |r| r.get(0))
-            .optional()?;
-        if !edited.is_some_and(|sql| sql.contains(&format!("AFTER UPDATE OF {columns} ON {table}"))) {
-            let remade = conn.execute_batch(&format!(
-                "BEGIN IMMEDIATE;
-                 DROP TRIGGER IF EXISTS {table}_edited;
-                 CREATE TRIGGER {table}_edited AFTER UPDATE OF {columns} ON {table} BEGIN
+        conn.execute_batch(&format!("CREATE INDEX IF NOT EXISTS {table}_seq ON {table} (seq);"))?;
+        // Two changes to the same row can share a clock tick. Advance its
+        // stamp even then, including across deletion followed by an undo.
+        let buried = format!("coalesce((SELECT changed FROM tombstone WHERE kind = '{table}' AND id = NEW.id), 0)");
+        for (name, event, previous, cleanup) in [
+            ("edited", format!("UPDATE OF {columns}"), "OLD.changed", String::new()),
+            ("written", "INSERT".into(), buried.as_str(), format!("DELETE FROM tombstone WHERE kind = '{table}' AND id = NEW.id AND {applying} = 0;")),
+        ] {
+            ensure_trigger(conn, &format!("{table}_{name}"), format!(
+                "AFTER {event} ON {table} BEGIN
                    UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
                    UPDATE {table} SET
                      seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
-                     changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
+                     changed = CASE WHEN {applying} = 0 THEN max({NOW}, {previous} + 1) ELSE NEW.changed END
                    WHERE id = NEW.id;
-                 END;
-                 COMMIT;"
-            ));
-            if remade.is_err() {
-                // Nothing half done is left behind: the old trigger stays.
-                let _ = conn.execute_batch("ROLLBACK");
-            }
-            remade?;
+                   {cleanup}
+                 END"
+            ))?;
         }
-        conn.execute_batch(&format!(
-            "CREATE INDEX IF NOT EXISTS {table}_seq ON {table} (seq);
-             -- Written here: a new counter value, unless a device is taking in
-             -- the server's rows (quiet), which it must not send back; and now
-             -- as the time of the edit, unless the row came from elsewhere
-             -- (applying) with a time of its own.
-             CREATE TRIGGER IF NOT EXISTS {table}_written AFTER INSERT ON {table} BEGIN
-               UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
-               UPDATE {table} SET
-                 seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
-                 changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
-               WHERE id = NEW.id;
-               DELETE FROM tombstone WHERE kind = '{table}' AND id = NEW.id AND {applying} = 0;
-             END;
-             -- Deletions made while taking in rows from elsewhere write their
-             -- own tombstone, with the time they came with.
-             CREATE TRIGGER IF NOT EXISTS {table}_deleted AFTER DELETE ON {table} WHEN {applying} = 0 BEGIN
+        ensure_trigger(conn, &format!("{table}_deleted"), format!(
+            "AFTER DELETE ON {table} WHEN {applying} = 0 BEGIN
                UPDATE meta SET value = value + 1 WHERE key = 'seq';
-               INSERT OR REPLACE INTO tombstone (kind, id, changed, seq) VALUES ('{table}', OLD.id, {NOW}, {counter});
-             END;"
+               INSERT OR REPLACE INTO tombstone (kind, id, changed, seq) VALUES ('{table}', OLD.id, max({NOW}, OLD.changed + 1), {counter});
+             END"
         ))?;
     }
-    // Who is on a task: a row per person, never deleted, only switched off,
-    // so taking someone off travels like any other edit.
-    let assignee = format!(
-        "UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
-         UPDATE task_assignee SET
-           seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
-           changed = CASE WHEN {applying} = 0 THEN {NOW} ELSE NEW.changed END
-         WHERE task_id = NEW.task_id AND account_id = NEW.account_id;"
-    );
-    conn.execute_batch(&format!(
-        "CREATE INDEX IF NOT EXISTS task_assignee_seq ON task_assignee (seq);
-         CREATE TRIGGER IF NOT EXISTS task_assignee_written AFTER INSERT ON task_assignee BEGIN {assignee} END;
-         CREATE TRIGGER IF NOT EXISTS task_assignee_edited AFTER UPDATE OF is_on ON task_assignee BEGIN {assignee} END;"
-    ))?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS task_assignee_seq ON task_assignee (seq);")?;
+    for (name, event, stamp) in [
+        ("task_assignee_written", "INSERT", NOW.to_string()),
+        ("task_assignee_edited", "UPDATE OF is_on", format!("max({NOW}, OLD.changed + 1)")),
+    ] {
+        ensure_trigger(conn, name, format!(
+            "AFTER {event} ON task_assignee BEGIN
+               UPDATE meta SET value = value + 1 WHERE key = 'seq' AND {quiet} = 0;
+               UPDATE task_assignee SET
+                 seq = CASE WHEN {quiet} = 0 THEN {counter} ELSE NEW.seq END,
+                 changed = CASE WHEN {applying} = 0 THEN {stamp} ELSE NEW.changed END
+               WHERE task_id = NEW.task_id AND account_id = NEW.account_id;
+             END"
+        ))?;
+    }
     Ok(())
 }
 
@@ -1060,6 +1050,8 @@ mod tests {
     fn an_edit_made_while_a_round_is_out_is_sent_next_time() {
         let (mac, cloud) = (store(), store());
         add(&mac, vec![task(1, "First")]);
+        // A coarse or adjusted clock cannot promise a later millisecond for the next write.
+        mac.conn.lock().unwrap().execute("UPDATE task SET changed = 4102444800000", []).unwrap();
         let out = mac.outbox().unwrap();
         let reply = cloud.exchange(&out).unwrap();
         // Written after the outbox was read, before the reply came in.

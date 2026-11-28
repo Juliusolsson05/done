@@ -2,7 +2,7 @@
 
 A super simple to-do list app I made for myself.
 
-It runs on my Mac, keeps everything in one local SQLite file, and needs no account, no cloud and no tracking. It can also be hosted, with a sign-in, for using the same list on several devices.
+It runs on Windows and Mac, keeps everything in one local SQLite file, and needs no account, no cloud and no tracking. It can also be hosted, with a sign-in, for using the same list on several devices.
 
 ## What it has
 
@@ -17,19 +17,14 @@ It runs on my Mac, keeps everything in one local SQLite file, and needs no accou
 
 ## Install
 
-Download `done-mac-arm64.zip` from the [latest release](https://github.com/Juliusolsson05/done/releases/latest), unzip it and move `done.app` to Applications. It is for Apple silicon Macs.
-
-The app is not signed with an Apple Developer ID, so macOS will refuse to open a downloaded copy until you run this once:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/done.app
-```
+- **Windows 10 or 11, x64** — download [done for Windows](https://github.com/Juliusolsson05/done/releases/latest/download/done-windows-x64-setup.exe) and run the installer. It installs for your Windows account and includes the WebView2 runtime for offline setup. Open **done** from Start.
+- **Mac with Apple silicon** — download the [notarized disk image](https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg) and drag done into Applications.
 
 A new release is built from `main` every night when there is something new.
 
 ## Connect an agent
 
-Open **Settings** in the app and copy the line under "Connect an AI agent". For Claude Code it is:
+Open **Settings** in the app and copy the line under "Connect an AI agent". On Windows, copy the PowerShell command from Settings so it uses your actual install folder. On macOS the usual command is:
 
 ```bash
 claude mcp add done -- "/Applications/done.app/Contents/MacOS/done" mcp
@@ -37,13 +32,13 @@ claude mcp add done -- "/Applications/done.app/Contents/MacOS/done" mcp
 
 ## Build it yourself
 
-You need Rust and Node.
+You need Rust and Node. For a Windows source build, also install the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
 
 ```bash
 cd ui && npm ci && npm test && npm run build && cd ..   # the interface
 cargo test -p done-core -p done-mcp                     # the rules and the MCP server
 cargo run -p done-server                                # the web app, at http://127.0.0.1:4400
-cd crates/app && npx @tauri-apps/cli@2 build            # the Mac app, in target/release/bundle/macos
+cd crates/app && npx @tauri-apps/cli@2 build            # the desktop installer or app in target/release/bundle
 ```
 
 ## The iPhone app

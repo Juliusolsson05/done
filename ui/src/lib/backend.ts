@@ -1,11 +1,12 @@
 // The tasks live in one SQLite file, reached through the desktop app's
 // commands or the web app's /api. Which of the two is decided here and
 // nowhere else; the rest of the interface cannot tell them apart.
+import { toast } from 'sonner'
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInFromApp, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
-import { isIosAgent } from '@/lib/platform'
+import { isIosAgent, windowsDevice } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
@@ -73,6 +74,7 @@ export const nativeSafeArea = async (): Promise<[number, number, number, number]
 // and kept on the release `mac`, a pre-release that is never "latest" (the
 // installed apps ask "latest" for updates). It can be a few versions behind;
 // the app updates itself once it runs.
+export const WINDOWS_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/latest/download/done-windows-x64-setup.exe'
 export const MAC_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg'
 
 // An app that has signed in to a hosted account. Looked at once, when the
@@ -428,18 +430,34 @@ export const watchAppleSession = (onEnded?: () => Promise<unknown>): (() => void
 
 // The browser hands a finished sign-in back as a link. Returns how to stop listening.
 export const onSignedIn = (done: () => void): (() => void) => {
-  const listening = tauri?.event.listen<string>('opened-link', (event) => {
-    void finishSignIn(event.payload).then((ok) => ok && done())
-  })
-  return () => void listening?.then((stop) => stop())
+  if (!tauri) return () => {}
+  const shell = tauri
+  let active = true
+  const receive = async () => {
+    if (!active) return
+    const link = await shell.core.invoke<string | null>('take_opened_link')
+    if (link && await finishSignIn(link)) done()
+  }
+  const listening = shell.event.listen('opened-link', receive)
+  // Subscribe before draining. Windows can hand the app a URL before its
+  // webview starts, or start a second process while the first is open.
+  void listening.then(receive)
+  return () => {
+    active = false
+    void listening.then((stop) => stop())
+  }
 }
 
-// In a browser there is no app to ask, so the usual install path stands in.
-export const BROWSER_INFO: Info = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null }
+// Windows users can choose their install folder. Only the native app knows the executable's path.
+export const BROWSER_INFO: Info = { version: null, mcpCommand: windowsDevice ? '' : '/Applications/done.app/Contents/MacOS/done', updateReady: null }
 export const loadInfo = (): Promise<Info> => (tauri ? tauri.core.invoke<Info>('info') : Promise.resolve(BROWSER_INFO))
 
-export const restart = (): void => {
-  void tauri?.core.invoke('restart')
+export const restart = async (): Promise<void> => {
+  try {
+    await tauri?.core.invoke('restart')
+  } catch (error) {
+    toast('Couldn’t install the update', { id: 'said', description: String(error) })
+  }
 }
 
 // Text size. Only the desktop app needs this: a browser has its own zoom on

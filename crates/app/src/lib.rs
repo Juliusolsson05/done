@@ -1,10 +1,4 @@
-//! done as an app: on a Mac and on an iPhone. The window shows the same
-//! interface as the web app; the commands below are its way to the tasks file
-//! on the device.
-//!
-//! A library, because that is what an iPhone app is built from. On a Mac,
-//! `main.rs` starts it. What only a Mac has (the menu bar, updating itself,
-//! a window that hides instead of closing) is compiled only there.
+//! Native task storage and platform integration for the shared done interface.
 
 use done_core::{Change, Entry, NewEntry, Note, SaveNote, State, Store, Synced, Task};
 use serde::{Deserialize, Serialize};
@@ -16,15 +10,30 @@ use tauri::menu::{Menu, MenuItem};
 #[cfg(desktop)]
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
-#[cfg(desktop)]
 use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_updater::UpdaterExt;
 
-/// The version of an update that has been downloaded and installed and now
-/// only needs a restart. Empty until that happens.
+struct ReadyRelease {
+    version: String,
+    // Running the Windows installer exits the app, so keep the verified bytes
+    // until the user chooses Restart. macOS can replace its bundle while open.
+    #[cfg(windows)]
+    installer: (tauri_plugin_updater::Update, Vec<u8>),
+}
+
 #[derive(Default)]
-struct UpdateReady(Mutex<Option<String>>);
+struct UpdateReady(Mutex<Option<ReadyRelease>>);
+
+// The browser can return before the webview has mounted its event listener.
+// A sign-in has only one outstanding PKCE verifier.
+#[derive(Default)]
+struct OpenedLink(Mutex<Option<String>>);
+
+#[tauri::command]
+fn take_opened_link(link: tauri::State<OpenedLink>) -> Option<String> {
+    link.0.lock().unwrap().take()
+}
 
 /// The focus session the window is running, as far as the menu bar needs to
 /// know it. The window owns the session; it hands over these times whenever
@@ -304,12 +313,23 @@ fn clock(milliseconds: f64) -> String {
 
 /// Plays the sound. On a thread of its own that waits for the player to
 /// finish, so a reminder ringing many times leaves no dead processes behind.
-#[cfg(desktop)]
+#[cfg(target_os = "macos")]
 fn ring() {
     std::thread::spawn(|| {
         let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").status();
     });
 }
+
+#[cfg(windows)]
+fn ring() {
+    // Plays the user's configured Windows notification sound asynchronously.
+    #[link(name = "user32")]
+    extern "system" { fn MessageBeep(kind: u32) -> i32; }
+    unsafe { MessageBeep(0x40); } // MB_ICONINFORMATION
+}
+
+#[cfg(all(desktop, not(any(windows, target_os = "macos"))))]
+fn ring() {}
 
 #[cfg(desktop)]
 fn show_window(app: &tauri::AppHandle) {
@@ -332,13 +352,27 @@ fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
     let stop = MenuItem::with_id(app, "stop", "Stop", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open done", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&pause, &stop, &open])?;
-    TrayIconBuilder::with_id("focus")
-        .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
-        // A template image is drawn by macOS in the menu bar's own colour.
-        .icon_as_template(true)
-        .menu(&menu)
+    let tray = TrayIconBuilder::with_id("focus");
+    #[cfg(windows)]
+    let tray = {
+        use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+        menu.append(&MenuItem::with_id(app, "quit", "Quit done", true, None::<&str>)?)?;
+        tray.icon(tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?)
+            .tooltip("done")
+            .show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray, event| {
+                if matches!(event, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }) {
+                    show_window(tray.app_handle());
+                }
+            })
+    };
+    #[cfg(not(windows))]
+    let tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?).icon_as_template(true);
+    tray.menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_window(app),
+            #[cfg(windows)]
+            "quit" => app.exit(0),
             // The window owns the session, so pausing and stopping are passed to it.
             command => {
                 let _ = app.emit("focus-command", command);
@@ -382,6 +416,9 @@ fn run_menu_bar(app: &tauri::AppHandle) -> tauri::Result<()> {
             };
             if text != shown {
                 if let Some(tray) = app.tray_by_id("focus") {
+                    #[cfg(windows)]
+                    let _ = tray.set_tooltip(Some(if text.is_empty() { "done".to_owned() } else { format!("done · {text}") }));
+                    #[cfg(not(windows))]
                     let _ = tray.set_title(if text.is_empty() { None } else { Some(text.as_str()) });
                 }
                 shown = text;
@@ -524,8 +561,8 @@ fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
         version: app.package_info().version.to_string(),
         mcp_command: std::env::current_exe()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|_| "/Applications/done.app/Contents/MacOS/done".into()),
-        update_ready: ready.0.lock().unwrap().clone(),
+            .unwrap_or_else(|_| if cfg!(windows) { "done.exe".into() } else { "done".into() }),
+        update_ready: ready.0.lock().unwrap().as_ref().map(|release| release.version.clone()),
     }
 }
 
@@ -544,14 +581,16 @@ fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn restart(app: tauri::AppHandle) {
+fn restart(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    if let Some(release) = app.state::<UpdateReady>().0.lock().unwrap().as_ref() {
+        let (update, bytes) = &release.installer;
+        return update.install(bytes).map_err(|e| e.to_string());
+    }
     app.restart();
 }
 
-/// Looks for a newer release now and every six hours. A newer one is
-/// downloaded, checked against the key built into this app and installed
-/// without asking; the window only learns that a restart will finish it.
-/// Nothing is interrupted: the running app keeps going until it is restarted.
+/// Check now and every six hours. Never exit a running Windows session to install.
 #[cfg(desktop)]
 fn keep_updated(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
@@ -560,14 +599,21 @@ fn keep_updated(app: tauri::AppHandle) {
                 return Ok::<_, tauri_plugin_updater::Error>(None);
             };
             let version = update.version.clone();
-            update.download_and_install(|_, _| {}, || {}).await?;
-            Ok(Some(version))
+            #[cfg(windows)]
+            let release = {
+                let bytes = update.download(|_, _| {}, || {}).await?;
+                ReadyRelease { version, installer: (update, bytes) }
+            };
+            #[cfg(not(windows))]
+            let release = {
+                update.download_and_install(|_, _| {}, || {}).await?;
+                ReadyRelease { version }
+            };
+            Ok(Some(release))
         });
         match installed {
-            Ok(Some(version)) => {
-                *app.state::<UpdateReady>().0.lock().unwrap() = Some(version);
-                // The files on disk are the new version now; there is nothing
-                // further to fetch until the app restarts.
+            Ok(Some(release)) => {
+                *app.state::<UpdateReady>().0.lock().unwrap() = Some(release);
                 return;
             }
             Ok(None) => {}
@@ -582,15 +628,18 @@ fn keep_updated(app: tauri::AppHandle) {
 /// Starts the app. On an iPhone this is where the system enters.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let store = Store::open(&done_core::default_path()).expect("open the tasks file");
-
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Windows activates done:// with a new process. Forward it before opening
+    // SQLite or creating another window. The standalone MCP bypasses this builder.
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show_window(app)));
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
-        .manage(store)
+        .manage(OpenedLink::default())
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, take_over, mark_leaving, finish_leaving, own_mark, waiting, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, take_over, mark_leaving, finish_leaving, own_mark, waiting, info, restart, focus_set, open_in_browser, take_opened_link, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]
@@ -603,6 +652,12 @@ pub fn run() {
         // do: a countdown in the menu bar must outlive its window. Cmd+Q quits.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // On Windows, closing an idle window quits. A running focus timer
+                // remains accessible from the system tray until stopped or quit.
+                #[cfg(windows)]
+                if window.state::<Focus>().0.lock().unwrap().is_none() {
+                    return;
+                }
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -610,6 +665,7 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            app.manage(Store::open(&done_core::default_path()).map_err(|e| std::io::Error::other(e.to_string()))?);
             // A `done://` link is how the browser hands a finished sign-in
             // back. The window does the rest, so the link is passed on as is.
             {
@@ -617,10 +673,16 @@ pub fn run() {
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
-                        let _ = handle.emit("opened-link", url.to_string());
+                        *handle.state::<OpenedLink>().0.lock().unwrap() = Some(url.to_string());
+                        let _ = handle.emit("opened-link", ());
                     }
                     show_window(&handle);
                 });
+                #[cfg(windows)]
+                if let Some(url) = app.deep_link().get_current()?.and_then(|urls| urls.into_iter().last()) {
+                    // The initial command line is processed during plugin setup.
+                    app.state::<OpenedLink>().0.lock().unwrap().get_or_insert_with(|| url.to_string());
+                }
             }
             #[cfg(desktop)]
             {

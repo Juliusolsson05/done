@@ -1,3 +1,4 @@
+import { currentPlatform, downloadOffer, modifierKey, readPlatform, windowsDevice, type Download } from '@/lib/platform'
 import { CLOUD_URL } from '@/lib/cloud'
 import { Avatar } from '@/components/avatars'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -9,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, waitingHere } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, WINDOWS_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, waitingHere } from '@/lib/backend'
 import { deletionWarning, signOutQuestion, waitingMessage, type Held } from '@/lib/account-switch'
 import { deleteAccountHere, prepareToLeave, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
@@ -234,12 +235,50 @@ function AccountPane() {
 // self-update (the updater is the Mac's; 23 Nov audit showed all three there).
 const onIos = isIosApp
 
+const DOWNLOAD: Record<Download, { href: string; name: string }> = {
+  windows: { href: WINDOWS_DOWNLOAD, name: 'Windows (x64)' },
+  mac: { href: MAC_DOWNLOAD, name: 'Mac (Apple silicon)' },
+}
+
+// One button for the computer this is, the others as small links. Which
+// computer is read in the page only (lib/platform.ts); nothing is sent.
+function DesktopDownloads() {
+  const [platform, setPlatform] = useState(currentPlatform)
+  useEffect(() => void readPlatform().then(setPlatform), [])
+  const offer = downloadOffer(platform)
+  return (
+    <>
+      <p className="text-muted-foreground">The desktop app keeps your tasks on the computer and works offline.</p>
+      {offer.primary === 'browser' ? (
+        <p>{platform.os === 'ios' ? 'Use done in the browser: it is what you are using now.' : 'done works right here in your browser.'}</p>
+      ) : (
+        <Button asChild size="sm" className="self-start">
+          <a href={DOWNLOAD[offer.primary].href}>{offer.label}</a>
+        </Button>
+      )}
+      {offer.note && <p className="text-sm text-muted-foreground">{offer.note}</p>}
+      <p className="text-sm text-muted-foreground">
+        Also for{' '}
+        {offer.also.map((d, i) => (
+          <span key={d}>
+            {i > 0 && ' · '}
+            <a className="underline underline-offset-2 hover:text-foreground" href={DOWNLOAD[d].href}>
+              {DOWNLOAD[d].name}
+            </a>
+          </span>
+        ))}
+      </p>
+    </>
+  )
+}
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
   // A workspace's page opens in place of the settings, with a way back.
   const [space, setSpace] = useState<number | null>(null)
   const path = info.mcpCommand
+  const commandPath = windowsDevice ? "'" + path.replaceAll("'", "''") + "'" : `"${path}"`
   if (space !== null) return <WorkspacePage id={space} onBack={() => setSpace(null)} />
   return (
     <div className="max-w-3xl">
@@ -274,13 +313,13 @@ export function Settings() {
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
             too; in the web app there is no file here to read. */}
-        {(!account || isDesktop) && !onIos && (
+        {path && (!account || isDesktop) && !onIos && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
               here within a few seconds.
             </p>
-            <Snippet label="Claude Code: run this once in a terminal" text={`claude mcp add done -- "${path}" mcp`} />
+            <Snippet label={windowsDevice ? "Run in PowerShell for Claude Code" : "Claude Code: run this once in a terminal"} text={`claude mcp add done -- ${commandPath} mcp`} />
             <Snippet
               label="Other apps: add this to their MCP settings"
               text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
@@ -288,14 +327,9 @@ export function Settings() {
           </Pane>
         )}
 
-        {/* In a browser: the Mac app, one download away (Julius, 23 Nov). The
-            app itself updates on its own, so it has no need of this. */}
         {!isDesktop && (
-          <Pane title="Mac app">
-            <p className="text-muted-foreground">done for Mac, for Macs with Apple silicon. It updates itself after that.</p>
-            <Button asChild size="sm" className="self-start">
-              <a href={MAC_DOWNLOAD}>Download for Mac</a>
-            </Button>
+          <Pane title="Desktop app">
+            <DesktopDownloads />
           </Pane>
         )}
 
@@ -319,14 +353,14 @@ export function Settings() {
                 </Button>
               </div>
               <p className="text-muted-foreground">
-                Also on <Kbd>⌘</Kbd> <Kbd>+</Kbd>, <Kbd>⌘</Kbd> <Kbd>−</Kbd> and <Kbd>⌘</Kbd> <Kbd>0</Kbd>.
+                Also on <Kbd>{modifierKey}</Kbd> <Kbd>+</Kbd>, <Kbd>{modifierKey}</Kbd> <Kbd>−</Kbd> and <Kbd>{modifierKey}</Kbd> <Kbd>0</Kbd>.
               </p>
             </Pane>
             <Pane title={`Version ${info.version}`}>
               <p className="text-muted-foreground">
                 {info.updateReady
-                  ? `Version ${info.updateReady} is installed and starts the next time done opens.`
-                  : 'done updates itself. New versions are fetched in the background and start the next time it opens.'}
+                  ? `Version ${info.updateReady} is ready. Restart done to use it.`
+                  : 'done checks for updates in the background.'}
               </p>
               {info.updateReady && (
                 <Button size="sm" className="self-start" onClick={restart}>

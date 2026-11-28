@@ -87,7 +87,7 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
         "Privacy",
         &cloud.operator,
         r#"<h2>On your device</h2>
-<p>You can use the iPhone, iPad and Mac apps without an account. They keep your tasks, projects, notes and time sheet on the device. On iPhone and iPad, done also keeps a local snapshot so its widgets and Live Activity can display tasks and focus sessions.</p>
+<p>You can use the iPhone, iPad, Mac and Windows apps without an account. They keep your tasks, projects, notes and time sheet on the device. On iPhone and iPad, done also keeps a local snapshot so its widgets and Live Activity can display tasks and focus sessions.</p>
 
 <h2>When you sign in</h2>
 <p>Signing in uploads the device’s task data to your account and syncs changes across your devices. In the web app, the server stores the content you enter. Your personal space and time sheet are private to your account.</p>
@@ -104,7 +104,7 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
 <h2>Retention and deletion</h2>
 <p>Synced data stays in your account until you delete it or the account. The database is backed up daily and each backup is kept for seven days. The sign-in cookie lasts 30 days.</p>
 <p>To delete your account, open Settings, choose “Delete my account” and confirm. This removes your personal space and feedback and ends your workspace memberships. A workspace you own passes to its earliest remaining member or is deleted if nobody else belongs to it. Shared content in a continuing workspace stays there. Deleted data ages out of backups within seven days.</p>
-<p>On iPhone, iPad and Mac, signing out or deleting your hosted account leaves local task data on your devices. To remove the local copy on iPhone or iPad, use Delete App on each device. If you signed in with Apple, also disconnect done under Sign in with Apple in your Apple Account. <a href="https://support.apple.com/102571">See Apple’s instructions</a>.</p>
+<p>On iPhone, iPad, Mac and Windows, signing out or deleting your hosted account leaves local task data on your devices. To remove the local copy on iPhone or iPad, use Delete App on each device. If you signed in with Apple, also disconnect done under Sign in with Apple in your Apple Account. <a href="https://support.apple.com/102571">See Apple’s instructions</a>.</p>
 <p>For questions about your data, <a href="/support">contact support</a>.</p>"#,
     )
 }

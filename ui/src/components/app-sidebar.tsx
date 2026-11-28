@@ -1,3 +1,4 @@
+import { shortcut } from '@/lib/platform'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   CalendarDaysIcon,
@@ -261,7 +262,7 @@ export function AppSidebar() {
           </svg>
           done
         </span>
-        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title="Hide sidebar (⌘B)" />
+        <SidebarTrigger className="-mr-2 text-muted-foreground max-md:hidden" title={`Hide sidebar (${shortcut('B')})`} />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -278,7 +279,7 @@ export function AppSidebar() {
                 <span>Search</span>
               </SidebarMenuButton>
               {/* A shortcut hint is for a keyboard; a finger has none to press. */}
-              <SidebarMenuBadge className={cn('font-normal text-faint touch:hidden', BADGE)}>⌘K</SidebarMenuBadge>
+              <SidebarMenuBadge className={cn('font-normal text-faint touch:hidden', BADGE)}>{shortcut('K')}</SidebarMenuBadge>
             </SidebarMenuItem>
             {/* The Inbox is your own. In a workspace it shows only what lost its project there. */}
             {(typeof scope !== 'number' || count.inbox > 0) && nav('inbox', 'Inbox', InboxIcon, count.inbox)}

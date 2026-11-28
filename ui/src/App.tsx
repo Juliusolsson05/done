@@ -1,3 +1,4 @@
+import { appleKeyboard, shortcut } from '@/lib/platform'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react'
 import { toast } from 'sonner'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -60,7 +61,7 @@ function SidebarToggle() {
   return (
     <div className="sticky top-0 z-20 h-0">
       {/* In the page's left margin, clear of the title it sits beside. */}
-      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground" title="Show sidebar (⌘B)" />
+      <SidebarTrigger className="-mt-6 -ml-10 text-muted-foreground" title={`Show sidebar (${shortcut('B')})`} />
     </div>
   )
 }
@@ -364,7 +365,7 @@ export default function App() {
   useEffect(() => {
     // Text size keys, in the desktop app only: a browser has its own.
     const onZoomKey = (event: KeyboardEvent) => {
-      if (!isDesktop || !event.metaKey || event.altKey) return
+      if (!isDesktop || isIosApp || !(appleKeyboard ? event.metaKey : event.ctrlKey) || event.altKey) return
       const step = ({ '=': 0.1, '+': 0.1, '-': -0.1, _: -0.1 } as Record<string, number>)[event.key]
       if (step === undefined && event.key !== '0') return
       event.preventDefault()
