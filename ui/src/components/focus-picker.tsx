@@ -9,13 +9,16 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useIsMobile, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
-import { describeDay, TODAY } from '@/lib/days'
-import { cursorAt, moveCursor, pickerGroups, type Cursor, type RowKey } from '@/lib/focus-picker'
-import { projectName, type Task } from '@/lib/tasks'
+import { loadEntries } from '@/lib/backend'
+import { addDays, describeDay, TODAY } from '@/lib/days'
+import { cursorAt, moveCursor, pickerGroups, recentTaskIds, type Cursor, type RowKey } from '@/lib/focus-picker'
+import { goalTask, projectName, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // Never shorter than this, so a few rows always show even with the keyboard up.
 const SHORTEST_LIST = 132
+// How far back "Recent" looks.
+const RECENT_DAYS = 7
 
 // The project and due day under a title, so two tasks with near names can
 // be told apart.
@@ -208,21 +211,33 @@ function Finder({
   )
 }
 
-export function FocusPicker({
-  id,
-  tasks,
-  recent,
-  goalId,
-  chosen,
-  onChoose,
-}: {
-  id: string
-  tasks: Task[]
-  recent: number[]
-  goalId: number | null
-  chosen: Task | null
-  onChoose: (task: Task | null) => void
-}) {
+// The tasks focused on in the last week, from the time sheet: true on every
+// device, where something kept in this window would not be. A day that fails
+// to load just adds nothing.
+function useRecent(): number[] {
+  const [recent, setRecent] = useState<number[]>([])
+  useEffect(() => {
+    let live = true
+    const days = Array.from({ length: RECENT_DAYS }, (_, i) => addDays(TODAY, -i))
+    Promise.allSettled(days.map(loadEntries)).then((results) => {
+      if (live) setRecent(recentTaskIds(results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))))
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+  return recent
+}
+
+// Reads the tasks, today's goal and what was focused on lately itself, so
+// each place that asks for a task (the Focus page, Up next) passes only the
+// choice.
+export function FocusPicker({ id, chosen, onChoose }: { id: string; chosen: Task | null; onChoose: (task: Task | null) => void }) {
+  const { shown, me } = useApp()
+  const tasks = shown.tasks
+  const recent = useRecent()
+  const goal = goalTask(tasks, TODAY, me)
+  const goalId = goal && !goal.done ? goal.id : null
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const choose = (task: Task | null) => {
@@ -233,6 +248,7 @@ export function FocusPicker({
   const trigger = (
     <Button
       id={id}
+      type="button"
       variant="outline"
       aria-haspopup="dialog"
       aria-expanded={open}

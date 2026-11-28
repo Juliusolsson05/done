@@ -36,6 +36,10 @@ panel is a 3/4-width side sheet, so queued titles truncate to "Write the la…".
   button (44 px) instead of the small corner X, and scrolls inside itself
   with room for the home indicator. The picker inside it is the same top
   sheet as on the Focus page.
+- **Length**: a block starts at the length last chosen for focus (the
+  remembered one); choosing a length in Up next is for that block and does
+  not change the Focus page's. After Add the panel is ready for the next
+  block: no task, the same length.
 - **Queued list**: number, title, length, then move up, move down and remove;
   on touch those are 44 px. A list labelled "Queued blocks". The total
   ("1 h 25 min planned") stays.
@@ -50,6 +54,35 @@ panel is a 3/4-width side sheet, so queued titles truncate to "Write the la…".
   the block queued and saved, checks the row's buttons are 44 px on touch,
   and removes it. On origin/main it fails at the picker (checked).
 
+Ruling: Add is a button, not a form submit — the picker's and Other's
+buttons sit inside the add area, and a `<button>` in a form submits it unless
+told otherwise (both now say `type="button"` as well) — cost if wrong: Enter
+in the add area no longer adds; the picker's own Enter chooses a task.
+
+Ruling: the check serves the faked app as `http://localhost:4499` rather than
+`done.test` like the notes checks — a block's id comes from
+`crypto.randomUUID`, which only a secure context has, and the app always runs
+in one — cost if wrong: none; nothing listens on that port, Playwright
+answers every request.
+
 ## Verification
 
-To be filled in at the end.
+- `npm run typecheck`, `npm test` (710), `npm run build` pass.
+- `ui/checks/up-next-picker.cjs` passes at 1280x800 and 390x844 (touch).
+  Against origin/main's source it fails: no "Find a task" field (checked).
+- Driven in Chrome on a faked API with three queued blocks, at 1280x800,
+  820x1180 and 390x844 (touch for the last two), before and after
+  screenshots:
+  - the picker opens over the panel (popover; top sheet on a phone),
+    "invit sketch" finds one task, Escape closes only the picker;
+  - row buttons are 28 px with a mouse and 44 px on touch; move down
+    reorders; the list sits 16 px from each side; on a phone the panel is
+    the full 390 px;
+  - Done closes the panel; Start focus, then Up next from the header during
+    the session shows the queue; after Stop, "Start next: Fix sign-in on
+    iPad · 25 min" starts that block;
+  - no horizontal scroll at any size.
+
+Not verified: a real iPhone or iPad keyboard over the picker and the Other
+minutes field, and the home-indicator padding on a real device (the
+emulator has no safe area).
