@@ -55,7 +55,7 @@ Ruling: a 401 is treated as a sign-out, not a deletion — the device cannot tel
 - New app, current server: no `refused` comes back, so refused rows are counted as sent, as today. Binding, holding and leaving are all on the device; the current server already sends `team.me`.
 - `held` is never sent to the server (the app sends nothing when it is set, and it is skipped when empty).
 - No new tables or columns in the device's SQLite file: the binding is a row in `kv`. Each new core call is one `BEGIN IMMEDIATE` transaction, so an interrupted one leaves the file as it was.
-- Merging with #101: both add a command to the one `generate_handler!` line in `crates/app/src/lib.rs` (`leave_account` here, `web_sign_in` there). Resolve by keeping both names. Nothing else overlaps; `signIn` is untouched.
+- Merging with #101: both add a command to the one `generate_handler!` line in `crates/app/src/lib.rs` (`leave_account` here, `web_sign_in` there). #101 merged first; this branch is rebased on it with both names kept. Nothing else overlapped; `signIn` is untouched.
 
 ## Tests
 
@@ -73,7 +73,7 @@ Verified (27 Nov, on this branch):
 - The audit's three tests fail on origin/main (eea3210) for the stated reasons (output in the PR).
 - The reshaped tests fail with the fix switched off (holding, leaving, the refused re-send and the Inbox space fix disabled in core) and pass with it. `a_refused_row_is_sent_again` (core) fails with only the re-send switched off.
 - `cargo test -p done-core -p done-mcp -p done-server`: 40, 13 and 49 passed. `cargo check -p done-app` and `cargo check -p done-app --target aarch64-apple-ios` pass.
-- `npm run typecheck`, `npm test` (638 passed), `npm run build` pass. `note-list.test.ts` failed once in a full run and passed alone and on the next full run; it does not touch anything changed here.
+- `npm run typecheck`, `npm test` (668 passed after rebasing on main with #101, #103 and #105), `npm run build` pass. `note-list.test.ts` failed once in a full run and passed alone and on the next full run; it does not touch anything changed here.
 
 Not verified:
 
