@@ -243,6 +243,7 @@ pub fn down(fail: Fail) -> Response {
     let fail_with = |status, message: &str| (status, Json(serde_json::json!({ "error": message }))).into_response();
     match fail {
         Fail::Invalid(why) => fail_with(StatusCode::BAD_REQUEST, &why),
+        Fail::TooManyRequests(why) => fail_with(StatusCode::TOO_MANY_REQUESTS, &why),
         Fail::NotFound => fail_with(StatusCode::NOT_FOUND, "Not found."),
         Fail::Down(why) => {
             eprintln!("{why}");
@@ -257,8 +258,7 @@ pub struct Start {
     /// app knows. See `exchange`.
     #[serde(default)]
     app_challenge: Option<String>,
-    /// Where to come back to afterwards: an invite's page. Only such a path,
-    /// so a link cannot send someone elsewhere through this sign-in.
+    /// An allowed return path on this server, checked by back_to.
     #[serde(default)]
     then: Option<String>,
 }
@@ -273,10 +273,12 @@ struct SigningIn {
     then: Option<String>,
 }
 
-/// An invite page's own path, or the page where an MCP client (Claude) is
-/// let in, and nothing else.
+/// The local destinations that can send someone through sign-in.
 fn back_to(then: Option<String>) -> Option<String> {
     let then = then?;
+    if then == "/feedback" {
+        return Some(then);
+    }
     // A path on this server, so the redirect cannot leave it.
     if then.starts_with("/oauth/authorize?") && then.len() <= 4096 && !then.contains(['\r', '\n', '\\']) {
         return Some(then);
@@ -498,6 +500,7 @@ pub async fn delete_account(State(cloud): State<Cloud>, me: Me, jar: SignedCooki
 
 #[derive(Deserialize)]
 pub struct DevAs {
+    then: Option<String>,
     #[serde(default)]
     r#as: String,
 }
@@ -516,7 +519,7 @@ pub async fn dev(State(cloud): State<Cloud>, jar: SignedCookieJar, Query(q): Que
     };
     let session = Session { sub: sub.into(), email: email.into(), name: name.into(), picture: String::new(), exp: now() + THIRTY_DAYS };
     let value = serde_json::to_string(&session).expect("plain text fields");
-    (jar.add(cookie(SESSION, value, &cloud.config, THIRTY_DAYS)), Redirect::to("/")).into_response()
+    (jar.add(cookie(SESSION, value, &cloud.config, THIRTY_DAYS)), Redirect::to(back_to(q.then).as_deref().unwrap_or("/"))).into_response()
 }
 
 /// What an app is handed when it signs in: the token it sends from then on,

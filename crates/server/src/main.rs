@@ -129,6 +129,20 @@ fn done<T: Serialize>(result: Result<T, Fail>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+struct NewFeedback {
+    kind: String,
+    message: String,
+}
+
+async fn feedback(State(cloud): State<Cloud>, _session: auth::Session) -> Response {
+    ([(header::CACHE_CONTROL, "private, no-store")], done(cloud.db.feedback().await)).into_response()
+}
+
+async fn add_feedback(State(cloud): State<Cloud>, me: Me, Json(q): Json<NewFeedback>) -> Response {
+    done(cloud.db.add_feedback(&me, &q.kind, &q.message).await)
+}
+
 async fn cloud_state(State(cloud): State<Cloud>, me: Me, Query(q): Query<Today>) -> Response {
     done(cloud.db.state(&me, &q.today).await)
 }
@@ -314,7 +328,9 @@ fn local(store: Arc<Store>) -> Router {
 
 fn cloud(cloud: Cloud) -> Router {
     Router::new()
-        .route("/", get(|| async { Html(UI) }))
+        .route("/", get(pages::home))
+        .route("/feedback", get(pages::feedback))
+        .route("/api/feedback", get(feedback).post(add_feedback))
         // For the host to ask whether the server is up. Says nothing else.
         .route("/healthz", get(|| async { "ok" }))
         .route("/privacy", get(pages::privacy))
@@ -703,6 +719,58 @@ mod tests {
         assert_eq!(bo.sign_in().await, "/");
         assert!(bo.titles().await.is_empty(), "the second person was shown the first person's tasks");
         assert_eq!(anna.titles().await, vec!["Call the bank"]);
+    }
+
+    #[tokio::test]
+    async fn feedback_landing_uses_the_app_host_for_sign_in() {
+        let (at, google, _db) = hosted(1).await;
+        let mut browser = Browser::new(&at);
+        let landing = browser.get("/feedback").await.text().await.unwrap();
+        assert!(landing.contains(&format!("{at}/auth/google?then=%2Ffeedback")));
+        assert!(!landing.contains("{{APP_URL}}"));
+        let hi = browser.http.get(&at).header("host", "Hi.TheDone.App:443").send().await.unwrap();
+        assert_eq!(hi.text().await.unwrap(), landing);
+        assert_eq!(browser.get("/").await.text().await.unwrap(), UI);
+        google.says(person("friend", "friend@example.com"));
+        assert_eq!(browser.sign_in_then("/feedback").await, "/feedback");
+        assert_eq!(browser.sign_in_then("/feedback/elsewhere").await, "/");
+    }
+
+    #[tokio::test]
+    async fn friends_can_share_feedback_and_deleting_an_account_removes_its_posts() {
+        let (at, google, _db) = hosted(1).await;
+        let path = "/api/feedback";
+        let write = |kind: &str, message: &str| serde_json::json!({ "kind": kind, "message": message });
+        let mut anna = Browser::new(&at);
+        let mut bo = Browser::new(&at);
+        assert_eq!(anna.get(path).await.status(), 401);
+        assert_eq!(anna.post(path, write("idea", "More shortcuts")).await.status(), 401);
+        google.says(person("anna", "anna@example.com"));
+        anna.sign_in().await;
+        for (kind, message) in [("bug", "  "), ("other", "Hello"), ("idea", "a\0b"), ("bug", &"a".repeat(2001))] {
+            assert_eq!(anna.post(path, write(kind, message)).await.status(), 400);
+        }
+        let saved = anna.post(path, write("bug", "  The keyboard hides a list.  ")).await;
+        assert_eq!(saved.status(), 200);
+        let row: serde_json::Value = saved.json().await.unwrap();
+        assert_eq!(row["kind"], "bug");
+        assert_eq!(row["message"], "The keyboard hides a list.");
+        assert!(row["created"].as_i64().unwrap() > 0);
+        assert!(row["id"].as_i64().unwrap() > 0);
+        assert_eq!(row.as_object().unwrap().len(), 4, "the public representation omits account data");
+
+        google.says(person("bo", "bo@example.com"));
+        bo.sign_in().await;
+        let newest: serde_json::Value = bo.post(path, write("idea", "Add a shortcut")).await.json().await.unwrap();
+        let wall = bo.get(path).await;
+        assert_eq!(wall.headers()["cache-control"], "private, no-store");
+        assert_eq!(wall.json::<serde_json::Value>().await.unwrap(), serde_json::json!([newest, row]));
+        for _ in 1..30 {
+            assert_eq!(anna.post(path, write("idea", "A suggestion")).await.status(), 200);
+        }
+        assert_eq!(anna.post(path, write("idea", "One more")).await.status(), 429);
+        assert_eq!(anna.post("/api/account/delete", serde_json::json!({})).await.status(), 200);
+        assert_eq!(bo.get(path).await.json::<serde_json::Value>().await.unwrap(), serde_json::json!([newest]));
     }
 
     #[tokio::test]

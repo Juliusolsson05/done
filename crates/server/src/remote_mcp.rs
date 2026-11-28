@@ -35,7 +35,7 @@ struct Remote {
 
 fn said(fail: Fail) -> Error {
     match fail {
-        Fail::Invalid(why) => Error::Invalid(why),
+        Fail::Invalid(why) | Fail::TooManyRequests(why) => Error::Invalid(why),
         Fail::NotFound => Error::Invalid("Not found.".into()),
         Fail::Down(why) => {
             eprintln!("{why}");
