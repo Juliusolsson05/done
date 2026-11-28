@@ -4,12 +4,21 @@
 import { addDays, describeDay, fullDay, type Day } from '@/lib/days'
 import type { Team } from '@/lib/team'
 
+export interface Sprint {
+  enabled: boolean
+  deadline: Day | null
+  completed: boolean
+}
+
+export const completedSprint = (project: Project) => project.sprint?.enabled === true && project.sprint.completed
+
 export interface Project {
   id: number
   name: string
   color?: number | null
   // The space it lives in (see lib/team.ts); absent until the server has seen it.
   spaceId?: number | null
+  sprint?: Sprint | null
 }
 
 export interface Task {

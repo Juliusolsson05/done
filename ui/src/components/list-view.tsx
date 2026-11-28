@@ -1,6 +1,6 @@
 // Inbox, Today, Upcoming and a project: the views that are a list of tasks.
 import { useEffect, useState, type ReactNode } from 'react'
-import { NotebookPenIcon } from 'lucide-react'
+import { CalendarDaysIcon, CheckIcon, NotebookPenIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
@@ -18,7 +18,7 @@ import { fullDay, TODAY } from '@/lib/days'
 import { byNewest, isBlank, titleOf, whenText, type Note } from '@/lib/notes'
 import { tagOf } from '@/lib/quick-add'
 import { play } from '@/lib/sounds'
-import { goalTask, patchProject, projectName, sections } from '@/lib/tasks'
+import { goalTask, patchProject, projectName, sections, type Sprint } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // On an iPad with the sidebar put away, the button that brings it back starts
@@ -153,9 +153,14 @@ function readOnlyMe(): boolean {
 }
 
 export function ListView() {
-  const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject } = useApp()
+  const { data, shown, me, keep, ui, rename, askDelete, closeAll, removeProject, update } = useApp()
   const isMobile = useIsMobile()
   const view = ui.view
+  const project = view.kind === 'project' ? data.projects.find((p) => p.id === view.id) : undefined
+  const sprint = project?.sprint?.enabled ? project.sprint : undefined
+  const changeSprint = (settings: Sprint) => {
+    if (project) update((current) => patchProject(current, project.id, { sprint: settings }))
+  }
   const [onlyMe, setOnlyMe] = useState(readOnlyMe)
   const toggleOnlyMe = () => {
     const next = !onlyMe
@@ -234,6 +239,11 @@ export function ListView() {
           ) : (
             <>
               <HeaderButton onClick={rename}>Rename</HeaderButton>
+              {project && (
+                <HeaderButton onClick={() => changeSprint({ enabled: !sprint, deadline: null, completed: false })}>
+                  {sprint ? 'Turn off sprint' : 'Make sprint'}
+                </HeaderButton>
+              )}
               <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
               {!isMobile && <FilterButton className={IN_HEADER} />}
             </>
@@ -246,6 +256,46 @@ export function ListView() {
         <div className="-mt-1 mb-2 -ml-2.5 flex">
           <FilterButton className={IN_HEADER} />
         </div>
+      )}
+      {sprint && (
+        <section aria-label="Sprint" className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-muted/30 px-3 py-2 sm:flex-nowrap">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {sprint.completed ? <CheckIcon className="size-4 text-primary" /> : <CalendarDaysIcon className="size-4 text-primary" />}
+            {sprint.completed ? 'Sprint complete' : 'Sprint'}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            Deadline
+            <Input
+              type="date"
+              min="0001-01-01"
+              max="9999-12-31"
+              value={sprint.deadline ?? ''}
+              onChange={(event) => {
+                if (event.target.validity.valid) changeSprint({ ...sprint, deadline: event.target.value || null })
+              }}
+              className="h-8 w-auto min-w-32 text-foreground pointer-coarse:h-11"
+            />
+          </label>
+          {sprint.deadline && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Clear deadline"
+              onClick={() => changeSprint({ ...sprint, deadline: null })}
+              className="-ml-2 text-muted-foreground pointer-coarse:size-11"
+            >
+              <XIcon />
+            </Button>
+          )}
+          <Button
+            variant={sprint.completed ? 'ghost' : 'outline'}
+            size="sm"
+            onClick={() => changeSprint({ ...sprint, completed: !sprint.completed })}
+            className="ml-auto pointer-coarse:h-11"
+          >
+            {sprint.completed ? 'Reopen sprint' : 'Complete sprint'}
+          </Button>
+        </section>
       )}
       <FilterBar shown={count} total={total} />
 

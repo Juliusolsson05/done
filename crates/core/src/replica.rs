@@ -24,7 +24,7 @@
 //!   (small ids, counted up from 1 on each device) are renumbered once, in
 //!   their old order, before they are first sent.
 
-use crate::{check, check_entry, Entry, Error, NewEntry, Note, Project, Store, Task};
+use crate::{check, check_entry, check_project, Entry, Error, NewEntry, Note, Project, Sprint, Store, Task};
 use serde_json::Value;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ const NOW: &str = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
 /// one of these columns is a change worth sending; `seq` and `changed` are
 /// bookkeeping and writing them must not count as one.
 pub(crate) const TABLES: [(&str, &str); 4] = [
-    ("project", "name, color, space_id"),
+    ("project", "name, color, space_id, sprint"),
     ("task", "title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by"),
     ("note", "text, updated_at, project_id, folder, space_id"),
     ("entry", "task_id, title, day, started_at, ended_at, planned_ms, focused_ms"),
@@ -69,6 +69,23 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, Erro
     Ok(conn.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"), [column], |r| {
         r.get::<_, i64>(0).map(|n| n > 0)
     })?)
+}
+
+/// Older clients may have pulled project rows without retaining sprint settings.
+pub(crate) fn prepare_project_sprints(conn: &Connection) -> Result<(), Error> {
+    if !has_column(conn, "project", "sprint")? {
+        let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        // Another Done process may already have performed the upgrade while we waited.
+        if !has_column(&tx, "project", "sprint")? {
+            tx.execute_batch(
+                "ALTER TABLE project ADD COLUMN sprint TEXT;
+                 UPDATE space_cursor SET pulled = 0 WHERE pulled > 0;
+                 UPDATE meta SET value = 0 WHERE key = 'pulled' AND value > 0;",
+            )?;
+        }
+        tx.commit()?;
+    }
+    Ok(())
 }
 
 // Replace an outdated trigger atomically: another connection can write to this same file.
@@ -291,9 +308,9 @@ pub(crate) fn set_meta(conn: &Connection, key: &str, value: i64) -> Result<(), E
 
 fn rows_since(conn: &Connection, after: i64) -> Result<Rows, Error> {
     let mut rows = Rows::default();
-    let mut stmt = conn.prepare("SELECT id, name, color, space_id, changed FROM project WHERE seq > ?1 ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, name, color, space_id, sprint, changed FROM project WHERE seq > ?1 ORDER BY id")?;
     rows.projects = stmt
-        .query_map([after], |r| Ok(Stamped { row: Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, space_id: r.get(3)? }, changed: r.get(4)? }))?
+        .query_map([after], |r| Ok(Stamped { row: Project::from_sqlite(r)?, changed: r.get(5)? }))?
         .collect::<Result<_, _>>()?;
     let mut stmt = conn.prepare(
         "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, changed, space_id, goal_by
@@ -406,14 +423,26 @@ fn merge(tx: &Transaction, rows: &Rows, quiet: bool) -> Result<usize, Error> {
         place("note", n.row.id, n.row.space_id)?;
     }
     for Stamped { row: p, changed } in &rows.projects {
-        if p.name.trim().is_empty() || !newer(tx, "project", p.id, *changed)? {
+        if check_project(p).is_err() {
+            continue;
+        }
+        let sprint = p.sprint.as_ref().map(Sprint::stored);
+        if !newer(tx, "project", p.id, *changed)? {
+            // Only fill a missing field on a server replay or acknowledgement.
+            // Leave the local name, colour, sequence and any later edits intact.
+            if quiet && sprint.is_some() {
+                applied += tx.execute(
+                    "UPDATE project SET sprint = ?2 WHERE id = ?1 AND changed = ?3 AND sprint IS NULL",
+                    params![p.id, sprint, changed],
+                )?;
+            }
             continue;
         }
         tx.execute(
-            "INSERT INTO project (id, name, color, space_id, changed, seq) VALUES (?1, ?2, ?3, ?4, ?5, 0)
+            "INSERT INTO project (id, name, color, space_id, changed, seq, sprint) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, space_id = excluded.space_id,
-               changed = excluded.changed, seq = excluded.seq",
-            params![p.id, p.name.trim(), p.color, p.space_id, changed],
+               changed = excluded.changed, seq = excluded.seq, sprint = coalesce(excluded.sprint, project.sprint)",
+            params![p.id, p.name.trim(), p.color, p.space_id, changed, sprint],
         )?;
         tx.execute("DELETE FROM tombstone WHERE kind = 'project' AND id = ?1", [p.id])?;
         applied += 1;
@@ -876,6 +905,73 @@ mod tests {
     }
 
     #[test]
+    fn sprint_upgrade_replays_old_cursors_without_sending_seen_rows_or_losing_pending_edits() {
+        let device = store();
+        let seen = SMALL + 1;
+        let pending = SMALL + 2;
+        {
+            let conn = device.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER project_edited;
+                 ALTER TABLE project DROP COLUMN sprint;
+                 INSERT INTO space_cursor (space_id, pulled) VALUES (8, 12);
+                 UPDATE meta SET value = 12 WHERE key = 'pulled';
+                 UPDATE meta SET value = 5 WHERE key = 'pushed';
+                 UPDATE meta SET value = 7 WHERE key = 'seq';",
+            )
+            .unwrap();
+            conn.execute("INSERT INTO project (id, name, space_id) VALUES (?1, 'Launch', 8), (?2, 'Release renamed offline', 8)", [seen, pending]).unwrap();
+            conn.execute("UPDATE project SET changed = 100, seq = 5 WHERE id = ?1", [seen]).unwrap();
+            conn.execute("UPDATE project SET changed = 300, seq = 7 WHERE id = ?1", [pending]).unwrap();
+            prepare_project_sprints(&conn).unwrap();
+            prepare(&conn).unwrap();
+        }
+        let out = device.outbox().unwrap();
+        assert_eq!(out.pulled, 0);
+        assert_eq!(out.cursors.unwrap()[0].at, 0);
+        assert_eq!(out.rows.projects.len(), 1);
+        assert_eq!(out.rows.projects[0].row.id, pending);
+        assert_eq!(out.rows.projects[0].row.name, "Release renamed offline");
+
+        let sprint = Sprint { enabled: true, deadline: Some("2026-12-04".into()), completed: true };
+        let cloud_row = |id, changed| Stamped {
+            row: Project { id, name: "Launch".into(), color: 2, space_id: Some(8), sprint: Some(sprint.clone()) },
+            changed,
+        };
+        // Pull a replay with the same stamp on a known row and an older
+        // stamp on a row that was edited while the request was in flight.
+        let reply = Reply {
+            upto: 14,
+            spaces: Some(vec![Cursor { space: 8, at: 14 }]),
+            rows: Rows { projects: vec![cloud_row(seen, 100), cloud_row(pending, 200)], ..Default::default() },
+            ..Default::default()
+        };
+        assert!(device.inbox(&reply, 5).unwrap());
+        let state = device.state("2026-12-04").unwrap();
+        assert_eq!(state.projects[0].sprint, Some(sprint.clone()));
+        assert_eq!(state.projects[0].color, 0);
+        assert_eq!(state.projects[1].name, "Release renamed offline");
+        assert_eq!(state.projects[1].sprint, None);
+
+        {
+            let conn = device.conn.lock().unwrap();
+            prepare_project_sprints(&conn).unwrap();
+        }
+        let next = device.outbox().unwrap();
+        assert_eq!(next.cursors.unwrap()[0].at, 14);
+        assert_eq!(next.rows.projects.len(), 1);
+        assert_eq!(next.rows.projects[0].row.id, pending);
+        // The server keeps the sprint from the omitted legacy field and echoes
+        // it at the stamp of the client's pending edit.
+        let reply = Reply { rows: Rows { projects: vec![cloud_row(pending, 300)], ..Default::default() }, ..reply };
+        assert!(device.inbox(&reply, next.upto).unwrap());
+        assert!(device.outbox().unwrap().rows.projects.is_empty());
+        let state = device.state("2026-12-04").unwrap();
+        assert_eq!(state.projects[1].sprint, Some(sprint));
+        assert_eq!(state.projects[1].name, "Release renamed offline");
+    }
+
+    #[test]
     fn a_task_added_on_one_device_reaches_the_other() {
         let (mac, phone, cloud) = (store(), store(), store());
         add(&mac, vec![task(1, "Email the five funds")]);
@@ -1030,7 +1126,7 @@ mod tests {
     #[test]
     fn a_task_in_a_project_deleted_elsewhere_falls_back_to_the_inbox() {
         let (mac, phone, cloud) = (store(), store(), store());
-        mac.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None }], ..Default::default() }).unwrap();
+        mac.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None, sprint: None }], ..Default::default() }).unwrap();
         round(&mac, &cloud);
         round(&phone, &cloud);
         let project = phone.state("2026-11-21").unwrap().projects[0].id;

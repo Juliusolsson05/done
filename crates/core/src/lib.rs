@@ -25,6 +25,34 @@ pub struct Project {
     /// never synced) or a workspace. Decided by the server; see SPACES.md.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space_id: Option<i64>,
+    // Omitting sprint settings allows older clients to edit the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprint: Option<Sprint>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Sprint {
+    pub enabled: bool,
+    pub deadline: Option<String>,
+    pub completed: bool,
+}
+
+impl Sprint {
+    pub fn stored(&self) -> String {
+        let disabled = Self { enabled: false, deadline: None, completed: false };
+        serde_json::to_string(if self.enabled { self } else { &disabled }).expect("sprint settings serialize to JSON")
+    }
+}
+
+impl Project {
+    fn from_sqlite(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        let sprint = row
+            .get::<_, Option<String>>(4)?
+            .map(|encoded| serde_json::from_str(&encoded))
+            .transpose()
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e)))?;
+        Ok(Self { id: row.get(0)?, name: row.get(1)?, color: row.get(2)?, space_id: row.get(3)?, sprint })
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -287,6 +315,36 @@ fn check_day(what: &str, day: &Option<String>) -> Result<(), Error> {
     }
 }
 
+fn is_sprint_deadline(date: &str) -> bool {
+    if !is_day(date) {
+        return false;
+    }
+    // is_day has checked the separators and that all three parts are digits.
+    let year: u32 = date[..4].parse().unwrap();
+    let month: u32 = date[5..7].parse().unwrap();
+    let day: u32 = date[8..].parse().unwrap();
+    let last_day = match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => 0,
+    };
+    year > 0 && (1..=last_day).contains(&day)
+}
+
+pub fn check_project(project: &Project) -> Result<(), Error> {
+    if project.name.trim().is_empty() {
+        return Err(Error::Invalid("A project needs a name.".into()));
+    }
+    if let Some(sprint) = &project.sprint {
+        if sprint.enabled && sprint.deadline.as_deref().is_some_and(|date| !is_sprint_deadline(date)) {
+            return Err(Error::Invalid("The sprint deadline must be a valid date written YYYY-MM-DD.".into()));
+        }
+    }
+    Ok(())
+}
+
 pub fn check(task: &Task) -> Result<(), Error> {
     if task.title.trim().is_empty() {
         return Err(Error::Invalid("A task needs a title.".into()));
@@ -439,7 +497,12 @@ impl Store {
         }
         // Spaces (see replica.rs): where a row lives, whose goal a goal is,
         // who is on a task, and what the server last said about the spaces.
-        for (table, column) in [("project", "space_id INTEGER"), ("task", "space_id INTEGER"), ("task", "goal_by TEXT"), ("note", "space_id INTEGER")] {
+        for (table, column) in [
+            ("project", "space_id INTEGER"),
+            ("task", "space_id INTEGER"),
+            ("task", "goal_by TEXT"),
+            ("note", "space_id INTEGER"),
+        ] {
             let name = column.split(' ').next().unwrap_or(column);
             let has: bool = conn.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"), [name], |r| {
                 r.get::<_, i64>(0).map(|n| n > 0)
@@ -462,6 +525,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS space_cursor (space_id INTEGER PRIMARY KEY, pulled INTEGER NOT NULL);",
         )?;
         // Last, once every table exists: what keeping copies in step needs.
+        replica::prepare_project_sprints(&conn)?;
         replica::prepare(&conn)?;
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -653,9 +717,9 @@ impl Store {
         }
         let conn = self.conn.lock().unwrap();
         let rev = conn.query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))?;
-        let mut stmt = conn.prepare("SELECT id, name, color, space_id FROM project ORDER BY id")?;
+        let mut stmt = conn.prepare("SELECT id, name, color, space_id, sprint FROM project ORDER BY id")?;
         let projects = stmt
-            .query_map([], |r| Ok(Project { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, space_id: r.get(3)? }))?
+            .query_map([], Project::from_sqlite)?
             .collect::<Result<Vec<_>, _>>()?;
         let mut stmt = conn.prepare(
             "SELECT id, title, notes, project_id, start, due, priority, status, done_day, goal_day, parent_id, space_id, goal_by
@@ -717,9 +781,7 @@ impl Store {
     /// at once must not silently undo each other.
     pub fn sync(&self, change: Change) -> Result<Synced, Error> {
         for project in &change.projects {
-            if project.name.trim().is_empty() {
-                return Err(Error::Invalid("A project needs a name.".into()));
-            }
+            check_project(project)?;
         }
         for task in &change.tasks {
             check(task)?;
@@ -742,9 +804,10 @@ impl Store {
             // A project's space is said once, when it is made; it moves only
             // when the server moves it.
             tx.execute(
-                "INSERT INTO project (id, name, color, space_id) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color",
-                params![p.id, p.name.trim(), p.color, p.space_id],
+                "INSERT INTO project (id, name, color, space_id, sprint) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color,
+                   sprint = coalesce(excluded.sprint, project.sprint)",
+                params![p.id, p.name.trim(), p.color, p.space_id, p.sprint.as_ref().map(Sprint::stored)],
             )?;
         }
         for t in &change.tasks {
@@ -940,7 +1003,7 @@ mod tests {
     #[test]
     fn what_is_saved_comes_back() {
         let s = store();
-        let project = Project { id: 1, name: "Work".into(), color: 2, space_id: None };
+        let project = Project { id: 1, name: "Work".into(), color: 2, space_id: None, sprint: None };
         let mut t = task(2, "  Send the invoice  ");
         t.project_id = Some(1);
         t.due = Some("2026-11-20".into());
@@ -953,6 +1016,39 @@ mod tests {
         assert_eq!(state.tasks[0].title, "Send the invoice");
         assert_eq!(state.tasks[0].project_id, Some(1));
         assert!(state.next_id >= replica::SMALL);
+    }
+
+    #[test]
+    fn sprint_completion_survives_legacy_edits_and_leaves_tasks_open() {
+        let store = store();
+        let mut project: Project = serde_json::from_str(r#"{"id":1,"name":"Launch"}"#).unwrap();
+        let mut launch_task = task(2, "Publish release notes");
+        launch_task.project_id = Some(project.id);
+        store.sync(Change { projects: vec![project.clone()], tasks: vec![launch_task], ..Default::default() }).unwrap();
+
+        let sprint = Sprint { enabled: true, deadline: Some("2026-12-04".into()), completed: true };
+        project.sprint = Some(sprint.clone());
+        store.sync(Change { rev: 1, projects: vec![project.clone()], ..Default::default() }).unwrap();
+        let mut legacy = project.clone();
+        legacy.name = "Release".into();
+        legacy.sprint = None;
+        store.sync(Change { rev: 2, projects: vec![legacy], ..Default::default() }).unwrap();
+
+        let state = store.state("2026-12-05").unwrap();
+        assert_eq!(state.projects[0].name, "Release");
+        assert_eq!(state.projects[0].sprint, Some(sprint.clone()));
+        assert!(!state.tasks[0].done);
+        assert_eq!(store.export().unwrap().rows.projects[0].row.sprint, Some(sprint));
+
+        for deadline in ["Friday", "2026-02-29", "2026-04-31", "2026-13-01", "2026-11-00"] {
+            project.sprint = Some(Sprint { enabled: true, deadline: Some(deadline.into()), completed: false });
+            assert!(matches!(store.sync(Change { rev: 3, projects: vec![project.clone()], ..Default::default() }), Err(Error::Invalid(_))));
+        }
+        assert!(is_sprint_deadline("2028-02-29"));
+
+        project.sprint = Some(Sprint { enabled: false, deadline: Some("2026-12-04".into()), completed: true });
+        store.sync(Change { rev: 3, projects: vec![project], ..Default::default() }).unwrap();
+        assert_eq!(store.state("2026-12-05").unwrap().projects[0].sprint, Some(Sprint { enabled: false, deadline: None, completed: false }));
     }
 
     #[test]
@@ -986,7 +1082,7 @@ mod tests {
         let s = store();
         let mut t = task(2, "Keep me");
         t.project_id = Some(1);
-        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Home".into(), color: 0, space_id: None }], tasks: vec![t], ..Default::default() })
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Home".into(), color: 0, space_id: None, sprint: None }], tasks: vec![t], ..Default::default() })
             .unwrap();
         s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();
         let state = s.state("2026-11-13").unwrap();
@@ -1153,7 +1249,7 @@ mod tests {
     #[test]
     fn a_note_keeps_its_project_and_outlives_it() {
         let s = store();
-        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None }], ..Default::default() }).unwrap();
+        s.sync(Change { rev: 0, projects: vec![Project { id: 1, name: "Hop".into(), color: 0, space_id: None, sprint: None }], ..Default::default() }).unwrap();
         let n = s.save_note(SaveNote { id: None, text: "Funds".into(), updated_at: 1, project_id: Some(1), folder: None, space_id: None }).unwrap();
         assert_eq!(s.notes().unwrap()[0].project_id, Some(1));
         s.sync(Change { rev: 1, delete_projects: vec![1], ..Default::default() }).unwrap();

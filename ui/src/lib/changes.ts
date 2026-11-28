@@ -41,9 +41,17 @@ export function changeSet(saved: Picture, now: Picture, rev: number): Change | n
     return { taskId: Number(task), accountId: account, on }
   }
   for (const [key, json] of now) {
-    if (saved.get(key) === json) continue
-    if (key[0] === 'p') change.projects.push(JSON.parse(json) as Project)
-    else if (key[0] === 'a') change.assign.push(assignment(key, true))
+    const previous = saved.get(key)
+    if (previous === json) continue
+    if (key[0] === 'p') {
+      const project: Project = JSON.parse(json)
+      // Undo can restore a record from before sprint mode was enabled.
+      // Omission means an older client, so send the reset explicitly.
+      if (!project.sprint && previous && (JSON.parse(previous) as Project).sprint?.enabled) {
+        project.sprint = { enabled: false, deadline: null, completed: false }
+      }
+      change.projects.push(project)
+    } else if (key[0] === 'a') change.assign.push(assignment(key, true))
     else change.tasks.push(JSON.parse(json) as Task)
   }
   for (const key of saved.keys()) {

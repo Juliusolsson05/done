@@ -48,7 +48,7 @@ import { useApp } from '@/lib/app-context'
 import { restart } from '@/lib/backend'
 import { play } from '@/lib/sounds'
 import { TODAY } from '@/lib/days'
-import { addProject, counts, openTasks, type Project, type View } from '@/lib/tasks'
+import { addProject, completedSprint, counts, openTasks, type Project, type View } from '@/lib/tasks'
 import { isPersonal, workspaces } from '@/lib/team'
 import { getFolderPanel, getNamingFolder, nameFolder, NEW_FOLDER, subscribeFolderPanel } from '@/lib/note-folder-panel'
 import { sameFolder } from '@/lib/notes'
@@ -218,9 +218,23 @@ export function AppSidebar() {
     </SidebarMenuItem>
   )
 
-  // A render function, not a component: a component made here would be new
-  // on every render, and a project name being typed in it would be lost.
-  const projectGroup = (key: string, label: string, projects: Project[], space: number | null, mark?: ReactNode) => (
+  const projectRow = (project: Project) => (
+    <SidebarMenuItem key={project.id}>
+      <SidebarMenuButton
+        data-project={project.id}
+        isActive={ui.view.kind === 'project' && ui.view.id === project.id}
+        onClick={() => openView({ kind: 'project', id: project.id })}
+        className={ROW}
+      >
+        <ProjectDot id={project.id} className="mx-1" />
+        <span>{project.name}</span>
+      </SidebarMenuButton>
+      {count.project(project.id) > 0 && <SidebarMenuBadge className={cn('font-normal text-faint', BADGE)}>{count.project(project.id)}</SidebarMenuBadge>}
+    </SidebarMenuItem>
+  )
+  const projectGroup = (key: string, label: string, projects: Project[], space: number | null, mark?: ReactNode) => {
+    const completed = projects.filter(completedSprint)
+    return (
       <SidebarGroup key={key}>
         <SidebarGroupLabel className="gap-1.5 text-faint">
           {mark}
@@ -230,24 +244,20 @@ export function AppSidebar() {
           <PlusIcon />
         </SidebarGroupAction>
         <SidebarMenu>
-          {projects.map((project) => (
-            <SidebarMenuItem key={project.id}>
-              <SidebarMenuButton
-                data-project={project.id}
-                isActive={ui.view.kind === 'project' && ui.view.id === project.id}
-                onClick={() => openView({ kind: 'project', id: project.id })}
-                className={ROW}
-              >
-                <ProjectDot id={project.id} className="mx-1" />
-                <span>{project.name}</span>
-              </SidebarMenuButton>
-              {count.project(project.id) > 0 && <SidebarMenuBadge className={cn('font-normal text-faint', BADGE)}>{count.project(project.id)}</SidebarMenuBadge>}
-            </SidebarMenuItem>
-          ))}
+          {projects.filter((project) => !completedSprint(project)).map(projectRow)}
           {ui.newProject && newIn === space && <NewProject space={space} />}
         </SidebarMenu>
+        {completed.length > 0 && (
+          <details className="text-sm text-muted-foreground">
+            <summary className="cursor-pointer rounded-md px-2 py-2 hover:bg-sidebar-accent touch:min-h-11">
+              Completed sprints ({completed.length})
+            </summary>
+            <SidebarMenu>{completed.map(projectRow)}</SidebarMenu>
+          </details>
+        )}
       </SidebarGroup>
-  )
+    )
+  }
 
   return (
     // On a phone the sidebar is a sheet that slides in over the page (opened

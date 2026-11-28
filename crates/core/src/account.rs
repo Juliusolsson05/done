@@ -723,7 +723,7 @@ mod tests {
         // Into a project of another space it follows the project, as on the server.
         let p = s.state(TODAY).unwrap().next_id;
         change(&s, |c| {
-            c.projects.push(Project { id: p, name: "Home".into(), color: 0, space_id: Some(9) });
+            c.projects.push(Project { id: p, name: "Home".into(), color: 0, space_id: Some(9), sprint: None });
             c.tasks.push(Task { project_id: Some(p), ..task(mine, "Renew passport, edited") });
         });
         assert_eq!(s.state(TODAY).unwrap().tasks.iter().find(|t| t.id == mine).unwrap().space_id, Some(9));

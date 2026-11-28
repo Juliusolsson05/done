@@ -661,7 +661,7 @@ fn call(store: &dyn Tasks, name: &str, args: &Value) -> Result<Value, String> {
             }
             // The first colour no other project is using, as the app does.
             let color = (0..COLOURS).find(|c| state.projects.iter().all(|p| p.color != *c)).unwrap_or(0);
-            let project = Project { id: state.next_id, name: name.clone(), color, space_id: None };
+            let project = Project { id: state.next_id, name: name.clone(), color, space_id: None, sprint: None };
             Ok((Change { projects: vec![project], ..Default::default() }, json!({ "created": name })))
         }),
         "list_notes" => {
