@@ -5,7 +5,7 @@ import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { beginSignIn, CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInWithAppleToken, signInWithPassword } from '@/lib/cloud'
 import { readMe, type Me } from '@/lib/me'
-import { isIosAgent } from '@/lib/platform'
+import { isIosAgent, windowsDevice } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
@@ -72,6 +72,7 @@ export const nativeSafeArea = async (): Promise<[number, number, number, number]
 // and kept on the release `mac`, a pre-release that is never "latest" (the
 // installed apps ask "latest" for updates). It can be a few versions behind;
 // the app updates itself once it runs.
+export const WINDOWS_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/latest/download/done-windows-x64-setup.exe'
 export const MAC_DOWNLOAD = 'https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg'
 
 // An app that has signed in to a hosted account. Looked at once, when the
@@ -283,14 +284,26 @@ export const watchAppleSession = (): (() => void) | undefined => {
 
 // The browser hands a finished sign-in back as a link. Returns how to stop listening.
 export const onSignedIn = (done: () => void): (() => void) => {
-  const listening = tauri?.event.listen<string>('opened-link', (event) => {
-    void finishSignIn(event.payload).then((ok) => ok && done())
-  })
-  return () => void listening?.then((stop) => stop())
+  if (!tauri) return () => {}
+  const shell = tauri
+  let active = true
+  const receive = async () => {
+    if (!active) return
+    const link = await shell.core.invoke<string | null>('take_opened_link')
+    if (link && await finishSignIn(link)) done()
+  }
+  const listening = shell.event.listen('opened-link', receive)
+  // Subscribe before draining. Windows can hand the app a URL before its
+  // webview starts, or start a second process while the first is open.
+  void listening.then(receive)
+  return () => {
+    active = false
+    void listening.then((stop) => stop())
+  }
 }
 
-// In a browser there is no app to ask, so the usual install path stands in.
-export const BROWSER_INFO: Info = { version: null, mcpCommand: '/Applications/done.app/Contents/MacOS/done', updateReady: null }
+// Windows users can choose their install folder. Only the native app knows the executable's path.
+export const BROWSER_INFO: Info = { version: null, mcpCommand: windowsDevice ? '' : '/Applications/done.app/Contents/MacOS/done', updateReady: null }
 export const loadInfo = (): Promise<Info> => (tauri ? tauri.core.invoke<Info>('info') : Promise.resolve(BROWSER_INFO))
 
 export const restart = (): void => {

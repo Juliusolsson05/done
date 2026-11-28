@@ -1,3 +1,4 @@
+import { modifierKey, windowsDevice } from '@/lib/platform'
 import { CLOUD_URL } from '@/lib/cloud'
 import { Avatar } from '@/components/avatars'
 import { useState, type ReactNode } from 'react'
@@ -9,7 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, WINDOWS_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -194,6 +195,7 @@ export function Settings() {
   // A workspace's page opens in place of the settings, with a way back.
   const [space, setSpace] = useState<number | null>(null)
   const path = info.mcpCommand
+  const commandPath = windowsDevice ? "'" + path.replaceAll("'", "''") + "'" : `"${path}"`
   if (space !== null) return <WorkspacePage id={space} onBack={() => setSpace(null)} />
   return (
     <div className="max-w-3xl">
@@ -228,13 +230,13 @@ export function Settings() {
         {/* The built-in MCP server reads the tasks file on this Mac. A signed-in
             app keeps that file in step with the account, so it works there
             too; in the web app there is no file here to read. */}
-        {(!account || isDesktop) && !onIos && (
+        {path && (!account || isDesktop) && !onIos && (
           <Pane title="Connect an AI agent">
             <p className="text-muted-foreground">
               done has an MCP server built in. An agent connected to it can read your tasks and add, change and finish them. What it does shows up
               here within a few seconds.
             </p>
-            <Snippet label="Claude Code: run this once in a terminal" text={`claude mcp add done -- "${path}" mcp`} />
+            <Snippet label={windowsDevice ? "Run in PowerShell for Claude Code" : "Claude Code: run this once in a terminal"} text={`claude mcp add done -- ${commandPath} mcp`} />
             <Snippet
               label="Other apps: add this to their MCP settings"
               text={JSON.stringify({ mcpServers: { done: { command: path, args: ['mcp'] } } }, null, 2)}
@@ -242,14 +244,17 @@ export function Settings() {
           </Pane>
         )}
 
-        {/* In a browser: the Mac app, one download away (Julius, 23 Nov). The
-            app itself updates on its own, so it has no need of this. */}
         {!isDesktop && (
-          <Pane title="Mac app">
-            <p className="text-muted-foreground">done for Mac, for Macs with Apple silicon. It updates itself after that.</p>
-            <Button asChild size="sm" className="self-start">
-              <a href={MAC_DOWNLOAD}>Download for Mac</a>
-            </Button>
+          <Pane title="Desktop app">
+            <p className="text-muted-foreground">Keep tasks on this computer and work offline.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild size="sm" variant={windowsDevice ? 'default' : 'outline'}>
+                <a href={WINDOWS_DOWNLOAD}>Download for Windows (x64)</a>
+              </Button>
+              <Button asChild size="sm" variant={windowsDevice ? 'outline' : 'default'}>
+                <a href={MAC_DOWNLOAD}>Download for Mac (Apple silicon)</a>
+              </Button>
+            </div>
           </Pane>
         )}
 
@@ -273,14 +278,14 @@ export function Settings() {
                 </Button>
               </div>
               <p className="text-muted-foreground">
-                Also on <Kbd>⌘</Kbd> <Kbd>+</Kbd>, <Kbd>⌘</Kbd> <Kbd>−</Kbd> and <Kbd>⌘</Kbd> <Kbd>0</Kbd>.
+                Also on <Kbd>{modifierKey}</Kbd> <Kbd>+</Kbd>, <Kbd>{modifierKey}</Kbd> <Kbd>−</Kbd> and <Kbd>{modifierKey}</Kbd> <Kbd>0</Kbd>.
               </p>
             </Pane>
             <Pane title={`Version ${info.version}`}>
               <p className="text-muted-foreground">
                 {info.updateReady
-                  ? `Version ${info.updateReady} is installed and starts the next time done opens.`
-                  : 'done updates itself. New versions are fetched in the background and start the next time it opens.'}
+                  ? `Version ${info.updateReady} is ready. Restart done to use it.`
+                  : 'done checks for updates in the background.'}
               </p>
               {info.updateReady && (
                 <Button size="sm" className="self-start" onClick={restart}>
