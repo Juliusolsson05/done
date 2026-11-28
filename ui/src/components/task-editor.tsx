@@ -18,6 +18,7 @@ import { play } from '@/lib/sounds'
 import { addSubtask, isSubtask, patchTask, PRIORITY_NAME, setGoal, subtasksOf, tidyDates, type Task } from '@/lib/tasks'
 import { describeDay, TODAY, type Day } from '@/lib/days'
 import { cn } from '@/lib/utils'
+import { onlyOnDevice, ONLY_HERE } from '@/lib/on-device'
 
 function EditorForm({ task }: { task: Task }) {
   const { data, update, closeAll, removeTask } = useApp()
@@ -55,6 +56,7 @@ function EditorForm({ task }: { task: Task }) {
         aria-label="Notes"
         className="min-h-10 border-0 px-0 py-0 text-muted-foreground focus-visible:ring-0"
       />
+      {onlyOnDevice(task, data) && <p className="text-xs text-muted-foreground">{ONLY_HERE}</p>}
       <Separator className="my-2" />
       <div className="flex flex-wrap items-center gap-2">
         <Label className="text-xs font-normal text-muted-foreground">
@@ -243,6 +245,7 @@ function Sheet({ task }: { task: Task }) {
               className="field-sizing-content min-h-20 w-full resize-none bg-transparent py-2.5 pr-4 text-body text-muted-foreground outline-none"
             />
           </div>
+          {onlyOnDevice(task, data) && <p className="-mt-4 px-4 text-footnote text-muted-foreground">{ONLY_HERE}</p>}
           <div className="overflow-hidden rounded-xl bg-background pl-4">
             <DateRow label="Date" day={due} set={setDue} className={row} />
             <DateRow label="Starts" day={start} set={setStart} className={row} />

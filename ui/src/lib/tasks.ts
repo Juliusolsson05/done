@@ -41,6 +41,11 @@ export interface Data {
   tasks: Task[]
   // Spaces, members and notifications, for a signed-in window.
   team?: Team | null
+  // Tasks only on this device: the account would not take them (lib/on-device.ts).
+  localOnly?: number[]
+  // Workspace tasks kept on a signed-out device to be sent later: left out
+  // of the widgets (lib/widget-snapshot.ts).
+  withheld?: number[]
 }
 
 export type View =

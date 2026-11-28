@@ -1018,7 +1018,7 @@ impl Db {
         }
         let rev: i64 = client.query_one("SELECT coalesce(sum(next_seq), 0)::BIGINT FROM space WHERE id = ANY($1)", &[&ids]).await?.get(0);
         let team = team_in(&client, me, &spaces).await?;
-        Ok(State { rev, next_id: fresh_id(), projects, tasks, team: Some(team) })
+        Ok(State { rev, next_id: fresh_id(), projects, tasks, team: Some(team), local_only: Vec::new(), withheld: Vec::new() })
     }
 
     /// Returns the rows refused for their space (see `merge`).
@@ -2609,14 +2609,14 @@ mod tests {
     /// What the app does to its file when a round is answered 401 (the
     /// session ran out or was ended) and the window loads again signed out.
     fn session_ended(d: &Store) {
-        d.mark_leaving(Some(Leaving::Ended)).unwrap();
-        d.finish_leaving().unwrap();
+        d.mark_leaving(Some(Leaving::Ended), Some("app")).unwrap();
+        d.finish_leaving(Some("app")).unwrap();
     }
 
     /// A window that is not signed in loads: the "done next" preview app on
     /// the real tasks file, say.
     fn plain_load(d: &Store) {
-        assert_eq!(d.finish_leaving().unwrap(), None);
+        assert_eq!(d.finish_leaving(Some("done next")).unwrap(), None);
     }
 
     /// Geart's phone in Hop, with Julius's project Launch and two of its tasks.
@@ -2717,5 +2717,30 @@ mod tests {
         assert!(phone.outbox().unwrap().rows.is_empty(), "still sent: {:?}", phone.outbox().unwrap().rows.tasks);
         assert_eq!(titles(&phone), ["Inbox thing EDITED"]);
         assert_eq!(phone.state(TODAY).unwrap().tasks[0].space_id, None);
+    }
+
+    // Issue #120, A: a row refused twice was kept on the phone only, out of
+    // any space, and never sent again, even once the right account signed in.
+    #[tokio::test]
+    async fn a_row_refused_twice_goes_again_when_the_account_signs_in_again() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let phone = device();
+        let id = next(&phone);
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing")));
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        let id = phone.state(TODAY).unwrap().tasks[0].id;
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing EDITED")));
+        for _ in 0..2 {
+            let out = phone.outbox().unwrap();
+            let reply = db.exchange(&geart, &out).await.unwrap();
+            phone.inbox(&Reply { spaces: None, ..reply }, out.upto).unwrap();
+        }
+        assert!(phone.outbox().unwrap().rows.is_empty());
+        // Julius's session ends and he signs in again: it goes.
+        session_ended(&phone);
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ["Inbox thing EDITED"]);
+        assert_eq!(phone.state(TODAY).unwrap().tasks[0].space_id, Some(julius.personal));
     }
 }

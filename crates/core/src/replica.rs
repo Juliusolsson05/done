@@ -650,6 +650,41 @@ fn take_spaces(tx: &Transaction, spaces: &[Cursor]) -> Result<usize, Error> {
     Ok(dropped)
 }
 
+fn set_list(tx: &Transaction, key: &str, list: &[Refused]) -> Result<(), Error> {
+    if list.is_empty() {
+        tx.execute("DELETE FROM kv WHERE key = ?1", [key])?;
+    } else {
+        let text = serde_json::to_string(list).map_err(|e| Error::Invalid(e.to_string()))?;
+        tx.execute("INSERT INTO kv (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, &text])?;
+    }
+    Ok(())
+}
+
+/// Rows refused twice and kept on this device only (see `inbox_in`).
+pub(crate) fn local_only(conn: &Connection) -> Result<Vec<Refused>, Error> {
+    Ok(conn
+        .query_row("SELECT value FROM kv WHERE key = 'local_only'", [], |r| r.get::<_, String>(0))
+        .optional()?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default())
+}
+
+/// When the account leaves, or signs in again: rows it refused twice are
+/// unsent again, with a clean record, so they go at most twice more. Once a
+/// sign-in, never for ever.
+pub(crate) fn release_local_only(tx: &Transaction) -> Result<(), Error> {
+    let list = local_only(tx)?;
+    for r in &list {
+        if !TABLES.iter().any(|(t, _)| *t == r.kind) {
+            continue;
+        }
+        tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'seq'", [])?;
+        tx.execute(&format!("UPDATE {} SET seq = (SELECT value FROM meta WHERE key = 'seq') WHERE id = ?1", r.kind), [r.id])?;
+    }
+    tx.execute("DELETE FROM kv WHERE key IN ('local_only', 'refused')", [])?;
+    Ok(())
+}
+
 /// What to send, inside a transaction of the caller's (see `Store::outbox`).
 pub(crate) fn outbox_in(tx: &Transaction) -> Result<Outbox, Error> {
     let renumbered = rekey(tx)?;
@@ -699,18 +734,21 @@ pub(crate) fn inbox_in(tx: &Transaction, reply: &Reply, upto: i64) -> Result<boo
                 applied += tx.execute(&format!("UPDATE {} SET space_id = NULL WHERE id = ?1 AND space_id IS NOT NULL", r.kind), [r.id])?;
                 tx.execute("UPDATE meta SET value = 0 WHERE key IN ('quiet', 'applying')", [])?;
             }
+            // Listed, so the window can say it is only here, and so it goes
+            // once more when the account signs in again (`release_local_only`).
+            let mut here_only = local_only(tx)?;
+            if !here_only.contains(r) {
+                here_only.push(r.clone());
+                applied += 1;
+            }
+            set_list(tx, "local_only", &here_only)?;
         } else {
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'seq'", [])?;
             tx.execute(&format!("UPDATE {} SET seq = (SELECT value FROM meta WHERE key = 'seq') WHERE id = ?1", r.kind), [r.id])?;
             again.push(r.clone());
         }
     }
-    if again.is_empty() {
-        tx.execute("DELETE FROM kv WHERE key = 'refused'", [])?;
-    } else {
-        let text = serde_json::to_string(&again).map_err(|e| Error::Invalid(e.to_string()))?;
-        tx.execute("INSERT INTO kv (key, value) VALUES ('refused', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
-    }
+    set_list(tx, "refused", &again)?;
     if let Some(team) = &reply.team {
         let text = team.to_string();
         let before: Option<String> = tx.query_row("SELECT value FROM kv WHERE key = 'team'", [], |r| r.get(0)).optional()?;

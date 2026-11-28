@@ -70,8 +70,22 @@ pub struct Held {
 #[serde(rename_all = "kebab-case")]
 pub enum Leaving {
     Ended,
+    /// Asked the server to delete the account, no answer yet. Finished as
+    /// `Ended`: a deletion counts only once the server confirmed it.
+    Deleting,
     SignedOut,
     Deleted,
+}
+
+/// A leaving mark and the app that wrote it: an id kept in that app's own web
+/// storage. Another app on the same file (the "done next" preview) has
+/// another id and never finishes it. A mark from before owners (a bare
+/// string) has none, and is finished by any app, as it was.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+struct Mark {
+    how: Leaving,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    by: Option<String>,
 }
 
 /// What leaving did: how, how many rows went, how many changes are still
@@ -98,7 +112,7 @@ fn team(conn: &Connection) -> Result<Option<Value>, Error> {
 
 /// The account this file's synced rows belong to. A file from before this
 /// was kept has the team the server last sent, which says who it was for.
-fn bound(conn: &Connection) -> Result<Option<Account>, Error> {
+pub(crate) fn bound(conn: &Connection) -> Result<Option<Account>, Error> {
     let team = team(conn)?;
     let personal = team.as_ref().and_then(|t| t["personal"].as_i64());
     if let Some(account) = kv(conn, "account")?.and_then(|a| serde_json::from_str::<Account>(&a).ok()) {
@@ -121,8 +135,14 @@ fn bind(conn: &Connection, account: &Account) -> Result<(), Error> {
     set_kv(conn, "account", &serde_json::to_string(account).map_err(|e| Error::Invalid(e.to_string()))?)
 }
 
-fn marked(conn: &Connection) -> Result<Option<Leaving>, Error> {
-    Ok(kv(conn, "leaving")?.and_then(|m| serde_json::from_str(&m).ok()))
+fn marked(conn: &Connection) -> Result<Option<Mark>, Error> {
+    let Some(text) = kv(conn, "leaving")? else { return Ok(None) };
+    Ok(serde_json::from_str::<Mark>(&text).ok().or_else(|| serde_json::from_str::<Leaving>(&text).ok().map(|how| Mark { how, by: None })))
+}
+
+/// The mark, if `by` wrote it (or nobody is known to have).
+fn own(conn: &Connection, by: Option<&str>) -> Result<Option<Mark>, Error> {
+    Ok(marked(conn)?.filter(|m| m.by.is_none() || m.by.as_deref() == by))
 }
 
 fn count(conn: &Connection, sql: &str, p: impl rusqlite::Params) -> Result<i64, Error> {
@@ -204,6 +224,8 @@ fn leave_in(tx: &Transaction, how: Leaving) -> Result<usize, Error> {
             bind(tx, was)?;
         }
     }
+    // Rows the account refused twice go once more when it signs in again.
+    replica::release_local_only(tx)?;
     let pushed = meta(tx, "pushed")?;
     let mut removed = 0;
     let mut forgot = 0;
@@ -344,27 +366,32 @@ impl Store {
     /// load. A weaker mark never replaces a stronger one: a session ending
     /// during a deletion is still a deletion. `None` takes the mark away (a
     /// deletion the server refused).
-    pub fn mark_leaving(&self, how: Option<Leaving>) -> Result<(), Error> {
+    /// `by` is the app writing it (see `Mark`).
+    pub fn mark_leaving(&self, how: Option<Leaving>, by: Option<&str>) -> Result<(), Error> {
         let conn = self.conn.lock().unwrap();
         match how {
             None => {
                 conn.execute("DELETE FROM kv WHERE key = 'leaving'", [])?;
             }
             Some(how) => {
-                if marked(&conn)?.is_none_or(|was| how > was) {
-                    set_kv(&conn, "leaving", &serde_json::to_string(&how).map_err(|e| Error::Invalid(e.to_string()))?)?;
+                if marked(&conn)?.is_none_or(|was| how > was.how) {
+                    let mark = Mark { how, by: by.map(String::from) };
+                    set_kv(&conn, "leaving", &serde_json::to_string(&mark).map_err(|e| Error::Invalid(e.to_string()))?)?;
                 }
             }
         }
         Ok(())
     }
 
-    /// Does what `mark_leaving` marked, and takes the mark away, in one step.
-    /// With no mark, nothing: a window that loads signed out changes nothing.
-    pub fn finish_leaving(&self) -> Result<Option<Left>, Error> {
+    /// Does what `by` marked, and takes the mark away, in one step. With no
+    /// mark of its own, nothing: a window that loads signed out changes
+    /// nothing, and one app never finishes another's mark.
+    pub fn finish_leaving(&self, by: Option<&str>) -> Result<Option<Left>, Error> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some(how) = marked(&tx)? else { return Ok(None) };
+        let Some(mark) = own(&tx, by)? else { return Ok(None) };
+        // Not confirmed by the server: a session that ended.
+        let how = if mark.how == Leaving::Deleting { Leaving::Ended } else { mark.how };
         let removed = leave_in(&tx, how)?;
         tx.execute("DELETE FROM kv WHERE key = 'leaving'", [])?;
         let kept = if how == Leaving::Deleted { 0 } else { unsent(&tx)? };
@@ -372,10 +399,25 @@ impl Store {
         Ok(Some(Left { how, removed, kept }))
     }
 
-    /// `mark_leaving` and `finish_leaving` at once.
+    /// A signed-in app starting: its own mark, left by a crash or a reload
+    /// before leaving was done, for it to complete (sign out, finish). A
+    /// deletion the server never confirmed is taken back instead, and so
+    /// gives nothing: the account may well be there.
+    pub fn own_mark(&self, by: Option<&str>) -> Result<Option<Leaving>, Error> {
+        let conn = self.conn.lock().unwrap();
+        Ok(match own(&conn, by)? {
+            Some(mark) if mark.how == Leaving::Deleting => {
+                conn.execute("DELETE FROM kv WHERE key = 'leaving'", [])?;
+                None
+            }
+            mark => mark.map(|m| m.how),
+        })
+    }
+
+    /// `mark_leaving` and `finish_leaving` at once, by no app in particular.
     pub fn leave_account(&self, how: Leaving) -> Result<Left, Error> {
-        self.mark_leaving(Some(how))?;
-        Ok(self.finish_leaving()?.expect("just marked"))
+        self.mark_leaving(Some(how), None)?;
+        Ok(self.finish_leaving(None)?.expect("just marked"))
     }
 
     /// On a device that is not signed in: the account its changes wait for,
@@ -479,7 +521,7 @@ mod tests {
         let fresh = store();
         change(&fresh, |c| c.tasks.push(task(1, "Buy milk")));
         let rev = fresh.state(TODAY).unwrap().rev;
-        assert_eq!(fresh.finish_leaving().unwrap(), None);
+        assert_eq!(fresh.finish_leaving(None).unwrap(), None);
         assert_eq!((fresh.state(TODAY).unwrap().rev, titles(&fresh)), (rev, vec!["Buy milk".to_string()]));
     }
 
@@ -540,8 +582,8 @@ mod tests {
         let s = store();
         let (_, shared) = synced(&s);
         change(&s, |c| c.tasks.push(Task { project_id: Some(shared + 10), ..task(shared, "Ship the site, edited") }));
-        s.mark_leaving(Some(Leaving::Ended)).unwrap();
-        let left = s.finish_leaving().unwrap().unwrap();
+        s.mark_leaving(Some(Leaving::Ended), None).unwrap();
+        let left = s.finish_leaving(None).unwrap().unwrap();
         assert_eq!((left.how, left.kept), (Leaving::Ended, 1));
         assert_eq!(titles(&s), vec!["Renew passport", "Ship the site, edited"]);
         let state = s.state(TODAY).unwrap();
@@ -563,28 +605,28 @@ mod tests {
         synced(&s);
         // A window that loads signed out, with no mark ("done next"): nothing.
         let rev = s.state(TODAY).unwrap().rev;
-        assert_eq!(s.finish_leaving().unwrap(), None);
+        assert_eq!(s.finish_leaving(None).unwrap(), None);
         assert_eq!(s.state(TODAY).unwrap().rev, rev);
         assert!(s.state(TODAY).unwrap().team.is_some());
         // Deleting, then the session ends before the clean-up: still a deletion.
-        s.mark_leaving(Some(Leaving::Deleted)).unwrap();
-        s.mark_leaving(Some(Leaving::Ended)).unwrap();
-        assert_eq!(s.finish_leaving().unwrap().map(|l| l.how), Some(Leaving::Deleted));
-        assert_eq!(s.finish_leaving().unwrap(), None);
+        s.mark_leaving(Some(Leaving::Deleted), None).unwrap();
+        s.mark_leaving(Some(Leaving::Ended), None).unwrap();
+        assert_eq!(s.finish_leaving(None).unwrap().map(|l| l.how), Some(Leaving::Deleted));
+        assert_eq!(s.finish_leaving(None).unwrap(), None);
         // A deletion the server refused takes its mark back.
-        s.mark_leaving(Some(Leaving::Deleted)).unwrap();
-        s.mark_leaving(None).unwrap();
-        assert_eq!(s.finish_leaving().unwrap(), None);
+        s.mark_leaving(Some(Leaving::Deleted), None).unwrap();
+        s.mark_leaving(None, None).unwrap();
+        assert_eq!(s.finish_leaving(None).unwrap(), None);
     }
 
     #[test]
     fn a_round_that_was_answered_takes_a_stale_mark_away() {
         let s = store();
         let a = who("1001");
-        s.mark_leaving(Some(Leaving::Deleted)).unwrap();
+        s.mark_leaving(Some(Leaving::Deleted), None).unwrap();
         let out = s.outbox_for(&a).unwrap();
         s.inbox_for(&Reply::default(), out.upto, &a).unwrap();
-        assert_eq!(s.finish_leaving().unwrap(), None);
+        assert_eq!(s.finish_leaving(None).unwrap(), None);
     }
 
     // Review of #112, 3.
@@ -604,6 +646,54 @@ mod tests {
         assert!(s.waiting().unwrap().is_none());
         let t = s.state(TODAY).unwrap().tasks.into_iter().find(|t| t.id == mine).unwrap();
         assert_eq!((t.title.as_str(), t.space_id), ("Renew passport, edited", None));
+        // The window is told it is only here (issue #120, A).
+        assert_eq!(s.state(TODAY).unwrap().local_only, vec![mine]);
+        // The session ends and the account signs in again: it goes once more,
+        // and twice at most.
+        s.leave_account(Leaving::Ended).unwrap();
+        for _ in 0..2 {
+            let out = s.outbox_for(&a).unwrap();
+            assert_eq!(out.rows.tasks.len(), 1);
+            s.inbox_for(&refused, out.upto, &a).unwrap();
+        }
+        assert!(s.outbox_for(&a).unwrap().rows.is_empty());
+        assert_eq!(s.state(TODAY).unwrap().local_only, vec![mine]);
+        // Taken this time: no longer only here.
+        s.leave_account(Leaving::Ended).unwrap();
+        let out = s.outbox_for(&a).unwrap();
+        s.inbox_for(&Reply::default(), out.upto, &a).unwrap();
+        assert!(s.state(TODAY).unwrap().local_only.is_empty());
+        assert!(s.outbox_for(&a).unwrap().rows.is_empty());
+    }
+
+    // Issue #120, E: kept to be sent, but not for the Home Screen.
+    #[test]
+    fn workspace_tasks_kept_after_a_session_ended_are_withheld_from_widgets() {
+        let s = store();
+        let (mine, shared) = synced(&s);
+        assert!(s.state(TODAY).unwrap().withheld.is_empty());
+        change(&s, |c| c.tasks.push(Task { project_id: Some(shared + 10), ..task(shared, "Ship the site, edited") }));
+        s.leave_account(Leaving::Ended).unwrap();
+        let state = s.state(TODAY).unwrap();
+        assert_eq!(state.withheld, vec![shared]);
+        assert!(state.tasks.iter().any(|t| t.id == mine) && state.tasks.iter().any(|t| t.id == shared));
+    }
+
+    // Issue #120, B: a signed-in app completes its own mark when it starts,
+    // and takes back a deletion that was never confirmed.
+    #[test]
+    fn a_signed_in_app_finds_its_own_mark_only() {
+        let s = store();
+        mark_by(&s, Leaving::SignedOut, "real");
+        assert_eq!(s.own_mark(Some("next")).unwrap(), None);
+        assert_eq!(s.own_mark(Some("real")).unwrap(), Some(Leaving::SignedOut));
+        s.mark_leaving(None, None).unwrap();
+        mark_by(&s, Leaving::Deleting, "real");
+        assert_eq!(s.own_mark(Some("real")).unwrap(), None);
+        assert_eq!(load_by(&s, "real"), None);
+        // A mark from before owners: anyone's.
+        s.conn.lock().unwrap().execute("INSERT INTO kv (key, value) VALUES ('leaving', '\"signed-out\"')", []).unwrap();
+        assert_eq!(load_by(&s, "next").map(|l| l.how), Some(Leaving::SignedOut));
     }
 
     #[test]
@@ -637,5 +727,49 @@ mod tests {
             c.tasks.push(Task { project_id: Some(p), ..task(mine, "Renew passport, edited") });
         });
         assert_eq!(s.state(TODAY).unwrap().tasks.iter().find(|t| t.id == mine).unwrap().space_id, Some(9));
+    }
+
+    /// The app with this window's storage writes a mark (issue #120, B).
+    fn mark_by(s: &Store, how: Leaving, by: &str) {
+        s.mark_leaving(Some(how), Some(by)).unwrap();
+    }
+
+    /// A window that is not signed in loads, with this storage.
+    fn load_by(s: &Store, by: &str) -> Option<Left> {
+        s.finish_leaving(Some(by)).unwrap()
+    }
+
+    /// Asked to delete, before the server answered (issue #120, C).
+    fn before_deleting(s: &Store, by: &str) {
+        mark_by(s, Leaving::Deleting, by);
+    }
+
+    // Issue #120, B: the real app writes a mark and crashes before it signs
+    // out; the "done next" preview, never signed in, opens the same file.
+    #[test]
+    fn a_mark_is_finished_only_by_the_app_that_wrote_it() {
+        let s = store();
+        synced(&s);
+        mark_by(&s, Leaving::SignedOut, "real");
+        assert_eq!(load_by(&s, "next"), None);
+        assert!(s.state(TODAY).unwrap().team.is_some());
+        assert_eq!(load_by(&s, "real").map(|l| l.how), Some(Leaving::SignedOut));
+        assert!(s.state(TODAY).unwrap().team.is_none());
+    }
+
+    // Issue #120, C: a deletion the server never confirmed is not finished as
+    // one: the session ended meanwhile, so nothing unsent goes and the file
+    // stays the account's.
+    #[test]
+    fn a_deletion_not_confirmed_is_never_finished_as_one() {
+        let s = store();
+        let (_, shared) = synced(&s);
+        change(&s, |c| c.tasks.push(Task { project_id: Some(shared + 10), ..task(shared, "Ship the site, edited") }));
+        before_deleting(&s, "real");
+        mark_by(&s, Leaving::Ended, "real");
+        load_by(&s, "real").unwrap();
+        assert_eq!(titles(&s), vec!["Renew passport", "Ship the site, edited"]);
+        let conn = s.conn.lock().unwrap();
+        assert_eq!(bound(&conn).unwrap().and_then(|a| a.id).as_deref(), Some("1001"));
     }
 }

@@ -103,6 +103,15 @@ pub struct State {
     /// server last sent them. Absent with no account.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team: Option<serde_json::Value>,
+    /// Tasks the account refused twice: on this device only, until it signs
+    /// in again (replica.rs `release_local_only`). Said on the task.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub local_only: Vec<i64>,
+    /// Workspace tasks kept on a signed-out device only to be sent when the
+    /// account signs in again (account.rs, a session that ended). The window
+    /// lists them; the Home Screen widgets leave them out.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub withheld: Vec<i64>,
 }
 
 /// What one window changed since it last loaded or saved.
@@ -688,7 +697,13 @@ impl Store {
         // number (see replica.rs). A window loads again every few seconds and
         // gets a new start, so what it adds still sorts after what others added.
         let next_id = replica::fresh_id(&conn)?;
-        Ok(State { rev, next_id, projects, tasks, team })
+        let local_only = replica::local_only(&conn)?.into_iter().filter(|r| r.kind == "task").map(|r| r.id).collect();
+        // Signed out (no team): what is in a space that is not the account's own.
+        let withheld = match (&team, account::bound(&conn)?.and_then(|a| a.personal)) {
+            (None, Some(personal)) => tasks.iter().filter(|t| t.space_id.is_some_and(|s| s != personal)).map(|t| t.id).collect(),
+            _ => Vec::new(),
+        };
+        Ok(State { rev, next_id, projects, tasks, team, local_only, withheld })
     }
 
     /// Applies one window's changes, all or nothing. Refused as `Stale` when

@@ -29,7 +29,11 @@ export function widgetSnapshot(
   focus: { title: string; endsAt: number | null; remaining: number | null } | null,
   now: number,
   keep: (t: Task) => boolean = () => true,
+  // Workspace tasks a signed-out device keeps only to send them later
+  // (Data.withheld): not for the Home Screen.
+  withheld: number[] = [],
 ): WidgetSnapshot {
+  if (withheld.length) tasks = tasks.filter((t) => !withheld.includes(t.id))
   // As Today draws it: the goal on top, then overdue, then today.
   const goal = goalTask(tasks, today, me)
   const listed = sections({ kind: 'today' }, tasks, today, keep).flatMap((s) =>
