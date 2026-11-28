@@ -381,11 +381,11 @@ export const signIn = (): Promise<void> => {
 export const canSignInWithApple = canSignIn && isIosApp
 export const needsAppleVerification = isIosApp && Boolean(hosted?.account.id?.startsWith('apple') && !hosted.appleUser)
 export const signInWithApple = async (): Promise<boolean> => {
-  const answer = await tauri!.core.invoke<{ token?: string; name?: string; user?: string; error?: string }>('apple_sign_in')
+  const answer = await tauri!.core.invoke<{ token?: string; code?: string; name?: string; user?: string; error?: string }>('apple_sign_in')
   if (answer.error === 'cancelled') return false
-  if (!answer.token || !answer.user) throw new Error('Signing in with Apple did not work. Try again.')
+  if (!answer.token || !answer.code || !answer.user) throw new Error('Signing in with Apple did not work. Try again.')
   if (hosted) await rememberAppleUser(hosted, answer.user)
-  else await signInWithAppleToken(answer.token, answer.name ?? '', answer.user)
+  else await signInWithAppleToken(answer.token, answer.code, answer.name ?? '', answer.user)
   location.reload()
   return true
 }

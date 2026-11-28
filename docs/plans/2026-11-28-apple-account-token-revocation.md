@@ -20,3 +20,11 @@ Check the authenticated account generation. Revoke all retained grants for that 
 - Run UI checks and Swift compiler validation around the native bridge. Share the build cache and serialize Cargo.
 - Configure the hosted service through its existing deployment owner. The settings are `DONE_APPLE_TEAM_ID`, `DONE_APPLE_KEY_ID`, `DONE_APPLE_PRIVATE_KEY` (multiline PEM), and the existing `DONE_APPLE_AUDIENCE` (the native bundle ID). Keep the same DONE_SESSION_KEY while grants encrypted under it exist. The operator validates real Apple sign-in and deletion on an explicitly disposable account.
 - Official Apple references are [TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple) and [token revocation](https://developer.apple.com/documentation/signinwithapplerestapi/revoke-tokens).
+
+## Verified on the branch
+
+The native Swift files typechecked against the installed iPhoneOS SDK for arm64 iOS 16.4. The UI typecheck, production build, and all 754 tests passed. The bridge test sends both native credentials and checks that only the Done session and account-bound Apple user identifier reach local storage.
+
+All 55 hosted server tests passed on disposable Postgres databases. The local Apple stand-in verifies the ES256 client assertion signature, key ID, team, audience, app ID and lifetime. Tests cover two users, two separate grants, deduplication, encrypted persistence, provider refusal, retry, session invalidation, and grant removal. Identity-code mismatch and failed exchange create no named account. A legacy account without an Apple grant still deletes.
+
+Server startup checks an incomplete signing configuration. An unconfigured service still supports the old identity-only client. Install all three settings before shipping the iOS client that sends a code. The owner's live Apple check remains open.

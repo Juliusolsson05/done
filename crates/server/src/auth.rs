@@ -19,6 +19,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::pg::{Db, Fail, Me};
 
+pub(crate) mod apple_grants;
+
 /// What the hosted mode needs to be told. All of it comes from the
 /// environment; see `Config::from_env`.
 pub struct Config {
@@ -44,6 +46,7 @@ pub struct Config {
     /// test can stand in for Apple.
     pub apple_audience: String,
     pub apple_keys_url: String,
+    pub(crate) apple_grants: Option<apple_grants::Client>,
     /// The App Review login's password (DONE_REVIEW_PASSWORD). None: the
     /// login is off and answers as if it did not exist.
     pub review_password: Option<String>,
@@ -95,6 +98,7 @@ impl Config {
             time_zone: std::env::var("DONE_TIME_ZONE").ok().filter(|z| !z.trim().is_empty()).unwrap_or_else(|| "America/Los_Angeles".into()),
             apple_audience: std::env::var("DONE_APPLE_AUDIENCE").ok().filter(|a| !a.trim().is_empty()).unwrap_or_else(|| "app.thedone.ios".into()),
             apple_keys_url: "https://appleid.apple.com/auth/keys".into(),
+            apple_grants: apple_grants::Client::from_env(),
             public_url,
             client_id: need("DONE_GOOGLE_CLIENT_ID"),
             client_secret: need("DONE_GOOGLE_CLIENT_SECRET"),
@@ -523,11 +527,11 @@ pub async fn me(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCooki
 
 /// Deletes the account's tasks for good and signs out.
 pub async fn delete_account(State(cloud): State<Cloud>, me: Me, jar: SignedCookieJar, Json(_): Json<serde_json::Value>) -> Response {
-    match cloud.db.delete_account(&me).await {
+    match cloud.db.delete_after_revocation(&me, |grants| apple_grants::revoke(&cloud, &me.id, grants)).await {
         Ok(()) => (jar.remove(gone(SESSION)), Json(serde_json::json!({}))).into_response(),
         Err(e) => {
             eprintln!("{e:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "The account could not be deleted. Nothing was removed." }))).into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Your account could not be deleted. Please try again." }))).into_response()
         }
     }
 }
@@ -574,6 +578,8 @@ fn not_signed_in(message: &str) -> Response {
 #[derive(Deserialize)]
 pub struct AppleSignIn {
     identity_token: String,
+    // Older released apps send only their verified identity token.
+    authorization_code: Option<String>,
     /// The person's name as the device gave it. Apple hands it over on the
     /// first sign-in only, and never puts it in the token.
     #[serde(default)]
@@ -617,7 +623,7 @@ pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Re
         eprintln!("apple sign-in refused: {why}");
         not_signed_in("Signing in with Apple did not work. Try again.")
     };
-    let Ok(header) = jsonwebtoken::decode_header(&q.identity_token) else {
+    if jsonwebtoken::decode_header(&q.identity_token).is_err() {
         return refused("not a token");
     };
     let keys: AppleKeys = match cloud.http.get(&config.apple_keys_url).send().await.and_then(|r| r.error_for_status()) {
@@ -627,33 +633,30 @@ pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Re
         },
         Err(e) => return refused(&format!("Apple's keys could not be fetched: {e}")),
     };
-    let Some(key) = keys.keys.iter().find(|k| Some(&k.kid) == header.kid.as_ref()) else {
-        return refused("signed with a key Apple does not list");
+    let claims = match apple_grants::identity(&q.identity_token, &keys, &config.apple_audience) {
+        Ok(claims) => claims,
+        Err(why) => return refused(why),
     };
-    let Ok(decoding) = jsonwebtoken::DecodingKey::from_rsa_components(&key.n, &key.e) else {
-        return refused("Apple's key could not be used");
-    };
-    let mut rules = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
-    rules.set_issuer(&["https://appleid.apple.com"]);
-    rules.set_audience(&[config.apple_audience.as_str()]);
-    let claims = match jsonwebtoken::decode::<AppleClaims>(&q.identity_token, &decoding, &rules) {
-        Ok(data) => data.claims,
-        Err(e) => return refused(&format!("the token does not hold: {e}")),
-    };
-    if claims.sub.is_empty() {
-        return refused("the token names nobody");
-    }
     let id = apple_id(&claims.sub);
+    let grant = match q.authorization_code {
+        Some(code) if !code.is_empty() => match apple_grants::exchange(config, &keys, &claims.sub, &id, &code).await {
+            Ok(grant) => Some(grant),
+            Err(why) => return refused(why),
+        },
+        Some(_) => return refused("empty authorization code"),
+        None => None,
+    };
     let mut name = q.name.trim().to_string();
     // Only the first sign-in comes with a name. Signing in again must not
     // turn a named account into a nameless one.
     if name.is_empty() {
         name = cloud.db.name_of(&id).await.ok().flatten().unwrap_or_default();
     }
-    let session = match Session::start(&cloud, id, claims.email, name, String::new()).await {
-        Ok(session) => session,
+    let me = match cloud.db.me_with_apple_grant(&id, &claims.email, &name, "", grant.as_ref()).await {
+        Ok(me) => me,
         Err(fail) => return down(fail),
     };
+    let session = Session { sub: id, email: claims.email, name, picture: String::new(), generation: me.generation, exp: now() + THIRTY_DAYS };
     app_session(&config.key, &session)
 }
 

@@ -591,6 +591,10 @@ mod tests {
 
     /// A hosted server with a database of its own, and the Google it trusts.
     async fn hosted(key: u8) -> (String, Google, Arc<Db>) {
+        hosted_with_apple(key, None).await
+    }
+
+    async fn hosted_with_apple(key: u8, apple_grants: Option<auth::apple_grants::Client>) -> (String, Google, Arc<Db>) {
         let (google, google_at) = Google::start().await;
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let at = format!("http://{}", listener.local_addr().unwrap());
@@ -605,6 +609,7 @@ mod tests {
             collab_url: None,
             apple_audience: "app.thedone.ios".into(),
             apple_keys_url: format!("{google_at}/keys"),
+            apple_grants,
             review_password: Some(REVIEW_PASSWORD.into()),
             time_zone: "America/Los_Angeles".into(),
         };
@@ -1048,6 +1053,100 @@ mod tests {
         let again: serde_json::Value = b.post("/auth/apple", sign_in(apple_token(apple_claims("app.thedone.ios", 4102444800), "test"), "")).await.json().await.unwrap();
         assert_eq!(again["account"]["id"], first["account"]["id"]);
         assert_eq!(again["account"]["name"], "Ana Lind");
+        let deleted = b.http.post(format!("{at}/api/account/delete")).bearer_auth(again["token"].as_str().unwrap())
+            .json(&serde_json::json!({})).send().await.unwrap();
+        assert_eq!(deleted.status(), StatusCode::OK, "a legacy account without a saved Apple grant can still be deleted");
+    }
+
+    #[tokio::test]
+    async fn apple_code_exchange_and_deletion_keep_the_grant_with_its_account() {
+        use axum::extract::Form;
+        use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+
+        let random = ring::rand::SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &random).unwrap();
+        let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &random).unwrap();
+        let public_key = jsonwebtoken::DecodingKey::from_ec_der(pair.public_key().as_ref());
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let revoke_ok = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let check_client = move |form: &HashMap<String, String>| {
+            let jwt = &form["client_secret"];
+            assert_eq!(jsonwebtoken::decode_header(jwt).unwrap().kid.as_deref(), Some("test-kid"));
+            let mut rules = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::ES256);
+            rules.set_audience(&["https://appleid.apple.com"]);
+            rules.set_issuer(&["test-team"]);
+            let claims = jsonwebtoken::decode::<serde_json::Value>(jwt, &public_key, &rules).unwrap().claims;
+            assert_eq!(claims["sub"], "app.thedone.ios");
+            assert_eq!(claims["exp"].as_u64().unwrap() - claims["iat"].as_u64().unwrap(), 300);
+            assert_eq!(form["client_id"], "app.thedone.ios");
+        };
+        let exchange = {
+            let check = check_client.clone();
+            move |Form(form): Form<HashMap<String, String>>| async move {
+                check(&form);
+                assert_eq!(form["grant_type"], "authorization_code");
+                let code = form["code"].as_str();
+                if code == "refuse" { return StatusCode::BAD_REQUEST.into_response(); }
+                let mut claims = apple_claims("app.thedone.ios", 4102444800);
+                if code == "different-user" || code == "other-grant" { claims["sub"] = "someone-else".into(); }
+                let id_token = apple_token(claims, "test");
+                Json(serde_json::json!({ "id_token": id_token, "refresh_token": format!("refresh-{code}") })).into_response()
+            }
+        };
+        let revoke = {
+            let calls = calls.clone();
+            let ok = revoke_ok.clone();
+            move |Form(form): Form<HashMap<String, String>>| async move {
+                check_client(&form);
+                assert_eq!(form["token_type_hint"], "refresh_token");
+                calls.lock().unwrap().push(form["token"].clone());
+                if ok.load(std::sync::atomic::Ordering::SeqCst) { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE }
+            }
+        };
+        let origin = serve(Router::new().route("/auth/token", post(exchange)).route("/auth/revoke", post(revoke))).await;
+        let apple = auth::apple_grants::Client::new("test-team".into(), "test-kid".into(), jsonwebtoken::EncodingKey::from_ec_der(pkcs8.as_ref()), &origin);
+        let (at, _, db) = hosted_with_apple(7, Some(apple)).await;
+        let http = reqwest::Client::new();
+        let login_for = |code: &str, subject: &str| {
+            let mut claims = apple_claims("app.thedone.ios", 4102444800);
+            claims["sub"] = subject.into();
+            http.post(format!("{at}/auth/apple")).json(&serde_json::json!({
+                "identity_token": apple_token(claims, "test"), "authorization_code": code, "name": "Synthetic Apple User"
+            })).send()
+        };
+        let subject = "001234.abcdef0123456789.1234";
+        let login = |code: &str| login_for(code, subject);
+        for bad in ["refuse", "different-user", ""] {
+            assert_eq!(login(bad).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        }
+        let id = auth::apple_id(subject);
+        assert!(db.name_of(&id).await.unwrap().is_none());
+        let other = login_for("other-grant", "someone-else").await.unwrap().error_for_status().unwrap().json::<serde_json::Value>().await.unwrap();
+        let mut token = String::new();
+        for code in ["one", "two", "one"] {
+            let signed = login(code).await.unwrap().error_for_status().unwrap().json::<serde_json::Value>().await.unwrap();
+            token = signed["token"].as_str().unwrap().to_owned();
+            assert!(signed.get("refresh_token").is_none());
+        }
+        let stored = pg::testing::stored_apple_grants(&db, &id).await;
+        assert_eq!(stored.len(), 2);
+        assert!(stored.iter().all(|bytes| !bytes.windows(8).any(|window| window == b"refresh-")), "the database must not contain the refresh token as plaintext");
+        let delete = || http.post(format!("{at}/api/account/delete")).bearer_auth(&token).json(&serde_json::json!({})).send();
+        let state = || http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(&token).send();
+        assert!(delete().await.unwrap().status().is_server_error());
+        assert_eq!(state().await.unwrap().status(), StatusCode::OK, "the failed revocation leaves the account and session usable");
+        calls.lock().unwrap().clear();
+        revoke_ok.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(delete().await.unwrap().status(), StatusCode::OK);
+        assert!(pg::testing::stored_apple_grants(&db, &id).await.is_empty());
+        let mut revoked = calls.lock().unwrap().clone();
+        revoked.sort();
+        assert_eq!(revoked, ["refresh-one", "refresh-two"]);
+        assert_eq!(state().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let other_delete = http.post(format!("{at}/api/account/delete")).bearer_auth(other["token"].as_str().unwrap())
+            .json(&serde_json::json!({})).send().await.unwrap();
+        assert_eq!(other_delete.status(), StatusCode::OK);
+        assert_eq!(calls.lock().unwrap().last().map(String::as_str), Some("refresh-other-grant"));
     }
 
     #[tokio::test]

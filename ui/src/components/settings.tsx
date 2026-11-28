@@ -139,7 +139,7 @@ function AccountPane() {
       </Pane>
     )
   }
-  const remove = () => void deleteAccountHere().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  const remove = () => void deleteAccountHere().catch(() => say('Your account could not be deleted. Please try again.'))
   // Signing out tries one last sync; if changes are still unsent, the
   // person is asked (lib/store.ts signOutChecked).
   const leave = (force: boolean) => {
@@ -222,7 +222,7 @@ function AccountPane() {
           {deletionWarning(deleteUnsent) && <p className="font-medium text-foreground">{deletionWarning(deleteUnsent)}</p>}
           {isDesktop && <p>Local copies stay on your devices.</p>}
           {account.id?.startsWith('apple') && (
-            <p>Also disconnect done in your Apple Account under Sign in with Apple.{' '}
+            <p>If you signed in on an older version of done, you may also need to disconnect it in your Apple Account.{' '}
               <button className="underline" onClick={() => openLink('https://support.apple.com/102571')}>See Apple’s instructions</button>.
             </p>
           )}

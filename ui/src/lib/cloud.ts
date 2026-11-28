@@ -169,5 +169,6 @@ async function signInWith(path: string, body: unknown, appleUser?: string): Prom
   if (cloudSession() === null) throw new Error('Signing in did not work. Try again.')
 }
 
-export const signInWithAppleToken = (token: string, name: string, user: string) => signInWith('/auth/apple', { identity_token: token, name }, user)
+export const signInWithAppleToken = (token: string, code: string, name: string, user: string) =>
+  signInWith('/auth/apple', { identity_token: token, authorization_code: code, name }, user)
 export const signInWithPassword = (username: string, password: string) => signInWith('/auth/review', { username, password })
