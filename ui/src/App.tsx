@@ -56,7 +56,7 @@ const behind = (prev: string | null) => {
   return route ? [route.view] : []
 }
 
-const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
+const CLOSED = { adding: false, asGoal: false, editing: null, editingInDialog: false, newProject: false, renaming: false, confirmDelete: false, searching: false }
 const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
 
 // Whether the sidebar was showing when the app was last open. The sidebar
@@ -340,13 +340,21 @@ export default function App() {
     lookFor.current = null
     const v = ui.view
     if (id === null || id !== ui.editing || isMobile || v.kind === 'timeline' || v.kind === 'board') return
+    if (page.current?.querySelector(`[data-editing-task="${id}"]`)) return
     const found = data.tasks.find((t) => t.id === id)
     const home = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
     if (!home) return
     const listed = sections(v, shown.tasks, TODAY, app.keep).some((s) => s.tasks.some((t) => t.id === home.id)) || (v.kind === 'today' && home.goalDay === TODAY)
-    if (listed) return
-    replaceNext.current = true
-    setUi((u) => ({ ...u, view: home.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: home.projectId } }))
+    const ownList = home.projectId === null ? v.kind === 'inbox' : v.kind === 'project' && v.id === home.projectId
+    if (!listed && !ownList) {
+      replaceNext.current = true
+      lookFor.current = id
+      setUi((u) => ({ ...u, view: home.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: home.projectId } }))
+      return
+    }
+    // A filter or a collapsed parent can hide even a task in the right list.
+    // Open its editor over the list so the link works without changing those choices.
+    setUi((u) => ({ ...u, editingInDialog: true }))
   }
 
   // The listeners below are set up once, so they read what is current
@@ -639,7 +647,7 @@ export default function App() {
   const view = ui.view
   // Timeline and Board use the full width and open tasks over the page.
   const wide = view.kind === 'timeline' || view.kind === 'board'
-  const editing = wide && !isMobile && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
+  const editing = (wide || ui.editingInDialog) && !isMobile && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
 
   return (
     <AppContext.Provider value={app}>

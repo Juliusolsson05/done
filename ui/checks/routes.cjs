@@ -24,7 +24,12 @@ async function open(browser, viewport, touch) {
   const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: touch })
   const page = await context.newPage()
   page.setDefaultTimeout(5000)
-  const state = { rev: 1, nextId: 1000, tasks: [task(101, 'Call the bank', day(0)), task(102, 'Book flights', day(3))], projects: [] }
+  const state = {
+    rev: 1,
+    nextId: 1000,
+    tasks: [task(101, 'Call the bank', day(0)), task(102, 'Book flights', day(3)), { ...task(103, 'Find the reservation', null), parentId: 101 }],
+    projects: [],
+  }
   // Every address of the app's is answered with the app, as the server does.
   await page.route('http://done.test/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -82,6 +87,17 @@ async function run(browser, where, viewport, touch) {
   expect(new URL(page.url()).pathname === '/today', `${where}: Back from the task stays in the app, on /today (${page.url()})`)
   expect((await heading(page)) === 'Today', `${where}: Back from the task shows Today`)
   expect(!(await editorOpen(page, touch)), `${where}: Back from the task closes it`)
+  // Subtasks can be linked even when their parent's row is collapsed.
+  if (!touch) {
+    await page.goto('http://done.test/today?task=103')
+    await page.locator('main').waitFor()
+    const title = page.getByRole('textbox', { name: 'Task', exact: true })
+    await title.waitFor()
+    expect((await title.inputValue()) === 'Find the reservation', 'a collapsed subtask link opens the correct editor')
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await title.waitFor({ state: 'hidden' })
+    expect(new URL(page.url()).search === '', 'closing a linked subtask clears its address')
+  }
   await context.close()
 }
 

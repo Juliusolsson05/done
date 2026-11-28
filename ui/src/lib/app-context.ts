@@ -18,6 +18,7 @@ export interface Ui {
   // The quick add box is naming today's goal rather than adding to the view.
   asGoal: boolean
   editing: number | null
+  editingInDialog: boolean
   newProject: boolean
   renaming: boolean
   confirmDelete: boolean
