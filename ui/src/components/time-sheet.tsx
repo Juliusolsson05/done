@@ -40,7 +40,7 @@ function PhoneEntries({ entries, remove }: { entries: Entry[]; remove: (entry: E
             variant="ghost"
             size="icon"
             className="-mr-3 size-11 shrink-0 text-muted-foreground"
-            aria-label={'Remove from the time sheet: ' + entry.title}
+            aria-label={'Remove from the time sheet: ' + (entry.title.trim() || 'No title')}
             onClick={() => remove(entry)}
           >
             <XIcon />

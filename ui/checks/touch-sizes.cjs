@@ -63,9 +63,14 @@ function entries() {
 // The safe areas an iPhone or iPad reports (status bar and Dynamic Island,
 // home indicator, the notch strip turned sideways), which Chromium does not have.
 const SAFE = { '390x844': [47, 34, 0, 0], '844x390': [0, 21, 47, 47], '820x1180': [24, 20, 0, 0] }
-const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
-const PHONE_SIDEWAYS = { viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
-const IPAD = { viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
+// As Safari names itself on each (an iPad asks for the desktop site), so the
+// page's own reading of the operating system sees a phone or a tablet.
+const IPHONE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+const IPAD_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'
+const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: IPHONE_UA }
+const PHONE_SIDEWAYS = { viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: IPHONE_UA }
+const IPAD = { viewport: { width: 820, height: 1180 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: IPAD_UA }
 
 async function open(browser, options) {
   const context = await browser.newContext(options)
@@ -201,6 +206,25 @@ async function phone(browser) {
     const returned = await scrollY(page)
     expect(Math.abs(returned - 300) <= 1, `Back returned Lists at scrollY ${returned}, not 300`)
 
+    // The same through search: Lists scrolled further, a task in a list found
+    // and shown, and Back returns to this Lists, not the earlier one.
+    await page.evaluate(() => window.scrollTo(0, 600))
+    await page.waitForFunction(() => Math.round(window.scrollY) === 600)
+    await page.getByRole('button', { name: 'Search', exact: true }).dispatchEvent('click')
+    await page.getByRole('dialog').getByRole('textbox').fill('Long list task 3')
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: /^Long list task 3\b/ })
+      .first()
+      .click()
+    await heading('List number 14').waitFor()
+    await settled(page)
+    await backToLists().tap()
+    await heading('Lists').waitFor()
+    await settled(page)
+    const again = await scrollY(page)
+    expect(Math.abs(again - 600) <= 1, `Back from a search result returned Lists at scrollY ${again}, not 600`)
+
     // A long press on the bar at the top is not a long press on the page.
     await page.evaluate(() => window.scrollTo(0, 0))
     await openRow(/^Time sheet/, 'Time sheet')
@@ -217,12 +241,24 @@ async function phone(browser) {
       expect(r.x >= 0 && r.x + r.width <= 390 && r.height >= TAP && r.width >= TAP, `Time sheet remove button ${r.width}x${r.height} at x=${r.x}`)
     }
     expect((await page.getByText('No title', { exact: true }).count()) === 1, 'a block with no title shows no title')
+    expect(
+      (await page.getByRole('button', { name: 'Remove from the time sheet: No title', exact: true }).count()) === 1,
+      'the remove button of a block with no title has no name for it',
+    )
     await margins('Time sheet')
     await backToLists().tap()
     await heading('Lists').waitFor()
 
     await openRow(/^Settings/, 'Settings')
     await margins('Settings')
+    // A phone's browser: no terminal commands, and the download pane says to
+    // use done in the browser rather than offering the Mac app.
+    expect((await page.getByRole('heading', { name: 'Connect an AI agent', exact: true }).count()) === 0, 'a phone browser offers terminal commands')
+    expect(
+      (await page.getByText('Use done in the browser', { exact: false }).count()) === 1,
+      'a phone browser is not told to use done in the browser',
+    )
+    expect((await page.getByRole('link', { name: 'Download for Mac', exact: true }).count()) === 0, 'a phone browser is offered Download for Mac')
 
     // The task sheet's Cancel and Done take the bar's whole height.
     await tab('Today').dispatchEvent('click')
@@ -298,6 +334,8 @@ async function tablet(browser) {
       const toggle = await box(page.locator('[data-slot="sidebar-inset"]').getByRole('button', { name: /^(Show sidebar|Toggle Sidebar)$/ }))
       expect(toggle.x >= 0 && toggle.x + toggle.width <= 820, `${name}: sidebar toggle at x=${toggle.x}`)
       expect(toggle.width >= TAP && toggle.height >= TAP, `${name}: sidebar toggle ${toggle.width}x${toggle.height}`)
+      const area = await tapArea(page.locator('[data-slot="sidebar-inset"]').getByRole('button', { name: /^(Show sidebar|Toggle Sidebar)$/ }))
+      expect(area.w >= TAP && area.h >= TAP, `${name}: sidebar toggle tap area ${area.w}x${area.h}`)
     }
 
     // Header buttons: the Time sheet's day arrows, and Timeline's Today and Filter.
@@ -329,7 +367,7 @@ async function narrowMouse(browser) {
     await page.getByRole('navigation', { name: 'Views' }).getByRole('button', { name: 'Lists', exact: true }).click()
     await page.getByRole('button', { name: /^Settings/ }).click()
     await page.getByRole('heading', { name: 'Settings', exact: true }).first().waitFor()
-    for (const pane of ['Connect an AI agent', 'Mac app'])
+    for (const pane of ['Connect an AI agent', 'Desktop app'])
       expect((await page.getByRole('heading', { name: pane, exact: true }).count()) === 1, `a 700 wide mouse window lost "${pane}"`)
   } finally {
     await context.close()

@@ -28,8 +28,14 @@ import { cn } from '@/lib/utils'
 // button in the page's margin (App.tsx).
 function HeaderSidebarToggle() {
   const { open, isMobile } = useSidebar()
-  if (!useIsTouch() || open || isMobile) return null
-  return <SidebarTrigger aria-label="Show sidebar" className="-my-1.5 -ml-3 size-11 self-center text-muted-foreground" title="Show sidebar" />
+  const { ui } = useApp()
+  const touch = useIsTouch()
+  if (!touch || open || isMobile) return null
+  // Timeline and Board's page clips what reaches into its margin, which took
+  // the left 12 points of the tap area there, so the button starts at the
+  // margin instead of reaching into it.
+  const wide = ui.view.kind === 'timeline' || ui.view.kind === 'board'
+  return <SidebarTrigger aria-label="Show sidebar" className={cn('-my-1.5 size-11 self-center text-muted-foreground', !wide && '-ml-3')} title="Show sidebar" />
 }
 
 export function ViewHeader({ title, sub, children }: { title: ReactNode; sub?: string; children?: ReactNode }) {
@@ -212,7 +218,7 @@ export function ListView() {
       {/* On a phone there is no hover, so the list sits on the page's margin.
           An iPad's rows are 44 points for a finger, so its groups sit a
           little closer to keep as many tasks in view (#109). */}
-      <div className="-mx-2 flex flex-col gap-7 max-md:mx-0 wide:touch:gap-4">
+      <div className="-mx-2 flex flex-col gap-7 max-md:mx-0 wide:touch:gap-5">
         {view.kind === 'today' && <GoalBlock />}
         {count === 0 && !ui.adding && !hasGoal && (
           <div className="px-2 pt-4 text-muted-foreground">

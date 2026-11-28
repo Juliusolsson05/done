@@ -84,15 +84,21 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   Removing stays a visible button rather than a swipe: nothing is lost and it
   needs no new gesture.
 - **Pushed screens open at the top; Back returns where you were.** On a phone,
-  `openView` to a pushed (non-tab) screen saves the current page's scrollY in
-  a `Map<pageKey, scrollY>` ref and the new page starts at 0; `back` (the
-  button and the edge swipe) restores the saved position of the page it
-  returns to. Switching tabs behaves as on main (scroll untouched). Review of
-  #119 caught the first version resetting the previous list to 0 on Back.
+  opening a pushed (non-tab) screen — `openView`, or `reveal` from search when
+  it changes the page — saves the page being left in a `Map` ref keyed by its
+  place in the back history (depth and page), and the new page starts at 0;
+  `back` (the button and the edge swipe) restores the position saved for the
+  place it returns to. Keying by place, not page alone, means Lists → a list →
+  Lists → another list returns each Back to its own Lists. Switching tabs
+  behaves as on main (scroll untouched). Review of #119 caught the first
+  version resetting the previous list to 0 on Back, and the second missing
+  `reveal`.
 - **iPad sidebar toggle.** On touch the toggle starts the page's existing
   header row (`ViewHeader`), as iPadOS bars put it, with `-my-1.5` so the
   header is no taller than main; a page without a `ViewHeader` (a note open in
-  Notes) keeps a 44 pt row of its own. The Mac keeps the margin button. (The
+  Notes) keeps a 44 pt row of its own. On Board and Timeline it starts at the
+  margin rather than reaching 12 into it, since their page clips there (the
+  tap area was 33x45). The Mac keeps the margin button. (The
   first version gave the toggle its own row everywhere, pushing every header
   down 52 px.)
 - **Long-press menu** rows get `pointer-coarse:min-h-11` and body text, in the
@@ -105,10 +111,11 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   centred form sheet on the iPad is probably the better design, since it
   already has 44 pt rows and the long-press actions; it is a redesign, and the
   owner should see it on its own.
-- **Settings in a browser** shows the Mac download and the terminal pane only
-  with a fine pointer (a mouse), however narrow the window. The Mac app itself
-  is unaffected. Kept minimal: PR #99 replaces the downloads pane with OS
-  detection and should win that hunk.
+- **Settings in a browser** shows the agent (terminal) pane only with a fine
+  pointer (a mouse), however narrow the window. The download pane is PR #99's
+  `DesktopDownloads`, ungated: it reads the operating system and on a phone
+  or iPad says to use done in the browser instead of offering the Mac app,
+  which is what the audit asked for (decided in review).
 - **Push animation overflow**: `overflow-x: clip` on the app's frame on a
   phone, so a page sliding in cannot widen the layout viewport.
 - **Landscape**: the task sheet keeps its content inside the side safe areas;
@@ -139,10 +146,12 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   which live in this change's files. Cost if wrong: those four stay 28–32 pt
   on touch until that branch takes them.
 - Ruling: an iPad task row is 44 pt (`min-h-11 py-2.5` on the tablet layout),
-  as tall as the check's tap area, and the list's groups sit 16 apart instead
+  as tall as the check's tap area, and the list's groups sit 20 apart instead
   of 28 on the tablet layout, so 22 rows show at 820x1180 (main 25 at 38 pt;
-  the first version's 48 pt rows and toggle row showed 17). Cost if wrong: a
-  little tighter grouping on iPad.
+  the first version's 48 pt rows and toggle row showed 17). 20 is the review's
+  middle ground; it keeps exactly 22 rows (the 22nd ends at 1180), so any
+  taller element above the list drops one. Cost if wrong: a little tighter
+  grouping on iPad.
 - Ruling: the long-press menu is kept from starting on the tab bar, New Task
   and the navigation bar: their contextmenu (what a browser's long press and a
   right click send) is stopped from reaching the window-wide menu trigger, and
@@ -188,7 +197,10 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
 All in Chromium's touch emulation (`isMobile`, `hasTouch`) with the safe areas
 an iPhone reports injected, on the built UI with stubbed `/api`:
 
-- `ui/checks/touch-sizes.cjs` fails on `origin/main` ab2c64b (26 failures)
+- `ui/checks/touch-sizes.cjs` fails on `origin/main` 717e7c7 (31 failures),
+  on the second review's head (3: Back after a search result returned Lists
+  at 300 not 600, Timeline toggle tap area 33x45, an untitled block's remove
+  button unnamed)
   and on this PR's first head (9 failures, one per review item: Back returned
   Lists at 0, long press on the bar, no "No title", landscape menu 390 tall
   and scrolling with Delete at y=374, iPad 17 rows and title at y=116, the
@@ -207,7 +219,7 @@ an iPhone reports injected, on the built UI with stubbed `/api`:
   16/81; Settings 16/58; task sheet in landscape 16 → 67 from the edge.
 - Desktop 1440x900 with a mouse: every measurement equal and the five
   screenshots byte-identical before and after.
-- `npm run typecheck`, `npm test` (723, on main ab2c64b), `npm run build` green.
+- `npm run typecheck`, `npm test` (736, on main 717e7c7), `npm run build` green.
 
 Not verified: WebKit and a real iPhone or iPad (safe areas there come from
 the device, not injected values), and anything with the on-screen keyboard up.

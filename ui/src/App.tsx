@@ -114,16 +114,24 @@ export default function App() {
   // the next: a list opened from a scrolled Lists opened mid-list, its title
   // off the screen (#109). So a screen pushed in starts at its top, and going
   // back returns to where the screen under it was left, as on iOS. Switching
-  // tabs is left as it was.
+  // tabs is left as it was. A position is kept for a place in the back
+  // history (its depth and page), not for the page alone: in Lists → a list →
+  // Lists → another list, each Back returns to its own Lists.
   const scrolls = useRef(new Map<string, number>())
-  const moving = useRef<'push' | 'back' | null>(null)
+  const moving = useRef<{ to: 'top' } | { to: 'saved'; slot: string } | null>(null)
+  const slotOf = (depth: number, view: View) => `${depth}:${keyOf(view)}`
+  // Called as a view is opened: the page being left is kept where it was
+  // when it becomes a step to go back to (opened() in lib/view-history.ts).
+  const leaving = (u: Ui, to: View) => {
+    if (isTab(to)) return
+    if (u.view.kind !== to.kind) scrolls.current.set(slotOf(u.history.length, u.view), window.scrollY)
+    moving.current = { to: 'top' }
+  }
   const pageKey = keyOf(ui.view)
   const shownKey = useRef(pageKey)
   useLayoutEffect(() => {
-    if (isMobile && shownKey.current !== pageKey) {
-      if (moving.current === 'push') window.scrollTo(0, 0)
-      if (moving.current === 'back') window.scrollTo(0, scrolls.current.get(pageKey) ?? 0)
-    }
+    const move = moving.current
+    if (isMobile && move && shownKey.current !== pageKey) window.scrollTo(0, move.to === 'top' ? 0 : (scrolls.current.get(move.slot) ?? 0))
     moving.current = null
     shownKey.current = pageKey
   })
@@ -193,19 +201,14 @@ export default function App() {
     say,
     setZoom,
     openView: (view: View) => {
-      if (!isTab(view)) {
-        scrolls.current.set(keyOf(ui.view), window.scrollY)
-        moving.current = 'push'
-      }
+      leaving(ui, view)
       setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
     },
     back: () => {
-      moving.current = 'back'
-      setUi((u) => {
-        // A list that is gone, or is not in this space, is skipped.
-        const to = back(u.history, (v) => v.kind !== 'project' || shown.projects.some((p) => p.id === v.id))
-        return { ...u, ...CLOSED, view: to.view, history: to.history }
-      })
+      // A list that is gone, or is not in this space, is skipped.
+      const to = back(ui.history, (v) => v.kind !== 'project' || shown.projects.some((p) => p.id === v.id))
+      moving.current = { to: 'saved', slot: slotOf(to.history.length, to.view) }
+      setUi((u) => ({ ...u, ...CLOSED, view: to.view, history: to.history }))
     },
     // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
@@ -236,6 +239,7 @@ export default function App() {
       // it can be ticked off, or clicked to edit, right there.
       // Already on the page you are looking at: stay there.
       const shown = document.querySelector(`[data-task="${task.id}"]`) !== null
+      if (!shown) leaving(ui, view)
       setUi((u) => (shown ? { ...u, ...CLOSED } : { ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
       notice(task.id)
       const bringIntoView = () =>
