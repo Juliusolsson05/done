@@ -27,8 +27,8 @@ import { isDesktop, isIosApp, onMenuBarCommand, sendWidgetSnapshot, setWebviewZo
 import { widgetSnapshot } from '@/lib/widget-snapshot'
 import { addDays, dayOf, TODAY } from '@/lib/days'
 import { useIsMobile, useLayout } from '@/hooks/use-mobile'
-import { DEFAULT_MINUTES, isDue } from '@/lib/focus'
-import { endFocus, getFocus, handOff, onRecordFailed, remind, retryUnsaved, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
+import { isDue } from '@/lib/focus'
+import { endFocus, getFocus, handOff, onRecordFailed, rememberMinutes, remind, retryUnsaved, storedMinutes, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
 import { caughtUp, change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } from '@/lib/store'
 import { setScope, useScope } from '@/lib/scope-store'
@@ -84,7 +84,7 @@ export default function App() {
     history: [],
     tlStart: addDays(TODAY, -4),
     focusPick: null,
-    focusMinutes: DEFAULT_MINUTES,
+    focusMinutes: storedMinutes(),
   }))
   const [noticed, setNoticed] = useState<number | null>(null)
   const [zoom, setZoomState] = useState(storedZoom)
@@ -212,7 +212,10 @@ export default function App() {
     askDelete: () => setUi((u) => ({ ...u, ...CLOSED, confirmDelete: true })),
     setTlStart: (tlStart) => setUi((u) => ({ ...u, tlStart })),
     focusOn: (id) => setUi((u) => ({ ...u, ...CLOSED, view: { kind: 'focus' }, focusPick: String(id) })),
-    chooseFocus: (choice) => setUi((u) => ({ ...u, ...choice })),
+    chooseFocus: (choice) => {
+      if (choice.focusMinutes) rememberMinutes(choice.focusMinutes)
+      setUi((u) => ({ ...u, ...choice }))
+    },
     update(fn, id) {
       change(fn)
       if (id !== undefined) notice(id)

@@ -115,7 +115,7 @@ function AccountPane() {
               <span aria-hidden>{'\uF8FF'}</span> Sign in with Apple
             </Button>
           )}
-          <Button size="sm" variant={canSignInWithApple ? 'outline' : 'default'} onClick={() => void signIn().catch(() => say('Your browser could not be opened.'))}>
+          <Button size="sm" variant={canSignInWithApple ? 'outline' : 'default'} onClick={() => void signIn().catch((e: unknown) => say(e instanceof Error ? e.message : 'Signing in did not work. Try again.'))}>
             Sign in with Google
           </Button>
         </div>

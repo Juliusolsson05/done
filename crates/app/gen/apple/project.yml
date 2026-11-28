@@ -6,7 +6,7 @@ options:
   # app to, so it must not change once the app is submitted.
   bundleIdPrefix: app.thedone.ios
   deploymentTarget:
-    iOS: 15.0
+    iOS: 16.4
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -76,6 +76,10 @@ targets:
         CFBundleVersion: "0.1.0"
         # The focus countdown in the Dynamic Island and on the Lock Screen.
         NSSupportsLiveActivities: true
+        # False is right: the only cryptography is the system's TLS and
+        # WebCrypto SHA-256 (the sign-in challenge), both exempt. Declared so
+        # each upload to App Store Connect stops asking.
+        ITSAppUsesNonExemptEncryption: false
         # done:// links: how the browser hands a finished sign-in back to the
         # app (crates/app/src/lib.rs, the deep-link plugin). Tauri wrote this
         # into Info.plist once, at `tauri ios init`; Info.plist is generated
@@ -121,6 +125,8 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: ActivityKit.framework
         weak: true
+      # Sign in with Apple and the in-app sign-in sheet (DoneNative.swift).
+      - sdk: AuthenticationServices.framework
       - sdk: CoreGraphics.framework
       - sdk: libsqlite3.tbd
       - sdk: Metal.framework
@@ -146,11 +152,12 @@ targets:
   # Today on the Home and Lock Screen, and the focus countdown in the Dynamic
   # Island. Declared here, not added in Xcode: the project is generated from
   # this file, so a target added by hand disappears at the next
-  # `xcodegen generate`. iOS 16.1 is the first with Live Activities.
+  # `xcodegen generate`. iOS 16.1 is the first with Live Activities;
+  # the whole app needs 16.4 (AbortSignal.timeout, color-mix in the web view).
   done-widgets:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.1"
+    deploymentTarget: "16.4"
     sources:
       - path: Widgets
       - path: Shared
@@ -162,6 +169,8 @@ targets:
         CFBundleDisplayName: done
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        # As for the app above: the extension uses no cryptography of its own.
+        ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:

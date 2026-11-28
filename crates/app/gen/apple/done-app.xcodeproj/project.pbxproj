@@ -11,6 +11,7 @@
 		1762AFF8ABC2A9ED479B0076 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = B2C90187317D9D06CE453308 /* assets */; };
 		3171BE65F485C4D4B0721AF1 /* DoneShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EAF9A139AC980406E2FF82E /* DoneShared.swift */; };
 		3800C94D89E8C5D513B77094 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B82947093255AF676A709466 /* WidgetKit.framework */; };
+		49D181F98EA02D70F4352451 /* AuthenticationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 408B0D6FAFE1E3AC0B0D74F0 /* AuthenticationServices.framework */; };
 		4BC909FD7A27B70C54AB80A3 /* done-widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 128A8F1D2C57C1D7D24FFC00 /* done-widgets.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		5A8B940D652003C523699C9C /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */; };
 		5B749E232B05C87B6108835B /* DoneWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 033209D9A0BF1DF11018FD87 /* DoneWidgets.swift */; };
@@ -68,6 +69,7 @@
 		3C967CB2903B38B6CF28E8AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3EAF9A139AC980406E2FF82E /* DoneShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoneShared.swift; sourceTree = "<group>"; };
 		40090A73884EE5FDE66DE995 /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
+		408B0D6FAFE1E3AC0B0D74F0 /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
 		4A686B5647A23F372E043B9E /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		4D8DE9179E9A257A61DCCF6F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
@@ -97,6 +99,7 @@
 				DC7622B98B29B65372CD4BE5 /* libapp.a in Frameworks */,
 				3800C94D89E8C5D513B77094 /* WidgetKit.framework in Frameworks */,
 				D8A7253ED928CFBDC760CC5B /* ActivityKit.framework in Frameworks */,
+				49D181F98EA02D70F4352451 /* AuthenticationServices.framework in Frameworks */,
 				5A8B940D652003C523699C9C /* CoreGraphics.framework in Frameworks */,
 				D2A7AA6344B6F91A999B8A63 /* libsqlite3.tbd in Frameworks */,
 				7D000DB4CAE26E07613C0837 /* Metal.framework in Frameworks */,
@@ -207,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				40090A73884EE5FDE66DE995 /* ActivityKit.framework */,
+				408B0D6FAFE1E3AC0B0D74F0 /* AuthenticationServices.framework */,
 				56B4025ADD633C9B03D492A9 /* CoreGraphics.framework */,
 				57E014AD4C6A613D4925DEEC /* libapp.a */,
 				7BE7EAB21323BBBFAC0CC388 /* libsqlite3.tbd */,
@@ -432,7 +436,7 @@
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widgets/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -499,7 +503,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -624,7 +628,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -645,7 +649,7 @@
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widgets/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
