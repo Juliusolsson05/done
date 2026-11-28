@@ -6,17 +6,13 @@ Review follow-ups for project sprints (#133, merged as b3e392e). Issue #134.
 
 An older app (one that does not know `sprint`: Mac 0.1.392, a downgrade, or "done next" beside the real app) can open a file the new app already upgraded. Its `prepare` rewrites the triggers without `sprint`, it pulls rows from the server, keeps whatever sprint the file had (it never touches the column) and moves the sync position past them. The new app reopens, the column exists, so nothing is fetched again, and its next edit of that project sends the old sprint with a newer stamp. Reproduced: the phone completed the sprint, the Mac renamed, the phone ended with completed: false.
 
-Decision: in `Store::open`, before the triggers are rewritten, the new app looks at `project_edited`. If it exists and its SQL lacks `sprint`, an older app has opened the file since. In one IMMEDIATE transaction (the pattern `prepare_project_sprints` already uses, so two processes do not both do it):
-- reset the sync positions (`space_cursor.pulled`, `meta.pulled`) to 0, so everything is fetched again;
-- clear the sprint of every project row the server already has (`seq <= pushed`), quietly (no seq or stamp change), so the value the file has is not trusted. The re-download then fills it from the server through the existing tie rule (same stamp, local sprint NULL). Until then a rename sends no sprint, and the server keeps its own (`coalesce`), and echoes it back.
+Review reproduced two regressions using v0.1.392 against a disposable SQLite file. Two server refusals can move the push checkpoint past a project the server does not have. An older app can also acknowledge a newer app's offline sprint edit without sending its sprint. Clearing based on the push checkpoint erases the local value in both cases.
 
-Why clearing as well as re-downloading: the old app stored the phone's row with the phone's stamp but the file's old sprint. On re-download that row ties, and a tie keeps what is here, so a reset alone does not repair it. And the user may rename before the first sync, which a reset alone cannot stop.
+The recovery has three stages. First, reset the pull checkpoints and mark sprint values on rows last written by a pull (`seq = 0`) as needing confirmation. This is the provenance available on existing files, and the stored sprint remains visible offline. Second, omit those unconfirmed values from outgoing edits until the server sends a sprint. An actual sprint edit establishes a local value immediately and travels normally. Third, accept an authoritative sprint on replay even when the row stamp ties. A reply without a sprint leaves the cached value alone. When the account is deleted and the retained projects become local, their sprint values can travel again as part of a future account.
 
-It cannot loop: `prepare` then rewrites the trigger with `sprint`, so the next open by a new app sees it and does nothing. Only an older app opening the file again sets it off again.
+Ruling: keep the sprint value on disk and recover rows last written by a pull. The row checkpoint acknowledges a project, while only an actual sprint value in a reply confirms that field. Existing files lack field-level history once an old app has written a local project edit over its pull. Automatically replacing those ambiguous rows could erase unsent work. That case, including a legacy offline rename between the pull and reopen and resending a previously acknowledged offline sprint without a new edit, still needs field-level history. Concurrent operation of the two versions on one file also remains outside the recovery.
 
-Cost: one full re-download per new-app open that follows an older app's open, and sprints on that device are hidden until that re-download (offline: until it is online). Rows not yet sent (`seq > pushed`) keep their sprint: they may be the user's own edit the server has never seen. Ruling: never discard a value the server does not have — why: losing an unsent edit is worse than the rare stale one — cost if wrong: an older app that renamed a project offline and quit before syncing can still send an old sprint once.
-
-Not fixed: an older app and the new app running at the same time on one file. The check runs at open; while both run, the trigger is the older app's. Rare (only the preview beside the real app); noted, not built.
+Verification fixtures are the reported old-app pull then new-app rename, and the two sequences recorded during review. Automation uses the real SQLite entry points and the old wire shape. Replay tests also cover an explicit newer sprint edit and a server reply with no sprint. The review probe compiles the v0.1.392 core and the current core against disposable files.
 
 ## 2. A newer row without a sprint keeps the local one
 
@@ -54,4 +50,6 @@ Fail first: `an_older_app_on_the_same_file_cannot_bring_back_an_old_sprint` fail
 
 Suites: typecheck, 847 frontend tests and the build; 134 Rust tests (core 52, MCP 13, server 69) with a throwaway Postgres; `cargo check -p done-app` for the Mac and `--target aarch64-apple-ios`; `timeline-hide-past.cjs` 69 expectations.
 
-Not verified: a real older app (0.1.392) opening the same file as the new one (emulated by rewriting the trigger and dropping the sprint from what it pulls); an older and a newer app running at the same time on one file; the packaged apps.
+Review follow-up verification: the two new protection tests failed on the original recovery with a missing local sprint and pass with the revised recovery. An isolated probe using the actual v0.1.392 core and the revised current core confirmed three cases: an old pull followed by a current rename preserves the cloud sprint, a twice-refused local sprint survives reopen, and an offline completion omitted by the old sync survives the replay locally.
+
+Not verified: concurrent operation of both versions, or the packaged apps.

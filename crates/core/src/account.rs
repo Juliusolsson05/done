@@ -203,7 +203,8 @@ fn make_local(tx: &Transaction, space: i64) -> Result<(), Error> {
     unrecorded(tx, || {
         tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'seq'", [])?;
         let now = "(SELECT value FROM meta WHERE key = 'seq')";
-        for table in ["task", "note", "project"] {
+        tx.execute(&format!("UPDATE project SET space_id = NULL, seq = {now}, sprint_needs_refresh = 0 WHERE space_id = ?1"), [space])?;
+        for table in ["task", "note"] {
             tx.execute(&format!("UPDATE {table} SET space_id = NULL, seq = {now} WHERE space_id = ?1"), [space])?;
         }
         tx.execute(&format!("UPDATE entry SET seq = {now}"), [])?;
