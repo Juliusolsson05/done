@@ -133,7 +133,8 @@ targets:
       - script: |
           mirror="${TARGET_TEMP_DIR:?}/done-ios-rust"
           python3 "$SRCROOT/../../ios-rust/prepare.py" "$mirror"
-          cd "$mirror/crates/app"
+          export TAURI_APP_PATH="$mirror/crates/app"
+          cd "$TAURI_APP_PATH"
           npx --yes @tauri-apps/cli@2 ios xcode-script -v --platform "${PLATFORM_DISPLAY_NAME:?}" --sdk-root "${SDKROOT:?}" --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration "${CONFIGURATION:?}" ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code
         basedOnDependencyAnalysis: false
