@@ -1,0 +1,41 @@
+name: Native store screenshots
+on:
+  push:
+    branches: [qa/store-capture-279]
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - name: Prepare simulator and tools
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+          command -v xcodegen || brew install xcodegen
+          mkdir -p crates/app/gen/apple/assets crates/app/gen/apple/Externals/arm64/debug
+      - name: Build simulator application
+        working-directory: crates/app
+        run: |
+          npx --yes @tauri-apps/cli@2 ios build --target aarch64-sim --debug --no-sign --archive-only --ci
+      - name: Capture real app screens
+        run: bash qa/capture/native.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-store-images
+          path: qa/output
+          if-no-files-found: warn
+          retention-days: 5
