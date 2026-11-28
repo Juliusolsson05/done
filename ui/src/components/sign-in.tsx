@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { loadMe, onSignedIn, watchAppleSession } from '@/lib/backend'
+import { forgetAfterDeletion, noticeAfterDeletion } from '@/lib/apple-after-deletion'
+import { loadMe, onSignedIn, openLink, watchAppleSession } from '@/lib/backend'
 import { signOutChecked } from '@/lib/leave'
 import type { Account, Me } from '@/lib/me'
 
@@ -42,6 +43,43 @@ function SignIn({ failed }: { failed: boolean }) {
   )
 }
 
+// Said once an account was deleted and the app started over: what became of
+// Sign in with Apple. Stays until it is closed, since what it asks is a must.
+function AfterDeletion() {
+  const [notice, setNotice] = useState(noticeAfterDeletion)
+  if (!notice) return null
+  return (
+    <div
+      role="status"
+      className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+1rem)] z-50 mx-auto flex max-w-md flex-col gap-3 rounded-lg border bg-background p-4 text-sm shadow-lg"
+    >
+      <p>
+        {notice.text}
+        {notice.help && (
+          <>
+            {' '}
+            <button className="underline" onClick={() => openLink(notice.help!)}>
+              See Apple’s instructions
+            </button>
+            .
+          </>
+        )}
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="self-end"
+        onClick={() => {
+          forgetAfterDeletion()
+          setNotice(null)
+        }}
+      >
+        OK
+      </Button>
+    </div>
+  )
+}
+
 // Stands in front of the whole app. The app loads tasks as soon as it is
 // shown, so it is only shown once there is someone to load them for.
 export function Gate({ children }: { children: ReactNode }) {
@@ -59,7 +97,17 @@ export function Gate({ children }: { children: ReactNode }) {
   }, [])
   if (me === null) return null
   if (me.mode === 'cloud' && me.account === null) {
-    return <SignIn failed={new URLSearchParams(location.search).get('signin') === 'failed'} />
+    return (
+      <>
+        <AfterDeletion />
+        <SignIn failed={new URLSearchParams(location.search).get('signin') === 'failed'} />
+      </>
+    )
   }
-  return <AccountContext.Provider value={me.mode === 'cloud' ? me.account : null}>{children}</AccountContext.Provider>
+  return (
+    <AccountContext.Provider value={me.mode === 'cloud' ? me.account : null}>
+      <AfterDeletion />
+      {children}
+    </AccountContext.Provider>
+  )
 }

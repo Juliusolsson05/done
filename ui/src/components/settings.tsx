@@ -222,9 +222,7 @@ function AccountPane() {
           {deletionWarning(deleteUnsent) && <p className="font-medium text-foreground">{deletionWarning(deleteUnsent)}</p>}
           {isDesktop && <p>Local copies stay on your devices.</p>}
           {account.id?.startsWith('apple') && (
-            <p>If you signed in on an older version of done, you may also need to disconnect it in your Apple Account.{' '}
-              <button className="underline" onClick={() => openLink('https://support.apple.com/102571')}>See Apple’s instructions</button>.
-            </p>
+            <p>done also disconnects Sign in with Apple. If it cannot, it tells you, and you disconnect done yourself in your Apple Account.</p>
           )}
         </div>
       )}

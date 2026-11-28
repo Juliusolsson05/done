@@ -104,7 +104,7 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
 <h2>Retention and deletion</h2>
 <p>Synced data stays in your account until you delete it or the account. The database is backed up daily and each backup is kept for seven days. The sign-in cookie lasts 30 days.</p>
 <p>To delete your account, open Settings, choose “Delete my account” and confirm. This removes your personal space and feedback and ends your workspace memberships. A workspace you own passes to its earliest remaining member or is deleted if nobody else belongs to it. Shared content in a continuing workspace stays there. Deleted data ages out of backups within seven days.</p>
-<p>On iPhone, iPad, Mac and Windows, signing out or deleting your hosted account leaves local task data on your devices. To remove the local copy on iPhone or iPad, use Delete App on each device. Done revokes the Apple grants it holds when you delete your account. If you signed in on an older version, you may also need to disconnect done under Sign in with Apple in your Apple Account. <a href="https://support.apple.com/102571">See Apple’s instructions</a>.</p>
+<p>On iPhone, iPad, Mac and Windows, signing out or deleting your hosted account leaves local task data on your devices. To remove the local copy on iPhone or iPad, use Delete App on each device. If you signed in with Apple, deleting your account also asks Apple to disconnect done from your Apple Account. If that does not work, the app says so, and you then need to disconnect done under Sign in with Apple in your Apple Account. <a href="https://support.apple.com/102571">See Apple’s instructions</a>.</p>
 <p>For questions about your data, <a href="/support">contact support</a>.</p>"#,
     )
 }

@@ -98,7 +98,7 @@ impl Config {
             time_zone: std::env::var("DONE_TIME_ZONE").ok().filter(|z| !z.trim().is_empty()).unwrap_or_else(|| "America/Los_Angeles".into()),
             apple_audience: std::env::var("DONE_APPLE_AUDIENCE").ok().filter(|a| !a.trim().is_empty()).unwrap_or_else(|| "app.thedone.ios".into()),
             apple_keys_url: "https://appleid.apple.com/auth/keys".into(),
-            apple_grants: apple_grants::Client::from_env(),
+            apple_grants: apple_grants::Client::from_env(&key),
             public_url,
             client_id: need("DONE_GOOGLE_CLIENT_ID"),
             client_secret: need("DONE_GOOGLE_CLIENT_SECRET"),
@@ -526,13 +526,28 @@ pub async fn me(State(cloud): State<Cloud>, headers: HeaderMap, jar: SignedCooki
 }
 
 /// Deletes the account's tasks for good and signs out.
+///
+/// Apple is asked to revoke the kept grant first, outside the deleting
+/// transaction, so no row is locked while Apple answers. Whatever Apple says
+/// (or does not say within the timeout), the account is deleted: the
+/// person's deletion always wins. `apple` tells the app what became of Sign
+/// in with Apple: "revoked", "not_revoked", or "none" when no grant was kept
+/// (a non-Apple account, too). Older apps ignore it.
 pub async fn delete_account(State(cloud): State<Cloud>, me: Me, jar: SignedCookieJar, Json(_): Json<serde_json::Value>) -> Response {
-    match cloud.db.delete_after_revocation(&me, |grants| apple_grants::revoke(&cloud, &me.id, grants)).await {
-        Ok(()) => (jar.remove(gone(SESSION)), Json(serde_json::json!({}))).into_response(),
-        Err(e) => {
-            eprintln!("{e:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Your account could not be deleted. Please try again." }))).into_response()
-        }
+    let failed = |e: Fail| {
+        eprintln!("{e:?}");
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "Your account could not be deleted. Please try again." }))).into_response()
+    };
+    let grant = match cloud.db.apple_grant(&me).await {
+        Ok(grant) => grant,
+        Err(e) => return failed(e),
+    };
+    // A grant kept meanwhile (a sign-in on another device) goes with the
+    // account unrevoked: the account is being deleted.
+    let apple = apple_grants::revoke(&cloud.config, &me.id, grant).await;
+    match cloud.db.delete_account(&me).await {
+        Ok(()) => (jar.remove(gone(SESSION)), Json(serde_json::json!({ "apple": apple }))).into_response(),
+        Err(e) => failed(e),
     }
 }
 
@@ -638,12 +653,19 @@ pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Re
         Err(why) => return refused(why),
     };
     let id = apple_id(&claims.sub);
-    let grant = match q.authorization_code {
-        Some(code) if !code.is_empty() => match apple_grants::exchange(config, &keys, &claims.sub, &id, &code).await {
-            Ok(grant) => Some(grant),
-            Err(why) => return refused(why),
+    // The exchange never stands in the way of signing in: a server without
+    // Apple's settings, Apple down or slow, a code already used, a wrong team
+    // id or a revoked key each sign in without a kept grant (logged in
+    // `exchange`). Only Apple naming somebody else refuses.
+    let grant = match q.authorization_code.as_deref().map(str::trim) {
+        Some(code) if !code.is_empty() => match apple_grants::exchange(config, &keys, &claims.sub, &id, code).await {
+            Ok(grant) => grant,
+            Err(apple_grants::Mismatch) => return refused("Apple's grant names somebody else"),
         },
-        Some(_) => return refused("empty authorization code"),
+        Some(_) => {
+            apple_grants::note("Apple code exchange failed: an empty code; signed in without a kept grant");
+            None
+        }
         None => None,
     };
     let mut name = q.name.trim().to_string();
@@ -652,7 +674,7 @@ pub async fn apple(State(cloud): State<Cloud>, Json(q): Json<AppleSignIn>) -> Re
     if name.is_empty() {
         name = cloud.db.name_of(&id).await.ok().flatten().unwrap_or_default();
     }
-    let me = match cloud.db.me_with_apple_grant(&id, &claims.email, &name, "", grant.as_ref()).await {
+    let me = match cloud.db.me_with_apple_grant(&id, &claims.email, &name, "", grant.as_deref()).await {
         Ok(me) => me,
         Err(fail) => return down(fail),
     };

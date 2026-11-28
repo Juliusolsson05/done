@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import type { Change } from '@/lib/changes'
 import type { Day } from '@/lib/days'
 import { CLOUD_URL, cloudSession, finishSignIn, forgetCloudSession, rememberAppleUser, sameAppleSession, signInFromApp, signInWithAppleToken, signInWithPassword, type SheetAnswer } from '@/lib/cloud'
+import { appleAfterDeletion, rememberAfterDeletion } from '@/lib/apple-after-deletion'
 import { newId } from '@/lib/ids'
 import { readMe, type Me } from '@/lib/me'
 import { isIosAgent, windowsDevice } from '@/lib/platform'
@@ -312,8 +313,9 @@ export const deleteAccount = async (): Promise<void> => {
   // not asked. A refusal takes the mark back, tried until it holds or said;
   // a 401 keeps it. 'deleted' only once the server confirmed.
   if (hosted) await markLeaving('deleting')
+  let answer: unknown
   try {
-    await post<unknown>('/api/account/delete', {})
+    answer = await post<unknown>('/api/account/delete', {})
   } catch (error) {
     if (hosted && !(error instanceof Error && error.message === 'signed out')) {
       await markLeaving(null).catch(() => {
@@ -329,6 +331,9 @@ export const deleteAccount = async (): Promise<void> => {
     forgetCloudSession()
     // The account is gone: what stays is plain local data.
     await finishLeaving()
+    // Only Apple accounts sign in in an app with Apple; after the reload the
+    // app says what became of Sign in with Apple (lib/apple-after-deletion.ts).
+    if (hosted.account.id?.startsWith('apple')) rememberAfterDeletion(appleAfterDeletion(answer))
   }
   await clearWidgets()
   location.reload()
