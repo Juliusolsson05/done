@@ -1,3 +1,4 @@
+import { CLOUD_URL } from '@/lib/cloud'
 import { Avatar } from '@/components/avatars'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
@@ -8,7 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -149,7 +150,7 @@ function AccountPane() {
         {sure ? (
           <>
             <Button variant="destructive" size="sm" onClick={remove}>
-              Delete every task and my account
+              Delete my account and cloud data
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setSure(false)}>
               Keep it
@@ -161,7 +162,17 @@ function AccountPane() {
           </Button>
         )}
       </div>
-      {sure && <p className="text-sm text-muted-foreground">This removes all your tasks, projects and time sheet for good. It cannot be undone.</p>}
+      {sure && (
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>Your personal space and feedback will be deleted. Other members keep shared workspaces. This cannot be undone.</p>
+          {isDesktop && <p>Local copies stay on your devices.</p>}
+          {account.id?.startsWith('apple') && (
+            <p>Also disconnect done in your Apple Account under Sign in with Apple.{' '}
+              <button className="underline" onClick={() => openLink('https://support.apple.com/102571')}>See Apple’s instructions</button>.
+            </p>
+          )}
+        </div>
+      )}
     </Pane>
   )
 }
@@ -183,6 +194,15 @@ export function Settings() {
       <ViewHeader title="Settings" />
       <div className="flex flex-col gap-8">
         <AccountPane />
+
+        {isDesktop && (
+          <Pane title="Help">
+            <div className="flex flex-wrap gap-4">
+              <button className="underline" onClick={() => openLink(`${CLOUD_URL ?? 'https://thedone.app'}/privacy`)}>Privacy policy</button>
+              <button className="underline" onClick={() => openLink(`${CLOUD_URL ?? 'https://thedone.app'}/support`)}>Support</button>
+            </div>
+          </Pane>
+        )}
 
         <WorkspacesPane onOpen={setSpace} />
 
