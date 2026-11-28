@@ -81,9 +81,51 @@ Done empty. Chrome through Playwright, sidebar open and closed.
   the board's bottom and above the tab bar; mouse: the 45th To do card onto
   In progress, a card low into empty Done; touch: To do onto In progress,
   To do into off-screen Done by holding at the edge (phone), To do into Done
-  (iPad). On origin/main: 17 failures.
+  (iPad), and 844x390 by touch. On origin/main: 22 failures.
 - `npm run typecheck && npm test && npm run build`.
 
-## Verified / not verified
+## Rulings made while building
 
-Filled in as the work lands.
+- Ruling: on an iPhone or iPad every pointer goes through the hold path, and
+  cards are not `draggable` there — an iPad's trackpad would otherwise have
+  had no way to drag at all, and iOS's own drag of a `draggable` element would
+  fight the hold. A mouse or trackpad lifts the card once it moves past
+  `SLOP`, so a click still opens the task. Cost if wrong: iPad trackpad drags
+  feel slightly different from the Mac's (a copy follows instead of the
+  system's drag image).
+- Ruling: on a phone the board has no minimum height (`max-md:min-h-0`).
+  Sideways (844x390) the 160 px minimum pushed Add task under the tab bar;
+  without it the columns are 144 px tall there, and still scroll and take
+  drops. Cost if wrong: short columns in landscape, which is a rare way to
+  use the Board.
+- Ruling: phone columns are 85% wide but at most 384 px (`max-w-sm`), so a
+  phone held sideways shows two columns instead of one 690 px wide.
+- Ruling: the check runs phones with `hasTouch` but without Chromium's
+  `isMobile`, because of the layout viewport widening noted above.
+
+## Verified (local preview, Chrome via Playwright, seeded board)
+
+- `ui/checks/board-heights.cjs`: all pass on this branch; 22 failures on
+  origin/main with the same check (every drag case and every height case).
+- Every viewport, sidebar open and closed: the document and the page do not
+  scroll; all three columns end at the board's bottom (1440x900: 804 px,
+  1280x600: 504, 1024x500: 404, iPad 1084 / 724, iPhone 743 / 289); a drop
+  low in the empty Done column lands (mouse on the Mac, trackpad path on the
+  iPad layouts, touch in the check).
+- Touch: a hold of a second without moving still opens the long-press menu,
+  and the lifted copy is gone after letting go; a sideways swipe on a card
+  moves to the next column on a phone (scrollLeft 0 to 316, one column);
+  a vertical swipe scrolls the column (0 to 325); a tap opens the task;
+  a held card at a column's bottom edge scrolls it (840 px in a second).
+- Desktop at 1440x900 matches the before screenshot apart from the columns
+  reaching the bottom (same column positions, widths and cards).
+- `npm run typecheck && npm test && npm run build` green (643 tests).
+
+## Not verified
+
+- A real iPhone or iPad, and the Mac app's WebKit view: only Chrome's touch
+  emulation. iOS's own long-press timing against the 380 ms hold, haptics
+  on lift, and `100svh` with the real safe areas need a device.
+- Auto-scroll near an edge with a mouse on the Mac uses the browser's own
+  drag auto-scroll; Playwright's emulated drag cannot show it. With
+  full-height columns it is no longer needed to reach a column.

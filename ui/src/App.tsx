@@ -548,7 +548,7 @@ export default function App() {
                     // A phone switches tabs at once, as iOS does, and pushes
                     // a screen opened from Lists in from the right.
                     isMobile ? !isTab(view) && 'animate-push' : 'animate-enter',
-                    (view.kind === 'timeline' || view.kind === 'focus') && 'flex min-h-0 flex-1 flex-col',
+                    (view.kind === 'timeline' || view.kind === 'focus' || view.kind === 'board') && 'flex min-h-0 flex-1 flex-col',
                   )}
                 >
                   {view.kind === 'lists' && <ListsScreen />}
