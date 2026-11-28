@@ -91,6 +91,9 @@ final class Capture: XCTestCase {
         wait(button(taskName), 20)
         capture("04-Relaunched-Today")
         open("Notes")
+        // A phone opens Notes on its folders; the notes are under All notes.
+        let all = button("All notes")
+        if all.waitForExistence(timeout: 3) && all.isHittable { all.tap() }
         wait(anything(noteName))
         capture("05-Relaunched-Notes")
 
