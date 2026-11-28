@@ -106,7 +106,7 @@ pub fn handle(store: &dyn Tasks, message: &Value) -> Option<Value> {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "done", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 1 is the most urgent and 4 means none. A task with no project is in the Inbox. A task can have subtasks, one level deep: a list to tick off under it. A subtask has its own id and is changed, completed and deleted like any task.",
+                "instructions": "done is the user's personal to-do list. Dates are calendar days written YYYY-MM-DD; list_tasks tells you today's date. Priority 0 (P0) is only for what must happen right away; otherwise 1 is the most urgent and 4 means none. A task with no project is in the Inbox. A task can have subtasks, one level deep: a list to tick off under it. A subtask has its own id and is changed, completed and deleted like any task.",
             })
         }
         "ping" => json!({}),
