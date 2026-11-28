@@ -37,6 +37,7 @@ use tokio_postgres::NoTls;
 pub enum Fail {
     /// What was asked breaks a rule; the text says which, for the person.
     Invalid(String),
+    TooManyRequests(String),
     /// There is no such thing, or it is not yours to see: the same answer
     /// for both, so an id cannot be probed.
     NotFound,
@@ -87,6 +88,13 @@ CREATE TABLE IF NOT EXISTS account (
   id TEXT PRIMARY KEY, email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', picture TEXT NOT NULL DEFAULT '',
   created BIGINT NOT NULL);
 CREATE INDEX IF NOT EXISTS account_email ON account (lower(email));
+CREATE TABLE IF NOT EXISTS feedback (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES account (id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('bug','idea')),
+  message TEXT NOT NULL CHECK (char_length(message) BETWEEN 1 AND 2000),
+  created BIGINT NOT NULL);
+CREATE INDEX IF NOT EXISTS feedback_account_created ON feedback (account_id, created);
 CREATE TABLE IF NOT EXISTS space (
   id BIGINT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', owner_id TEXT NOT NULL,
   created BIGINT NOT NULL, next_seq BIGINT NOT NULL DEFAULT 0);
@@ -142,6 +150,20 @@ pub struct Me {
     pub id: String,
     pub email: String,
     pub personal: i64,
+}
+
+#[derive(Serialize)]
+pub struct Feedback {
+    id: i64,
+    kind: String,
+    message: String,
+    created: i64,
+}
+
+impl From<tokio_postgres::Row> for Feedback {
+    fn from(row: tokio_postgres::Row) -> Self {
+        Self { id: row.get("id"), kind: row.get("kind"), message: row.get("message"), created: row.get("created") }
+    }
 }
 
 /// A space someone is in, and as what.
@@ -835,6 +857,40 @@ impl Db {
         )
         .await?;
         Ok(personal)
+    }
+
+    pub async fn feedback(&self) -> Result<Vec<Feedback>, Fail> {
+        let client = self.pool.get().await?;
+        let rows = client.query("SELECT id, kind, message, created FROM feedback ORDER BY id DESC LIMIT 100", &[]).await?;
+        Ok(rows.into_iter().map(Feedback::from).collect())
+    }
+
+    pub async fn add_feedback(&self, me: &Me, kind: &str, message: &str) -> Result<Feedback, Fail> {
+        let message = message.trim();
+        if !matches!(kind, "bug" | "idea") {
+            return invalid("Choose a problem or an idea.");
+        }
+        if message.is_empty() || message.contains('\0') || message.chars().count() > 2000 {
+            return invalid("Write a message of up to 2,000 characters.");
+        }
+        let mut client = self.pool.get().await?;
+        let tx = client.transaction().await?;
+        // Serialize submissions by this account so simultaneous requests share its limit.
+        if tx.query_opt("SELECT id FROM account WHERE id = $1 FOR UPDATE", &[&me.id]).await?.is_none() {
+            return Err(Fail::NotFound);
+        }
+        let now = now_ms();
+        let yesterday = now - 24 * 60 * 60 * 1000;
+        let recent: i64 = tx.query_one("SELECT count(*) FROM feedback WHERE account_id = $1 AND created >= $2", &[&me.id, &yesterday]).await?.get(0);
+        if recent >= 30 {
+            return Err(Fail::TooManyRequests("You have posted 30 messages in the last day. Try again later.".into()));
+        }
+        let row = tx.query_one(
+            "INSERT INTO feedback (account_id, kind, message, created) VALUES ($1, $2, $3, $4) RETURNING id, kind, message, created",
+            &[&me.id, &kind, &message, &now],
+        ).await?;
+        tx.commit().await?;
+        Ok(row.into())
     }
 
     /// A device swapping changes: its rows in, everything new in each of its

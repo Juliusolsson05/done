@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="done-app" content="{{APP_URL}}">
+  <meta name="color-scheme" content="light">
+  <title>Feedback wall · done</title>
+  <style>
+    :root { color-scheme:light; --ink:#232820; --muted:#60675d; --line:#d8dbd1; --paper:#f6f7f1; --blue:#244ac6; font:16px/1.55 "Helvetica Neue",Arial,sans-serif; color:var(--ink); background:var(--paper); }
+    * { box-sizing:border-box; }
+    body { margin:0; }
+    [hidden] { display:none !important; }
+    :focus-visible { outline:3px solid #345edc; outline-offset:3px; }
+    a { color:inherit; text-underline-offset:3px; }
+    .shell { max-width:1056px; margin:auto; padding:0 clamp(20px,5vw,64px); }
+    nav, footer, .row { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+    nav { min-height:76px; border-bottom:1px solid var(--line); }
+    .wordmark { font-weight:800; letter-spacing:-.075em; font-size:30px; line-height:1; }
+    .open { text-decoration:none; font-size:14px; font-weight:600; }
+    .open:hover, footer a:hover { color:var(--blue); }
+    header { padding:clamp(40px,7vw,78px) 0 clamp(28px,5vw,54px); }
+    h1,h2,p { margin:0; }
+    h1 { font-size:clamp(48px,8vw,88px); letter-spacing:-.055em; line-height:.98; font-weight:660; }
+    header p { max-width:34em; margin-top:20px; color:var(--muted); font-size:clamp(16px,2vw,19px); line-height:1.5; }
+    .board { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:clamp(24px,4vw,48px); align-items:start; padding-bottom:64px; }
+    .compose { background:#fff; padding:clamp(22px,3vw,30px); border:1px solid var(--line); border-radius:12px; }
+    h2 { font-size:22px; line-height:1.2; letter-spacing:-.04em; }
+    .muted, #status, time, footer { color:var(--muted); }
+    .compose p { margin-top:12px; }
+    fieldset { padding:0; margin:22px 0 15px; border:0; }
+    legend,.label { display:block; padding:0; margin:0 0 7px; font-size:14px; font-weight:600; }
+    .choices { display:flex; gap:7px; flex-wrap:wrap; }
+    .choice { position:relative; display:inline-flex; }
+    .choice input { position:absolute; width:1px; height:1px; opacity:0; }
+    .choice span { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line); padding:6px 12px; border-radius:22px; font-size:14px; cursor:pointer; }
+    .choice input:checked + span { border-color:var(--ink); background:var(--ink); color:white; }
+    .choice input:focus-visible + span { outline:3px solid var(--blue); outline-offset:2px; }
+    textarea { display:block; width:100%; min-height:126px; resize:vertical; padding:11px 13px; border:1px solid #bdc3b6; border-radius:6px; font:inherit; color:var(--ink); background:#fff; }
+    .button { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:6px; background:var(--blue); color:white; text-decoration:none; font:600 15px/1.2 "Helvetica Neue",Arial,sans-serif; padding:12px 17px; cursor:pointer; }
+    .button:hover { background:#173ba8; }
+    button:disabled { opacity:.65; cursor:wait; }
+    .compose .button { margin-top:16px; }
+    #status { font-size:14px; }
+    #status:empty { display:none; }
+    .feed { padding-top:8px; }
+    .feed h2 { padding-bottom:16px; border-bottom:1px solid var(--ink); }
+    #wall-state { padding-top:17px; }
+    #retry { background:none; border:0; color:var(--blue); text-decoration:underline; font:inherit; cursor:pointer; padding:6px 0; }
+    ol { list-style:none; padding:0; margin:0; }
+    li { padding:17px 0 20px; border-bottom:1px solid var(--line); }
+    time,.tag { font-size:12px; }
+    .tag { display:inline-flex; align-items:center; gap:6px; font-weight:650; }
+    .tag::before { content:""; width:8px; height:8px; border-radius:50%; background:#cd7748; }
+    .tag.idea::before { background:#697fd2; }
+    li p { white-space:pre-wrap; overflow-wrap:anywhere; margin-top:7px; }
+    footer { justify-content:flex-start; border-top:1px solid var(--line); padding:20px 0 36px; font-size:13px; }
+    @media (max-width:700px) { .board { grid-template-columns:1fr; } nav { min-height:62px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav aria-label="Main"><span class="wordmark">done</span><a class="open" href="{{APP_URL}}/">Open done <span aria-hidden="true">↗</span></a></nav>
+    <main>
+      <header>
+        <h1>A to-do list for you<br>and your team.</h1>
+        <p>Completely free. No bloat, no AI bullshit, no maze of confusing features.</p>
+      </header>
+      <div class="board">
+        <section class="compose" aria-labelledby="write-title">
+          <h2 id="write-title">Leave feedback</h2>
+          <div id="gate" hidden>
+            <p id="gate-copy" class="muted">Sign in with your done account to post.</p>
+            <a class="button" id="sign-in" href="{{FEEDBACK_SIGN_IN}}">Sign in to done</a>
+          </div>
+          <form id="composer" hidden>
+            <fieldset>
+              <legend>What is it?</legend>
+              <div class="choices">
+                <label class="choice"><input type="radio" name="kind" value="bug" checked><span>Something broke</span></label>
+                <label class="choice"><input type="radio" name="kind" value="idea"><span>An idea</span></label>
+              </div>
+            </fieldset>
+            <label class="label" for="message" id="message-label">What happened?</label>
+            <textarea id="message" name="message" required maxlength="2000" rows="4"></textarea>
+            <p class="muted" style="font-size:13px">People signed in to done can read your post.</p>
+            <button type="submit" class="button" id="submit">Post to wall</button>
+          </form>
+          <p id="status" role="status" aria-live="polite"></p>
+          <noscript><p>Enable JavaScript to read the wall and post feedback.</p></noscript>
+        </section>
+        <section class="feed" aria-labelledby="wall-title">
+          <h2 id="wall-title">Feedback wall</h2>
+          <p class="muted" id="wall-state" role="status">Loading feedback…</p>
+          <button id="retry" type="button" hidden>Try again</button>
+          <ol id="posts" aria-label="Feedback, newest first"></ol>
+        </section>
+      </div>
+    </main>
+    <footer><a href="{{APP_URL}}/privacy">Privacy</a><a href="{{APP_URL}}/terms">Terms</a></footer>
+  </div>
+  <script>
+    const byId = (id) => document.getElementById(id)
+    const form = byId('composer')
+    const message = byId('message')
+    const status = byId('status')
+    const wall = byId('wall-state')
+    const posts = byId('posts')
+    const app = new URL(document.querySelector('meta[name="done-app"]').content)
+    const dates = new Intl.DateTimeFormat(undefined, { month:'short', day:'numeric', year:'numeric' })
+
+    const draftKey = 'done-feedback-sign-in-draft'
+    function restoreDraft() {
+      try {
+        const draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null')
+        if (!draft || typeof draft.message !== 'string') return
+        message.value = draft.message
+        form.elements.kind.value = draft.kind === 'idea' ? 'idea' : 'bug'
+        updateLabel()
+        sessionStorage.removeItem(draftKey)
+      } catch { /* Storage can be unavailable in private browsing. */ }
+    }
+
+    function showGate() {
+      form.hidden = true
+      byId('gate').hidden = false
+      posts.replaceChildren()
+      wall.hidden = false
+      wall.textContent = 'Sign in to see what others have posted.'
+    }
+
+    function entry(post) {
+      const item = document.createElement('li')
+      const row = document.createElement('div')
+      row.className = 'row'
+      const kind = document.createElement('span')
+      kind.className = post.kind === 'idea' ? 'tag idea' : 'tag'
+      kind.textContent = post.kind === 'idea' ? 'Idea' : 'Problem'
+      const date = document.createElement('time')
+      date.dateTime = new Date(post.created).toISOString()
+      date.textContent = dates.format(post.created)
+      const body = document.createElement('p')
+      body.textContent = post.message
+      row.append(kind, date)
+      item.append(row, body)
+      return item
+    }
+
+    async function load() {
+      byId('retry').hidden = true
+      try {
+        const response = await fetch('/api/feedback', {cache:'no-store'})
+        if (response.status === 401) return showGate()
+        if (!response.ok) throw Error()
+        const rows = await response.json()
+        posts.replaceChildren(...rows.map(entry))
+        wall.hidden = rows.length > 0
+        wall.textContent = 'Nothing posted yet. Your feedback can start the wall.'
+        byId('gate').hidden = true
+        form.hidden = false
+        restoreDraft()
+      } catch {
+        wall.hidden = false
+        wall.textContent = 'The wall couldn’t load.'
+        byId('retry').hidden = false
+      }
+    }
+
+    function updateLabel() {
+      byId('message-label').textContent = form.elements.kind.value === 'idea' ? 'What would you change?' : 'What happened?'
+    }
+    form.addEventListener('change', updateLabel)
+    message.addEventListener('input', () => message.setCustomValidity(''))
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const button = byId('submit')
+      if (button.disabled) return
+      const text = message.value.trim()
+      if (!text) {
+        message.setCustomValidity('Write a little about what happened or what you would change.')
+        message.reportValidity()
+        return
+      }
+      let signedOut = false
+      button.disabled = true
+      message.readOnly = true
+      form.querySelector('fieldset').disabled = true
+      status.textContent = 'Posting…'
+      try {
+        const response = await fetch('/api/feedback', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({kind:form.elements.kind.value, message:text})
+        })
+        if (response.status === 401) {
+          signedOut = true
+          showGate()
+          try {
+            sessionStorage.setItem(draftKey, JSON.stringify({kind:form.elements.kind.value, message:message.value}))
+            status.textContent = 'Your draft is saved in this tab. Sign in to finish posting.'
+          } catch {
+            form.hidden = false
+            status.textContent = 'Your session ended. Copy your message before signing in again.'
+          }
+          return
+        }
+        if (!response.ok) {
+          status.textContent = response.status === 429 ? 'You’ve posted several times recently. Try again later.' : 'Your post couldn’t be saved. Try again.'
+          return
+        }
+        posts.prepend(entry(await response.json()))
+        wall.hidden = true
+        message.value = ''
+        status.textContent = 'Posted to the wall.'
+      } catch {
+        status.textContent = 'Couldn’t confirm the post. Check the wall before posting again.'
+        byId('retry').hidden = false
+      } finally {
+        button.disabled = signedOut
+        message.readOnly = false
+        form.querySelector('fieldset').disabled = false
+      }
+    })
+    byId('retry').addEventListener('click', load)
+    if (location.origin === app.origin) {
+      load()
+    } else {
+      showGate()
+      byId('gate-copy').textContent = 'Use your done account to read the wall and leave feedback.'
+      byId('sign-in').href = new URL('/feedback', app).href
+      byId('sign-in').textContent = 'Visit the wall'
+    }
+  </script>
+</body>
+</html>
