@@ -126,7 +126,7 @@ function EditorForm({ task }: { task: Task }) {
 // In a list the editor takes the place of the task's row.
 export function TaskEditor({ task }: { task: Task }) {
   return (
-    <Card className="my-1 animate-enter p-3 shadow-md">
+    <Card data-editing-task={task.id} className="my-1 animate-enter p-3 shadow-md">
       <EditorForm task={task} />
     </Card>
   )

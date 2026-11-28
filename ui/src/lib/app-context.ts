@@ -7,15 +7,18 @@ import type { Hit } from '@/lib/search'
 import { colorIndex, type Data, type Project, type Task, type View } from '@/lib/tasks'
 import type { Scope, Shown, Team } from '@/lib/team'
 
-// What is on screen right now. Not saved: a reload always starts in Today.
+// What is on screen right now. The view and the open task are in the
+// address (lib/route.ts), so a reload comes back to them; the rest is not kept.
 export interface Ui {
   view: View
-  // The views left to get here, for a phone's back button (lib/view-history).
+  // Where the phone's Back button goes: the place this one was opened from,
+  // read from the browser's history (lib/router.ts). Empty when there is none.
   history: View[]
   adding: boolean
   // The quick add box is naming today's goal rather than adding to the view.
   asGoal: boolean
   editing: number | null
+  editingInDialog: boolean
   newProject: boolean
   renaming: boolean
   confirmDelete: boolean
@@ -59,6 +62,9 @@ export interface App {
   openView(view: View): void
   // Back to the view this one was opened from; Lists when there is none.
   back(): void
+  // The Notes page says which note it shows, for the address. `auto` for a
+  // note it opened by itself, which is not a step to go back through.
+  showNote(id: number | null, auto?: boolean): void
   add(): void
   addGoal(): void
   edit(id: number): void

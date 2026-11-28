@@ -49,7 +49,9 @@ export interface Data {
 }
 
 export type View =
-  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'completed' | 'settings' }
+  | { kind: 'inbox' | 'today' | 'upcoming' | 'timeline' | 'board' | 'focus' | 'timesheet' | 'completed' }
+  // A workspace id opens that workspace's page inside Settings.
+  | { kind: 'settings'; space?: number }
   // In a workspace (or All): the tasks someone put you on.
   | { kind: 'mine' }
   // A phone's list of notifications; a window shows them under the bell.

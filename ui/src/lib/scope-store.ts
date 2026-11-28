@@ -32,6 +32,9 @@ export function setScope(scope: Scope) {
   for (const listener of listeners) listener()
 }
 
+// Where the picker is now, for code that runs outside a render.
+export const getScope = (): Scope => current
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener)
   return () => listeners.delete(listener)

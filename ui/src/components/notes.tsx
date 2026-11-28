@@ -3,6 +3,7 @@
 // open note on the right; on a phone one at a time.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, useMemo } from 'react'
 import { inScope, spaceForNew, workspaceOf } from '@/lib/team'
+import { NO_ACCESS, scopeFor } from '@/lib/route'
 import Markdown from 'markdown-to-jsx/react'
 import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -82,7 +83,7 @@ function useWidth(): [(el: HTMLElement | null) => void, number | null] {
 const NO_NOTES: Note[] = []
 
 export function Notes() {
-  const { ui, data, scope, team } = useApp()
+  const { ui, data, scope, team, showNote, setScope, say } = useApp()
   const isMobile = useIsMobile()
   // An iPad: the window layout, for a finger. The note's header keeps what is
   // used all the time and puts the rest behind one ⋯, every control 44 tall.
@@ -212,23 +213,66 @@ export function Notes() {
   useEffect(() => {
     if (isMobile || stacked || !notes || !query.trim()) return
     const found = [...notes].sort(byNewest).filter((n) => matches(n, query))
-    if (found.length > 0 && !found.some((n) => n.id === openId)) open(found[0].id)
+    if (found.length > 0 && !found.some((n) => n.id === openId)) open(found[0].id, true)
     // Only when the search or the notes change; open reads the latest state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, notes, isMobile, stacked])
 
-  // A note asked for from elsewhere (the search) is opened once it is here,
-  // under All notes so it is listed whatever folder it is in.
+  // A note asked for from elsewhere (the search, a link, the address, Back
+  // or Forward) is opened once it is here, under All notes so it is listed
+  // whatever folder it is in. One in another of your spaces moves the picker
+  // there; one that is not yours, or is gone, is said and not opened.
   const asked = ui.view.kind === 'notes' ? ui.view.id : undefined
+  // Whether the next note shown was tapped, and the note last told to the
+  // app for the address (see below).
+  const tapped = useRef(false)
+  const reported = useRef<number | null | undefined>(undefined)
+  // The ask last acted on. Only a new ask is acted on: the notes changing
+  // under a note the page opened itself (Undo, a new note) is not one.
+  const handled = useRef<number | null | undefined>(null)
   useEffect(() => {
-    if (asked !== undefined && notes?.some((n) => n.id === asked)) {
+    if (!notes || asked === handled.current) return
+    handled.current = asked
+    if (asked === undefined) {
+      // Back from a note to the list of notes. A wide screen always shows a
+      // note, so there the address takes the open one instead.
+      if (openRef.current === null) return
+      if (isMobile || stacked) open(null, true)
+      else showNote(openRef.current, true)
+      return
+    }
+    if (asked === openRef.current) return
+    if (notes.some((n) => n.id === asked)) {
       setQuery('')
       setFolder(null)
       setAtFolders(false)
-      open(asked)
+      open(asked, true)
+      return
     }
+    const elsewhere = stored?.find((n) => n.id === asked)
+    if (elsewhere) {
+      // Asked again once the picker has moved and the note is listed.
+      handled.current = null
+      return setScope(scopeFor(spaceOfNote(elsewhere, data.projects), team))
+    }
+    say(NO_ACCESS)
+    showNote(null, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asked, notes !== null])
+  }, [asked, notes])
+
+  // The address follows the open note. One opened by a tap is a step Back
+  // goes through; one the page opened by itself is not. Nothing is said
+  // before a note has been open (undefined): the address may be asking for
+  // one that is about to open.
+  useEffect(() => {
+    if (!notes || openId === reported.current || (reported.current === undefined && openId === null)) return
+    reported.current = openId
+    showNote(openId, !tapped.current)
+    tapped.current = false
+    // Only a change of the open note is reported: the notes arriving, with
+    // the asked-for note not open yet, is not a change to report.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId])
 
   // On a wide screen a note is always open when the chosen folder has one:
   // the one asked for if any, otherwise the folder's newest.
@@ -251,10 +295,11 @@ export function Notes() {
     return () => document.removeEventListener('keydown', onKey)
   }, [reading])
 
-  const open = (id: number | null) => {
+  const open = (id: number | null, auto = false) => {
     setReading(false)
     setSheet(false)
     if (id === openId) return
+    tapped.current = !auto
     leave(openId)
     setFresh(null)
     setOpenId(id)
@@ -268,7 +313,7 @@ export function Notes() {
     setAtFolders(false)
     if (isMobile || stacked) return
     const newest = [...(latest.current ?? [])].sort(byNewest).find((n) => inFolder(n, next))
-    open(newest ? newest.id : null)
+    open(newest ? newest.id : null, true)
   }
 
   // A new note goes in the folder that is open, so it is listed where it was made.
@@ -280,6 +325,7 @@ export function Notes() {
       const note = await saveNote({ text: '', updatedAt: Date.now(), projectId, folder: into, spaceId: spaceForNew(scope) })
       play('add')
       setNotes((all) => [note, ...(all ?? [])])
+      tapped.current = true
       setOpenId(note.id)
       setFresh(note.id)
     } catch {

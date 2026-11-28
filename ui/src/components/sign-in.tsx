@@ -3,11 +3,21 @@ import { Button } from '@/components/ui/button'
 import { loadMe, onSignedIn, watchAppleSession } from '@/lib/backend'
 import { signOutChecked } from '@/lib/leave'
 import type { Account, Me } from '@/lib/me'
+import { formatRoute, parseRoute } from '@/lib/route'
 
 // The signed-in account, or null where there are no accounts (the desktop
 // app, and a server running on this Mac).
 const AccountContext = createContext<Account | null>(null)
 export const useAccount = () => useContext(AccountContext)
+
+// Back to the place the address names once signed in: a link to a task or
+// a note opens it after the trip to Google. Only an address of the app's own
+// is sent, and the server checks it again (auth.rs `back_to`).
+function signInHref(): string {
+  const route = parseRoute(location.pathname + location.search)
+  if (!route || location.pathname === '/') return '/auth/google'
+  return `/auth/google?then=${encodeURIComponent(formatRoute(route))}`
+}
 
 function SignIn({ failed }: { failed: boolean }) {
   return (
@@ -20,7 +30,7 @@ function SignIn({ failed }: { failed: boolean }) {
         {/* A link, not a request from a script: signing in is a trip to
             Google and back, and the browser has to make it itself. */}
         <Button asChild size="lg">
-          <a href="/auth/google">Continue with Google</a>
+          <a href={signInHref()}>Continue with Google</a>
         </Button>
         {failed && (
           <p role="alert" className="text-sm text-destructive">

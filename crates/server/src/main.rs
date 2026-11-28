@@ -13,6 +13,7 @@ mod remote_mcp;
 mod collab;
 mod pages;
 mod pg;
+mod routes;
 
 use axum::{
     extract::{Query, Request, State},
@@ -311,6 +312,10 @@ async fn read_notifications(State(cloud): State<Cloud>, me: Me, Json(_): Json<se
     done(cloud.db.read_notifications(&me).await.map(OK))
 }
 
+async fn app_place(method: axum::http::Method, uri: axum::http::Uri, headers: axum::http::HeaderMap) -> Response {
+    routes::fallback(method, uri, headers, UI).await
+}
+
 fn local(store: Arc<Store>) -> Router {
     Router::new()
         .route("/", get(|| async { Html(UI) }))
@@ -323,6 +328,8 @@ fn local(store: Arc<Store>) -> Router {
         .route("/api/entries/delete", post(delete_entry))
         .route("/api/notes", get(notes).post(save_note))
         .route("/api/notes/delete", post(delete_note))
+        // The app's own addresses, for a reload or a link (routes.rs).
+        .fallback(app_place)
         .layer(middleware::from_fn(local_only))
         .with_state(store)
 }
@@ -378,6 +385,8 @@ fn cloud(cloud: Cloud) -> Router {
         .route("/api/notifications/read", post(read_notifications))
         .route("/api/live/ticket", post(live_ticket))
         .route("/invite/{token}", get(pages::invite))
+        // The app's own addresses, for a reload or a link (routes.rs).
+        .fallback(app_place)
         .layer(for_the_apps())
         .with_state(cloud)
 }
@@ -739,6 +748,56 @@ mod tests {
         google.says(person("friend", "friend@example.com"));
         assert_eq!(browser.sign_in_then("/feedback").await, "/feedback");
         assert_eq!(browser.sign_in_then("/feedback/elsewhere").await, "/");
+    }
+
+    /// The app's own addresses load the app, so a reload or a link keeps its
+    /// place; nothing the server answered before answers differently.
+    #[tokio::test]
+    async fn the_apps_places_load_the_app_and_shadow_no_route() {
+        let (at, google, _db) = hosted(1).await;
+        let mut b = Browser::new(&at);
+        for path in ["/today", "/upcoming", "/upcoming/", "/project/7", "/notes/3", "/settings/workspace/2", "/board?task=12", "/time-sheet"] {
+            let answer = b.get(path).await;
+            assert_eq!(answer.status(), 200, "{path}");
+            assert_eq!(answer.text().await.unwrap(), UI, "{path}");
+        }
+        for path in ["/nope", "/project/abc", "/project/7/more", "/today/more", "/api/nope", "/auth/nope", "/oauth/nope", "/mcp/nope", "/Today", "/index.html"] {
+            assert_eq!(b.get(path).await.status(), 404, "{path}");
+        }
+        // Only a GET: a POST to a place is what it was before.
+        assert_eq!(b.post("/today", serde_json::json!({})).await.status(), 404);
+        // What was there before is there as it was.
+        assert_eq!(b.get("/").await.text().await.unwrap(), UI);
+        assert_eq!(b.get("/healthz").await.text().await.unwrap(), "ok");
+        assert_eq!(b.get("/api/me").await.json::<serde_json::Value>().await.unwrap(), serde_json::json!({ "mode": "cloud", "account": null }));
+        assert_eq!(b.get("/api/state?today=2026-11-18").await.status(), 401);
+        for path in ["/privacy", "/support", "/terms", "/feedback"] {
+            let page = b.get(path).await.text().await.unwrap();
+            assert_ne!(page, UI, "{path}");
+            assert!(page.contains("<html") || page.contains("<!doctype") || page.contains("<!DOCTYPE"), "{path}");
+        }
+        assert!(b.get("/auth/google").await.headers()["location"].to_str().unwrap().contains("/authorize?"));
+        // The landing host keeps only its landing.
+        let landing = b.http.get(format!("{at}/today")).header("host", "hi.thedone.app").send().await.unwrap();
+        assert_eq!(landing.status(), 404);
+        // Signing in from a link comes back to it, and only to the app's own places.
+        google.says(person("2001", "cy@example.com"));
+        assert_eq!(b.sign_in_then("/upcoming?task=12").await, "/upcoming?task=12");
+        assert_eq!(b.sign_in_then("/project/7").await, "/project/7");
+        for unsafe_then in ["//evil.example", "https://evil.example/today", "/today?task=1&x=//evil", "/api/state", "/nope"] {
+            assert_eq!(b.sign_in_then(unsafe_then).await, "/", "{unsafe_then}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_local_server_loads_the_apps_places_for_this_machine_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = serve(local(Arc::new(Store::open(&dir.path().join("done.db")).unwrap()))).await;
+        let http = reqwest::Client::new();
+        assert_eq!(http.get(format!("{at}/upcoming")).send().await.unwrap().text().await.unwrap(), UI);
+        assert_eq!(http.get(format!("{at}/nope")).send().await.unwrap().status(), 404);
+        let other = http.get(format!("{at}/upcoming")).header("host", "evil.example.com").send().await.unwrap();
+        assert_eq!(other.status(), 403);
     }
 
     #[tokio::test]

@@ -33,16 +33,31 @@ import { isDue } from '@/lib/focus'
 import { endFocus, getFocus, handOff, onRecordFailed, rememberMinutes, remind, retryUnsaved, storedMinutes, subscribeFocus, timeIsUp, toggleFocus } from '@/lib/focus-store'
 import { play } from '@/lib/sounds'
 import { caughtUp, change, getSnapshot, load, onLost, refresh, replicateNow, subscribe } from '@/lib/store'
-import { setScope, useScope } from '@/lib/scope-store'
+import { getScope, setScope, useScope } from '@/lib/scope-store'
 import { forMe, shownFor, validScope } from '@/lib/team'
 import { forgetLast, undoLast } from '@/lib/undo'
-import { deleteProject, deleteTask, finishesBig, markDone, markOpen, type Data, type View } from '@/lib/tasks'
+import { deleteProject, deleteTask, finishesBig, markDone, markOpen, sections, type Data, type View } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 import { offered } from '@/lib/view-filter'
 import { setFilterOpen } from '@/lib/view-filter-store'
-import { back, opened } from '@/lib/view-history'
+import { formatRoute, HOME, parseRoute, resolve, titleOf, type Route } from '@/lib/route'
+import { createRouter } from '@/lib/router'
 
-const CLOSED = { adding: false, asGoal: false, editing: null, newProject: false, renaming: false, confirmDelete: false, searching: false }
+// The address follows where the app is (lib/route.ts), and the browser's
+// Back and Forward move the app (lib/router.ts).
+const router = createRouter(window)
+// Where a phone's page is scrolled on Back is the app's to put back (see
+// `leaving`); the browser's own would put it where the pushed page left it.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
+const loaded = (): Route | null => parseRoute(location.pathname + location.search)
+// The phone's Back button names the place it goes to: the entry this one was
+// pushed from.
+const behind = (prev: string | null) => {
+  const route = prev === null ? null : parseRoute(prev)
+  return route ? [route.view] : []
+}
+
+const CLOSED = { adding: false, asGoal: false, editing: null, editingInDialog: false, newProject: false, renaming: false, confirmDelete: false, searching: false }
 const isOpen = (ui: Ui) => ui.adding || ui.editing !== null || ui.newProject || ui.renaming || ui.confirmDelete || ui.searching
 
 // Whether the sidebar was showing when the app was last open. The sidebar
@@ -90,9 +105,10 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [ui, setUi] = useState<Ui>(() => ({
     ...CLOSED,
-    // A reminder that was showing before a reload is still showing after it.
-    view: { kind: getFocus()?.reminding ? 'focus' : 'today' },
-    history: [],
+    // Where the address says; it is checked against the tasks once they are
+    // loaded. A reminder that was showing before a reload is still showing after it.
+    view: getFocus()?.reminding ? { kind: 'focus' } : (loaded() ?? HOME).view,
+    history: behind(router.entry().prev),
     tlStart: addDays(TODAY, -4),
     focusPick: null,
     focusMinutes: storedMinutes(),
@@ -109,30 +125,32 @@ export default function App() {
   const shown = shownFor(data, scope, team)
 
   const closeAll = () => setUi((u) => ({ ...u, ...CLOSED }))
+  // The next step in the address is a correction, or a move the app made by
+  // itself, not a step to go back through.
+  const replaceNext = useRef(false)
+  const toSay = useRef<string | null>(null)
   // The page a phone swipes back from.
   const page = useRef<HTMLDivElement>(null)
   // A phone's page is the window, which keeps its scroll from one screen to
   // the next: a list opened from a scrolled Lists opened mid-list, its title
   // off the screen (#109). So a screen pushed in starts at its top, and going
   // back returns to where the screen under it was left, as on iOS. Switching
-  // tabs is left as it was. A position is kept for a place in the back
-  // history (its depth and page), not for the page alone: in Lists → a list →
-  // Lists → another list, each Back returns to its own Lists.
-  const scrolls = useRef(new Map<string, number>())
-  const moving = useRef<{ to: 'top' } | { to: 'saved'; slot: string } | null>(null)
-  const slotOf = (depth: number, view: View) => `${depth}:${keyOf(view)}`
-  // Called as a view is opened: the page being left is kept where it was
-  // when it becomes a step to go back to (opened() in lib/view-history.ts).
-  const leaving = (u: Ui, to: View) => {
+  // tabs is left as it was. A position is kept in the browser's history
+  // entry it belongs to (lib/router.ts), not for the page alone: in Lists → a
+  // list → Lists → another list, each Back returns to its own Lists.
+  const moving = useRef<number | null>(null)
+  // Called as a view is opened: the page being left is kept where it was,
+  // in its entry, for Back to return to.
+  const leaving = (to: View) => {
     if (isTab(to)) return
-    if (u.view.kind !== to.kind) scrolls.current.set(slotOf(u.history.length, u.view), window.scrollY)
-    moving.current = { to: 'top' }
+    if (ui.view.kind !== to.kind) router.keepScroll(window.scrollY)
+    moving.current = 0
   }
   const pageKey = keyOf(ui.view)
   const shownKey = useRef(pageKey)
   useLayoutEffect(() => {
-    const move = moving.current
-    if (isMobile && move && shownKey.current !== pageKey) window.scrollTo(0, move.to === 'top' ? 0 : (scrolls.current.get(move.slot) ?? 0))
+    const to = moving.current
+    if (isMobile && to !== null && shownKey.current !== pageKey) window.scrollTo(0, to)
     moving.current = null
     shownKey.current = pageKey
   })
@@ -202,15 +220,24 @@ export default function App() {
     say,
     setZoom,
     openView: (view: View) => {
-      leaving(ui, view)
-      setUi((u) => ({ ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
+      leaving(view)
+      setUi((u) => ({ ...u, ...CLOSED, view }))
     },
+    // The browser's Back, so the phone's Back, its edge swipe and the
+    // browser all go to the same place. With nothing of the app's behind,
+    // Lists, rather than leaving the app.
     back: () => {
-      // A list that is gone, or is not in this space, is skipped.
-      const to = back(ui.history, (v) => v.kind !== 'project' || shown.projects.some((p) => p.id === v.id))
-      moving.current = { to: 'saved', slot: slotOf(to.history.length, to.view) }
-      setUi((u) => ({ ...u, ...CLOSED, view: to.view, history: to.history }))
+      const to = router.back({ view: { kind: 'lists' }, task: null })
+      if (to) setUi((u) => ({ ...u, ...CLOSED, view: to.view, history: [] }))
     },
+    showNote: (id, auto = false) =>
+      setUi((u) => {
+        if (u.view.kind !== 'notes' || u.view.id === (id ?? undefined)) return u
+        // Only for a step that happens: a flag left set would turn the next
+        // move, made by the person, into a replace.
+        if (auto) replaceNext.current = true
+        return { ...u, view: { kind: 'notes', id: id ?? undefined } }
+      }),
     // Settings, Focus, the time sheet and Notes have no list to add to, so adding from there goes to Inbox.
     add: () =>
       setUi((u) => ({
@@ -240,8 +267,8 @@ export default function App() {
       // it can be ticked off, or clicked to edit, right there.
       // Already on the page you are looking at: stay there.
       const shown = document.querySelector(`[data-task="${task.id}"]`) !== null
-      if (!shown) leaving(ui, view)
-      setUi((u) => (shown ? { ...u, ...CLOSED } : { ...u, ...CLOSED, view, history: opened(u.history, u.view, view, isTab(view)) }))
+      if (!shown) leaving(view)
+      setUi((u) => (shown ? { ...u, ...CLOSED } : { ...u, ...CLOSED, view }))
       notice(task.id)
       const bringIntoView = () =>
         (document.querySelector(`[data-task="${hit.id}"]`) ?? document.querySelector(`[data-task="${task.id}"]`))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -292,10 +319,79 @@ export default function App() {
     },
   }
 
+  // Arriving at an address: on load, and on Back or Forward. What is not
+  // there is said and left out (lib/route.ts `resolve`); a link into another
+  // of your spaces moves the picker there. A correction replaces the entry,
+  // so Back never returns to it.
+  const arrive = (route: Route | null, prev: string | null, current: Data) => {
+    const r = resolve(route ?? HOME, current, current.team ?? null, validScope(getScope(), current.team ?? null), isMobile)
+    if (r.scope !== undefined) setScope(r.scope)
+    // Said once the page, and its place for messages, are showing.
+    if (r.said) toSay.current = r.said
+    if (route === null || r.said || formatRoute(r.route) !== formatRoute(route)) replaceNext.current = true
+    setUi((u) => ({ ...u, ...CLOSED, view: r.route.view, editing: r.route.task, history: behind(prev) }))
+    lookFor.current = r.route.task
+  }
+  // A task opened in a list it is not in (a link to Today kept after its
+  // date moved): once the page is drawn, its own list takes the place. A
+  // window edits a task in its row; Timeline, Board and a phone open it over any page.
+  const lookFor = useRef<number | null>(null)
+  const findOpenTask = () => {
+    const id = lookFor.current
+    lookFor.current = null
+    const v = ui.view
+    if (id === null || id !== ui.editing || isMobile || v.kind === 'timeline' || v.kind === 'board') return
+    if (page.current?.querySelector(`[data-editing-task="${id}"]`)) return
+    const found = data.tasks.find((t) => t.id === id)
+    const home = found?.parentId != null ? (data.tasks.find((t) => t.id === found.parentId) ?? found) : found
+    if (!home) return
+    const listed = sections(v, shown.tasks, TODAY, app.keep).some((s) => s.tasks.some((t) => t.id === home.id)) || (v.kind === 'today' && home.goalDay === TODAY)
+    const ownList = home.projectId === null ? v.kind === 'inbox' : v.kind === 'project' && v.id === home.projectId
+    if (!listed && !ownList) {
+      replaceNext.current = true
+      lookFor.current = id
+      setUi((u) => ({ ...u, view: home.projectId === null ? { kind: 'inbox' } : { kind: 'project', id: home.projectId } }))
+      return
+    }
+    // A filter or a collapsed parent can hide even a task in the right list.
+    // Open its editor over the list so the link works without changing those choices.
+    setUi((u) => ({ ...u, editingInDialog: true }))
+  }
+
   // The listeners below are set up once, so they read what is current
   // through this instead of what was current when they were set up.
   const latest = useRef(app)
   latest.current = app
+  const arriving = useRef(arrive)
+  arriving.current = arrive
+
+  // The browser moved through its history.
+  // Back returns a phone's page to where it was left, if it was kept.
+  useEffect(
+    () =>
+      router.listen((route, entry) => {
+        moving.current = router.scrollOf()
+        arriving.current(route, entry.prev, getSnapshot().data)
+      }),
+    [],
+  )
+
+  // The address, and the window's title, follow where the app is.
+  useEffect(() => {
+    if (!ready) return
+    const route = { view: ui.view, task: ui.editing }
+    router.go(route, replaceNext.current)
+    replaceNext.current = false
+    document.title = titleOf(route)
+    if (toSay.current) say(toSay.current)
+    toSay.current = null
+    findOpenTask()
+    const prev = behind(router.entry().prev)
+    if (prev.length !== ui.history.length || (prev[0] && formatRoute({ view: prev[0], task: null }) !== formatRoute({ view: ui.history[0], task: null })))
+      setUi((u) => ({ ...u, history: prev }))
+    // Only where the app is decides the address.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, ui.view, ui.editing])
 
   useEffect(() => {
     load().then(
@@ -305,6 +401,10 @@ export default function App() {
         // A session that was running before a reload: the menu bar is told again.
         handOff()
         retryUnsaved()
+        // A reminder that was showing wins over the address, as it did before.
+        const reminding = getFocus()?.reminding
+        arriving.current(reminding ? { view: { kind: 'focus' }, task: null } : loaded(), router.entry().prev, getSnapshot().data)
+        replaceNext.current = true
         setReady(true)
       },
       (error: unknown) => setFailed(String(error instanceof Error ? error.message : error)),
@@ -548,7 +648,7 @@ export default function App() {
   const view = ui.view
   // Timeline and Board use the full width and open tasks over the page.
   const wide = view.kind === 'timeline' || view.kind === 'board'
-  const editing = wide && !isMobile && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
+  const editing = (wide || ui.editingInDialog) && !isMobile && ui.editing !== null ? data.tasks.find((t) => t.id === ui.editing) : undefined
 
   return (
     <AppContext.Provider value={app}>
