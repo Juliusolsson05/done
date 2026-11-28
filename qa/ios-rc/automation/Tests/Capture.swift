@@ -65,9 +65,10 @@ final class Capture: XCTestCase {
         if newTask.exists && newTask.isHittable { newTask.tap() } else { button("Add task").tap() }
         let field = app.textFields["New task"]
         wait(field)
-        field.typeText(taskName)
-        let add = exact("Add task").exists && exact("Add task").isHittable ? exact("Add task") : exact("Add")
-        add.tap()
+        // Return adds it on both (quick-add.tsx); on a phone "Add task" is
+        // also the list's own row, behind the sheet, so it is not tapped.
+        field.typeText(taskName + "\n")
+        sleep(1)
         for name in ["Cancel", "Close"] where exact(name).exists && exact(name).isHittable { exact(name).tap() }
         wait(button(taskName))
         capture("02-Task-added")

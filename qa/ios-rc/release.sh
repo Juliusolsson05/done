@@ -39,12 +39,12 @@ echo "commit $sha -> done 1.0 ($build)"
 disk start
 work=${DONE_RC_WORK:-/tmp/done-ios-rc}/$build
 logs="$release/done-1.0-$build-logs"
-rm -rf "$work"; mkdir -p "$work" "$logs"
+rm -rf "$work" "$logs"; mkdir -p "$work" "$logs"
 
 # 1. The runner.
 run=${DONE_RC_RUN:-}
 if [[ -z $run ]]; then
-  if [[ $(tr -d '[:space:]' < qa/ios-rc/SOURCE_SHA 2>/dev/null) != "$sha" ]]; then
+  if [[ ! -f qa/ios-rc/SOURCE_SHA || $(tr -d '[:space:]' < qa/ios-rc/SOURCE_SHA) != "$sha" ]]; then
     print -r -- "$sha" > qa/ios-rc/SOURCE_SHA
     git add qa/ios-rc/SOURCE_SHA
     git commit -q -m "rc: done 1.0 ($build) from ${sha:0:7}" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
