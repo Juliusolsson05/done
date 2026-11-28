@@ -377,6 +377,72 @@ async function sidewaysRoom(browser) {
   try {
     const board = await page.locator('[data-board]').boundingBox()
     expect(board.height >= 190, `844x390: the columns get room (${Math.round(board.height)} px tall)`)
+    // With the large title hidden, the navigation bar names the view.
+    await page.waitForTimeout(300)
+    const named = await page.evaluate(() =>
+      [...document.querySelectorAll('body > div.fixed div[aria-hidden]')].some(
+        (e) => e.textContent === 'Board' && getComputedStyle(e).opacity === '1',
+      ),
+    )
+    expect(named, '844x390: the navigation bar shows the title Board')
+  } finally {
+    await context.close()
+  }
+}
+
+// A second finger resting on another card while one is held: no menu, and the drag still lands.
+async function secondFinger(browser, viewport) {
+  const where = `${viewport.width}x${viewport.height}`
+  const { context, page } = await open(browser, viewport, true)
+  try {
+    const t = await fingers(page)
+    const one = await center(cardIn(page, 'todo', 0))
+    const two = await center(cardIn(page, 'todo', 3))
+    const doing = await page.locator('[data-lane="doing"]').boundingBox()
+    const to = [Math.min(doing.x + 60, viewport.width - 40), one[1] + 30]
+    await t('touchStart', [one])
+    await page.waitForTimeout(500)
+    await t('touchMove', [[one[0] + 15, one[1] + 15]])
+    await t('touchStart', [
+      [one[0] + 15, one[1] + 15],
+      [...two, 1],
+    ])
+    await page.waitForTimeout(900)
+    expect(!(await menuShown(page)), `${where}: a second finger resting on a card opens no menu mid-drag`)
+    for (let i = 1; i <= 8; i++) {
+      await t('touchMove', [
+        [one[0] + 15 + ((to[0] - one[0] - 15) * i) / 8, one[1] + 15 + ((to[1] - one[1] - 15) * i) / 8],
+        [...two, 1],
+      ])
+      await page.waitForTimeout(16)
+    }
+    // Chrome's touchEnd names the fingers that come up: the dragging one first.
+    await t('touchEnd', [to])
+    await page.waitForTimeout(100)
+    await t('touchEnd', [[...two, 1]])
+    await page.waitForTimeout(400)
+    expect((await counts(page))[1] === 6, `${where}: with a second finger down, the held card still lands in In progress`)
+  } finally {
+    await context.close()
+  }
+}
+
+// On an iPad the Filter is a popover: pressing a card closes it, as any press outside it does.
+async function filterClosesOnHold(browser) {
+  const { context, page } = await open(browser, { width: 820, height: 1180 }, true)
+  try {
+    await page.getByRole('button', { name: 'Filter' }).tap()
+    await page.waitForTimeout(300)
+    const open = () => page.evaluate(() => !!document.querySelector('[data-slot="popover-content"]'))
+    expect(await open(), '820x1180: the Filter popover opens')
+    const t = await fingers(page)
+    const at = await center(cardIn(page, 'todo', 1))
+    await t('touchStart', [at])
+    await page.waitForTimeout(500)
+    expect(!(await open()), '820x1180: holding a card closes the Filter popover')
+    await t('touchEnd', [at])
+    await page.waitForTimeout(400)
+    expect(!(await open()), '820x1180: after the hold, only the card menu is open, not the Filter')
   } finally {
     await context.close()
   }
@@ -384,11 +450,25 @@ async function sidewaysRoom(browser) {
 
 const ipadRules = (browser) => touchRules(browser, { width: 820, height: 1180 })
 const phoneRules = (browser) => touchRules(browser, { width: 390, height: 844 })
+const ipadSecondFinger = (browser) => secondFinger(browser, { width: 820, height: 1180 })
+const phoneSecondFinger = (browser) => secondFinger(browser, { width: 390, height: 844 })
 
 async function check() {
   const browser = await chromium.launch({ channel: 'chrome' })
   try {
-    for (const run of [desktop, phone, phoneSideways, tablet, ipadRules, phoneRules, narrowMouse, sidewaysRoom]) {
+    for (const run of [
+      desktop,
+      phone,
+      phoneSideways,
+      tablet,
+      ipadRules,
+      phoneRules,
+      narrowMouse,
+      sidewaysRoom,
+      ipadSecondFinger,
+      phoneSecondFinger,
+      filterClosesOnHold,
+    ]) {
       try {
         await run(browser)
       } catch (error) {
