@@ -115,9 +115,9 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
   the tab bar, New Task and the navigation bar no longer start the page's
   long-press menu.
 - **Time sheet** block with an empty title reads "No title".
-- **Tab bar height** (`3.0625rem`) is one `TAB_BAR` constant in phone.tsx used
-  by the tab bar and New Task, so it can switch to `--tab-bar` from the Board
-  PR #116 in one line when that merges.
+- **Tab bar height**: the tab bar and New Task use `--tab-bar` (and the page
+  `--phone-nav` / `--phone-page-end`) from the Board PR #116, which merged
+  first; no competing values here.
 
 - **Margins on the phone.** The task list no longer hangs 8 pt into the
   margin (`-mx-2` was for the Mac's hover background): checks, section
@@ -188,7 +188,7 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
 All in Chromium's touch emulation (`isMobile`, `hasTouch`) with the safe areas
 an iPhone reports injected, on the built UI with stubbed `/api`:
 
-- `ui/checks/touch-sizes.cjs` fails on `origin/main` 34d2745 (26 failures)
+- `ui/checks/touch-sizes.cjs` fails on `origin/main` ab2c64b (26 failures)
   and on this PR's first head (9 failures, one per review item: Back returned
   Lists at 0, long press on the bar, no "No title", landscape menu 390 tall
   and scrolling with Delete at y=374, iPad 17 rows and title at y=116, the
@@ -207,7 +207,7 @@ an iPhone reports injected, on the built UI with stubbed `/api`:
   16/81; Settings 16/58; task sheet in landscape 16 → 67 from the edge.
 - Desktop 1440x900 with a mouse: every measurement equal and the five
   screenshots byte-identical before and after.
-- `npm run typecheck`, `npm test` (710, on main 34d2745), `npm run build` green.
+- `npm run typecheck`, `npm test` (723, on main ab2c64b), `npm run build` green.
 
 Not verified: WebKit and a real iPhone or iPad (safe areas there come from
 the device, not injected values), and anything with the on-screen keyboard up.
