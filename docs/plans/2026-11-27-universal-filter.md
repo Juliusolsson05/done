@@ -119,4 +119,7 @@ Saved or named filters, a query language, OR/NOT across dimensions, a status fil
 
 ## Verified
 
-Filled in before the PR.
+- Fail-first: the three new bug tests were run against view-filter.ts as on 6b8c47c and failed: P0 read back as `[1]` instead of `[0, 1]`; `[-1, 0, 1.5, 5, '0']` cleaned to `[1.5]` (non-integers also got through) instead of `[0]`; "cafe" found `[3]` instead of `[1, 2, 3]`. All pass on the branch.
+- Existing view-filter, focus-picker and search tests pass unchanged (the only edit to the old test file is its import lines).
+- `npm run typecheck`, `npm test` (38 files, 689 tests) and `npm run build` pass.
+- Not verified here: the panel in a browser. The code path is unchanged apart from `cleanFilter` keeping 0 and words being folded; board.tsx, timeline.tsx, timeline-desktop.tsx and components/view-filter.tsx are not touched.
