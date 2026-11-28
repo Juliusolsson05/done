@@ -48,6 +48,8 @@ final class Capture: XCTestCase {
         }
         let target = exact(title)
         wait(target)
+        // Lists on a phone is taller than the screen: Settings is last, under the tab bar.
+        for _ in 0..<4 where !target.isHittable { app.swipeUp(); sleep(1) }
         target.tap()
     }
 
