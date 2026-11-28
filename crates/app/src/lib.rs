@@ -147,6 +147,7 @@ extern "C" {
     fn done_widget_snapshot(json: *const std::os::raw::c_char);
     fn done_watch_apple_user(user: *const std::os::raw::c_char, id: *const std::os::raw::c_char, ended: extern "C" fn(*const std::os::raw::c_char));
     fn done_apple_sign_in(answer: extern "C" fn(*const std::os::raw::c_char));
+    fn done_web_sign_in(url: *const std::os::raw::c_char, answer: extern "C" fn(*const std::os::raw::c_char));
 }
 
 #[cfg(target_os = "ios")]
@@ -206,6 +207,56 @@ async fn apple_sign_in() -> serde_json::Value {
 #[tauri::command]
 async fn apple_sign_in() -> serde_json::Value {
     serde_json::json!({ "error": "Sign in with Apple is only in the iPhone and iPad app." })
+}
+
+/// Where the one sign-in sheet under way is waiting for Swift's answer.
+#[cfg(target_os = "ios")]
+static WEB_ANSWER: Mutex<Option<std::sync::mpsc::Sender<String>>> = Mutex::new(None);
+
+#[cfg(target_os = "ios")]
+extern "C" fn web_answered(json: *const std::os::raw::c_char) {
+    // Copied now: Swift frees the string when this returns.
+    let text = unsafe { std::ffi::CStr::from_ptr(json) }.to_string_lossy().into_owned();
+    if let Some(waiting) = WEB_ANSWER.lock().unwrap().take() {
+        let _ = waiting.send(text);
+    }
+}
+
+/// Shows the hosted sign-in page in a sheet inside the app and returns what
+/// came of it: `{"link"}` (the `done://` link the page ended on) or
+/// `{"error"}`. iPhone and iPad only.
+/// WHY not `open_in_browser` there: it leaves the app for Safari, which App
+/// Review rejects (guideline 4.0). The system's sign-in sheet is the one
+/// in-app browser Google shows its page in.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+async fn web_sign_in(url: String) -> serde_json::Value {
+    // A sign-in page only: a web address (the sheet raises an exception,
+    // which would end the app, for any other kind) whose path is the hosted
+    // server's sign-in. Which server is not known here: its address is built
+    // into the interface (VITE_DONE_CLOUD_URL), not into this crate, so the
+    // interface checks that part (`isSignInPage`, ui/src/lib/cloud.ts).
+    let sign_in_page = tauri::Url::parse(&url).is_ok_and(|page| matches!(page.scheme(), "https" | "http") && page.path().ends_with("/auth/google"));
+    if !sign_in_page {
+        return serde_json::json!({ "error": "Only the sign-in page can be opened." });
+    }
+    let Ok(url) = std::ffi::CString::new(url) else {
+        return serde_json::json!({ "error": "failed" });
+    };
+    let (tell, answer) = std::sync::mpsc::channel();
+    // A second start replaces the first, as in `apple_sign_in`; Swift closes
+    // the first sheet.
+    *WEB_ANSWER.lock().unwrap() = Some(tell);
+    unsafe { done_web_sign_in(url.as_ptr(), web_answered) };
+    let text = tauri::async_runtime::spawn_blocking(move || answer.recv().unwrap_or_default()).await.unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({ "error": "failed" }))
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn web_sign_in(url: String) -> serde_json::Value {
+    let _ = url;
+    serde_json::json!({ "error": "Signing in inside the app is only in the iPhone and iPad app." })
 }
 
 /// Hands a JSON value to one of the Swift functions above.
@@ -446,7 +497,8 @@ fn info(app: tauri::AppHandle, ready: tauri::State<UpdateReady>) -> Info {
 }
 
 /// Opens a page in the person's own browser. Signing in to a hosted account
-/// starts there: Google does not show its sign-in page inside an app's window.
+/// starts there on a Mac or PC: Google does not show its sign-in page inside
+/// an app's window. (On a phone it is `web_sign_in`, which stays in the app.)
 #[tauri::command]
 fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -505,7 +557,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, watch_apple_user]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]

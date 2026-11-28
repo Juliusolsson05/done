@@ -163,6 +163,78 @@ final class AppleSignIn: NSObject, ASAuthorizationControllerDelegate, ASAuthoriz
     }
 }
 
+// MARK: Sign in with Google, in a sheet
+
+/// Called from Rust (`web_sign_in` in crates/app/src/lib.rs) with the hosted
+/// sign-in page's address and a C function to answer through, once:
+/// `{"link"}` (the `done://` link the page ended on) or `{"error"}`
+/// (`"cancelled"` when the person closed the sheet).
+///
+/// WHY this sheet: opening Safari takes the person out of the app, which App
+/// Review rejects (guideline 4.0), and Google refuses its sign-in page in an
+/// app's own web view. ASWebAuthenticationSession is the system's in-app
+/// browser for exactly this; it hands back the `done://` link itself, so the
+/// link never goes through the system's link handling.
+@_cdecl("done_web_sign_in")
+public func doneWebSignIn(_ url: UnsafePointer<CChar>, _ answer: DoneAnswer) {
+    let address = String(cString: url)
+    DispatchQueue.main.async { WebSignIn.start(address, answer) }
+}
+
+final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
+    // The session must be kept until it has answered, or the sheet closes at
+    // once; it holds its context provider weakly, so this keeps both. Nothing
+    // else holds them: letting go here is what frees a replaced sheet.
+    private static var current: WebSignIn?
+    private var session: ASWebAuthenticationSession?
+
+    static func start(_ address: String, _ answer: DoneAnswer) {
+        // A sheet still up from an earlier tap is closed without an answer:
+        // Rust has already stopped waiting for it.
+        WebSignIn.current?.session?.cancel()
+        WebSignIn.current = nil
+        guard let url = URL(string: address) else {
+            WebSignIn.send(["error": "failed"], answer)
+            return
+        }
+        let signIn = WebSignIn()
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "done") { [weak signIn] link, error in
+            DispatchQueue.main.async {
+                // An answer from a sheet that has been replaced is not this
+                // sign-in's to give.
+                guard let signIn, WebSignIn.current === signIn else { return }
+                WebSignIn.current = nil
+                if let link {
+                    WebSignIn.send(["link": link.absoluteString], answer)
+                } else {
+                    let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+                    WebSignIn.send(["error": cancelled ? "cancelled" : (error?.localizedDescription ?? "failed")], answer)
+                }
+            }
+        }
+        session.presentationContextProvider = signIn
+        // Not a private session: someone already signed in to Google in
+        // Safari is offered that account instead of typing a password.
+        session.prefersEphemeralWebBrowserSession = false
+        signIn.session = session
+        WebSignIn.current = signIn
+        if !session.start() {
+            WebSignIn.current = nil
+            WebSignIn.send(["error": "failed"], answer)
+        }
+    }
+
+    private static func send(_ value: [String: String], _ answer: DoneAnswer) {
+        let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{\"error\":\"failed\"}".utf8)
+        String(decoding: data, as: UTF8.self).withCString { answer($0) }
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+}
+
 /// Apple's notification identifies no user. Check the account this window is
 /// signed in to, including when a revocation happened while the app was closed.
 private final class AppleCredentialMonitor: NSObject {

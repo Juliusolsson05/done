@@ -110,6 +110,47 @@ export async function finishSignIn(link: string): Promise<boolean> {
   return cloudSession() !== null
 }
 
+// The same sign-in without leaving the app: the iPhone and iPad app shows the
+// page in the system's sign-in sheet, which gives back the link the page ended
+// on (the App Store does not accept being sent out to Safari to sign in).
+// `present` shows the sheet. Resolves false when the person closed it, which
+// is not a failure and gets no message.
+export type SheetAnswer = { link?: string; error?: string }
+export async function signInInSheet(present: (url: string) => Promise<SheetAnswer>): Promise<boolean> {
+  let answer: SheetAnswer = {}
+  await beginSignIn(async (url) => {
+    // The sheet is for this server's sign-in page and nothing else. Checked
+    // here because the native side cannot: which server is known only to the
+    // interface's build (VITE_DONE_CLOUD_URL), not to the Rust one.
+    if (!isSignInPage(url)) throw new Error('Signing in did not work. Try again.')
+    answer = await present(url)
+  })
+  if (answer.error === 'cancelled') return false
+  if (!answer.link || !(await finishSignIn(answer.link))) throw new Error('Signing in did not work. Try again.')
+  return true
+}
+
+// The hosted server's own sign-in page. The slash and question mark after
+// the address matter: without them `https://server.evil.example` would pass.
+export const isSignInPage = (url: string): boolean => CLOUD_URL !== null && url.startsWith(`${CLOUD_URL}/auth/google?`)
+
+// Sign in with Google from an app, by the way its device allows: an iPhone
+// or iPad stays in the app (the sheet; being sent out to Safari is what App
+// Review rejects), a Mac or PC opens the person's own browser, which hands the
+// finished sign-in back later as a link. True when the app is signed in now.
+export interface SignInWays {
+  ios: boolean
+  openBrowser: (url: string) => Promise<void>
+  presentSheet: (url: string) => Promise<SheetAnswer>
+}
+export async function signInFromApp({ ios, openBrowser, presentSheet }: SignInWays): Promise<boolean> {
+  if (ios) return signInInSheet(presentSheet)
+  await beginSignIn(openBrowser).catch(() => {
+    throw new Error('Your browser could not be opened.')
+  })
+  return false
+}
+
 // Sign-ins that finish in one request rather than a trip through the
 // browser: Apple's (the iPhone app hands over the token Apple gave it) and
 // the App Review login. Both answer `{token, account}`, like `/auth/exchange`.
