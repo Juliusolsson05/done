@@ -1,6 +1,6 @@
 # One filter for every task view
 
-Fixes #114 (P0 cannot be chosen). Refs #115 (one filter for every task view; stays open after this PR). Base 6b8c47c.
+Step 1 (the library): fixed #114, merged. Steps 2 to 5: one PR, feat/filter-views, base 28e05f8 (after #116/#126, #118, #119, #122, #99). Fixes #115.
 
 ## Outcome
 
@@ -94,10 +94,24 @@ export function fixedFor(view: View): Dimension[]
 ## Steps (each one a PR)
 
 1. **lib only (this PR).** `lib/view-filter.ts`: applyFilter, matchTask, offered/fixedFor, P0 fix, fortnight read as week inside applyFilter; folded words in the existing `matchesFilter`. Tests in `lib/view-filter.test.ts`.
-2. **List views.** *Not started, waits for the owner's yes.* `components/list-view.tsx` (Inbox, Today, Upcoming, project, Mine), `App.tsx` (F on every `offered` view), `components/quick-add.tsx` (addDefaults on every view), `lib/view-filter-store.ts` (sessionStorage), `components/view-filter.tsx` (chips skip `fixed`, clean against `shown.projects`). After feat/mobile-touch-sizes.
-3. **Board and Timeline move to applyFilter.** *Not started, waits for the owner's yes.* `components/board.tsx`, `components/timeline.tsx`, `components/timeline-desktop.tsx`; "Next two weeks" leaves the panel. One rule for "x of y": open tasks only. After feat/board-heights and feat/phone-timeline.
-4. **Completed.** *Not started, waits for the owner's yes.* `components/completed.tsx` (filter bar; keep only tasks in the scope).
-5. **Pickers and agents use the same matcher.** *Not started, waits for the owner's yes.* `lib/mentions.ts` uses `matchTask`; `components/up-next.tsx` uses `FocusPicker`; `crates/mcp/src/lib.rs`: P0 in the instructions, `today`/`upcoming` drop tasks assigned only to others.
+2. **List views.** *In feat/filter-views.* `components/list-view.tsx` (Inbox, Today, Upcoming, project, Mine), `App.tsx` (F on every `offered` view: the key handler only), `components/quick-add.tsx` (addDefaults on every view), `lib/view-filter-store.ts` (sessionStorage), `components/view-filter.tsx` (chips skip `fixed`, clean against `shown.projects`).
+3. **Board and Timeline move to applyFilter.** *In feat/filter-views.* `components/board.tsx`, `components/timeline.tsx`, `components/timeline-desktop.tsx`; "Next two weeks" leaves the panel.
+4. **Completed.** *In feat/filter-views.* `components/completed.tsx` (filter bar; keep only tasks in the scope).
+5. **Pickers and agents use the same matcher.** *In feat/filter-views.* `lib/mentions.ts` and the assignee picker use `matchesQuery`; `components/up-next.tsx` already uses `FocusPicker` (#122); `crates/mcp/src/lib.rs`: P0 in the instructions, text only.
+
+## Rulings in steps 2 to 5 (feat/filter-views)
+
+- *Ruling: one PR for steps 2 to 5, Board and Timeline first, then the list views, the store, quick add, Completed, the matchers. Why: the owner's node contract for #115 asked for one PR. Cost if wrong: a bigger review; each step is its own commit.*
+- *Ruling: the MCP's `today`/`upcoming` keep returning what they return now; only the instructions change (P0 exists). Why: the contract for this PR says text only, no tool behaviour. Cost if wrong: an agent still sees others' workspace tasks in today/upcoming; a follow-up issue.*
+- *Ruling: sessionStorage, as planned above; the old localStorage key is removed on start. Why: as above (a forgotten filter hides tasks the next morning). The owner was told and did not object. Cost if wrong: the owner sets the filter again after each launch; going back is one line in view-filter-store.ts.*
+- *Ruling: the filter is not part of the route (feat/routes, in flight). The view components hold the control; App.tsx changes only in the F handler.*
+- *Ruling: where the scope has nobody to choose (one's own space, local mode), person counts as fixed: it is not offered and an old person choice shows as "hidden here" instead of hiding every task. Why: personal tasks have no assignees, so "Me" would empty the page with nothing to explain it. Cost if wrong: none for data; Board in the personal scope stops narrowing by a person no one there can be.*
+- *Ruling: a scope switch writes the filter back without projects outside the new scope, the first time a filtered view is drawn after it (the store remembers which scope it last checked). Until then a read leaves them out anyway. Why: App.tsx is not touched beyond F, and the drop must not run before the tasks load (it would drop every project on start).*
+- *Ruling: Board's "x of y" still counts what the columns hold, Done included, as before; lists and Timeline count open tasks. Why: "behaviour otherwise identical" for Board; its Done column is drawn. Cost if wrong: one line.*
+- *Ruling: a project's "Delete it and move N tasks" counts every task in it, never the filtered few.*
+- *Ruling: on a phone a project's header buttons live behind ⋯ (an action sheet), so its Filter button sits on its own row under the large title instead (in list-view.tsx; phone.tsx is not touched).*
+- *Ruling: a task added under a words filter that it does not contain leaves the page, as on Board and Timeline today. Words cannot be given to a new task. Cost if wrong: a noticed task kept on the page for a moment; not built.*
+- *Ruling: Cmd+F keeps its own matcher (lib/find.ts): it marks where the text is on the page, which needs positions, not a yes or no.*
 
 ## Left out on purpose
 
