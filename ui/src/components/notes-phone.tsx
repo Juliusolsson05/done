@@ -1,7 +1,7 @@
 // The Notes page's pieces for an iPhone, drawn as Apple Notes draws them:
 // a bar at the top with one way back, a ⋯ that brings up the note's actions
 // as an action sheet, and a compose button at the bottom right.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, SquarePenIcon } from 'lucide-react'
 import { ProjectDot } from '@/components/marks'
@@ -42,16 +42,20 @@ export function NotesBar({ back, onBack, children }: { back: string; onBack: () 
   )
 }
 
-// ⋯ in the bar.
-export function MoreButton({ onClick }: { onClick: () => void }) {
+// ⋯ in the bar, 44 points square around its circle. Takes a trigger's props,
+// so it can open a menu as well as a sheet.
+export function MoreButton({ label = 'Note actions', className, ...props }: { label?: string } & ComponentProps<'button'>) {
   return (
     <button
       type="button"
-      aria-label="Note actions"
-      onClick={onClick}
-      className="flex size-11 items-center justify-center active:opacity-40"
+      aria-label={label}
+      className={cn(
+        'group flex size-11 shrink-0 items-center justify-center rounded-full outline-none active:opacity-40',
+        className,
+      )}
+      {...props}
     >
-      <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary group-focus-visible:ring-2 group-focus-visible:ring-ring">
         <EllipsisIcon className="size-5" strokeWidth={2.4} />
       </span>
     </button>
@@ -109,8 +113,9 @@ export function NoteSheet({
   onDelete: () => void
 }) {
   const [step, setStep] = useState<'main' | 'folder' | 'project'>('main')
-  const row = (content: ReactNode, onClick: () => void, className?: string) => (
+  const row = (content: ReactNode, onClick: () => void, className?: string, key?: string) => (
     <button
+      key={key}
       type="button"
       onClick={(event) => {
         event.stopPropagation()
@@ -171,6 +176,8 @@ export function NoteSheet({
                   {check(folder !== null && folder.toLocaleLowerCase() === name.toLocaleLowerCase())}
                 </>,
                 done(() => onFolder(name)),
+                undefined,
+                name,
               ),
             )}
           </>
@@ -194,6 +201,8 @@ export function NoteSheet({
                   {check(project.id === p.id)}
                 </>,
                 done(() => onProject(p.id)),
+                undefined,
+                String(p.id),
               ),
             )}
           </>
@@ -209,6 +218,76 @@ export function NoteSheet({
         className="h-14 shrink-0 animate-rise rounded-2xl bg-background text-body font-semibold text-primary active:bg-accent"
       >
         {step === 'main' ? 'Cancel' : 'Back'}
+      </button>
+    </div>,
+    document.body,
+  )
+}
+
+// A short action sheet: its actions, then Cancel. A destructive one is red
+// and goes last. A modal dialog: the focus goes into it and back to where it
+// was when it closes, and Escape closes it.
+export function ActionSheet({
+  label,
+  actions,
+  onClose,
+}: {
+  label: string
+  actions: { label: string; onClick: () => void; destructive?: boolean }[]
+  onClose: () => void
+}) {
+  const sheet = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    sheet.current?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true })
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        close.current()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      // Back to where it was, unless an action has moved it on (Rename's field).
+      if (before?.isConnected && (document.activeElement === document.body || document.activeElement === null)) before.focus({ preventScroll: true })
+    }
+  }, [])
+  return createPortal(
+    <div
+      ref={sheet}
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pb-[calc(var(--safe-bottom)+0.5rem)]"
+      onClick={onClose}
+    >
+      <div className="flex animate-rise flex-col overflow-hidden rounded-2xl bg-background" onClick={(event) => event.stopPropagation()}>
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={() => {
+              onClose()
+              action.onClick()
+            }}
+            className={cn(
+              'flex min-h-14 w-full items-center justify-center border-b border-border px-4 text-body outline-none last:border-b-0 focus-visible:bg-accent active:bg-accent',
+              action.destructive ? 'text-destructive' : 'text-primary',
+            )}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="h-14 shrink-0 animate-rise rounded-2xl bg-background text-body font-semibold text-primary outline-none focus-visible:bg-accent active:bg-accent"
+      >
+        Cancel
       </button>
     </div>,
     document.body,

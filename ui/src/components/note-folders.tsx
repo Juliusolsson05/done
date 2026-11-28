@@ -100,37 +100,3 @@ export function FolderNav({ folders, total, onSelect, onCreate }: FolderNavProps
     </nav>
   )
 }
-
-// On a phone, a folder's own actions, in its list's header.
-export function FolderActions({
-  name,
-  onRename,
-  onDelete,
-}: {
-  name: string
-  onRename(from: string, to: string): void
-  onDelete(name: string): void
-}) {
-  const [renaming, setRenaming] = useState(false)
-  if (renaming)
-    return (
-      <NameField
-        initial={name}
-        label="Folder name"
-        onDone={(to) => {
-          setRenaming(false)
-          if (to !== null) onRename(name, to)
-        }}
-      />
-    )
-  return (
-    <div className="flex gap-1">
-      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setRenaming(true)}>
-        Rename
-      </Button>
-      <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(name)}>
-        Delete
-      </Button>
-    </div>
-  )
-}
