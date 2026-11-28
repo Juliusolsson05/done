@@ -63,9 +63,9 @@ Added to `ui/checks/board-heights.cjs`, each failing on origin/main 160f253:
 
 ## Verified (Chrome via Playwright, built UI, mocked `/api`)
 
-- `ui/checks/board-heights.cjs`: 6 failures on origin/main 160f253 (the five
-  new N1/N2/N3 assertions that can fail, plus the drag landing with a second
-  finger down); all 93 assertions pass on this branch.
+- `ui/checks/board-heights.cjs`: 6 failures on origin/main 160f253 (N1: no
+  menu and the drop landing, on iPad and phone; N2: the popover closing on a
+  hold; N3: the title); all 93 assertions pass on this branch.
 - 844x390: the navigation bar shows "Board" (screenshot taken).
 - `npm run typecheck && npm test && npm run build` green (714 tests).
 
