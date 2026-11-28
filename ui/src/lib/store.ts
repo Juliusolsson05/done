@@ -1,5 +1,6 @@
 // The tasks and projects this window is showing, and keeping them saved.
 // One store for the whole interface; React reads it with useSyncExternalStore.
+import type { Held } from '@/lib/account-switch'
 import { BROWSER_INFO, canReplicate, loadInfo, loadState, replicate, sync, type Info } from '@/lib/backend'
 import { changeSet, picture, type Picture } from '@/lib/changes'
 import { TODAY } from '@/lib/days'
@@ -9,9 +10,12 @@ import { recordChange } from '@/lib/undo'
 export interface Snapshot {
   data: Data
   info: Info
+  // This device holds another account's tasks, so nothing is synced until
+  // the person says what to do (components/held-dialog.tsx).
+  held: Held | null
 }
 
-let snapshot: Snapshot = { data: { rev: 0, nextId: 1, projects: [], tasks: [] }, info: BROWSER_INFO }
+let snapshot: Snapshot = { data: { rev: 0, nextId: 1, projects: [], tasks: [] }, info: BROWSER_INFO, held: null }
 // What the file held when this window last loaded or saved.
 let saved: Picture = new Map()
 let pending: Promise<void> = Promise.resolve()
@@ -98,12 +102,14 @@ export function refresh() {
 // told by an event, as they load on their own.
 export const SYNCED = 'done-synced'
 let replicating = false
-export function replicateNow(): Promise<void> {
+export function replicateNow(takeOver = false): Promise<void> {
   if (!canReplicate || replicating) return Promise.resolve()
   replicating = true
   const round = pending.then(async () => {
     try {
-      if (await replicate()) {
+      const { arrived, held } = await replicate(takeOver)
+      if (JSON.stringify(held) !== JSON.stringify(snapshot.held)) set({ held })
+      if (arrived) {
         await reload()
         window.dispatchEvent(new Event(SYNCED))
       }
@@ -117,6 +123,17 @@ export function replicateNow(): Promise<void> {
   pending = round
   return round
 }
+
+// The person's answer to "tasks from another account": take them off this
+// device and sync this account. Waits for a round under way, which would
+// skip this one.
+export async function takeOver(): Promise<void> {
+  await pending
+  await replicateNow(true)
+}
+
+// Once every save and round queued so far is done (lib/leave.ts).
+export const idle = (): Promise<void> => pending
 
 // A change goes up a moment after it is saved, so a burst of edits (typing a
 // title, ticking off three tasks) goes as one round.

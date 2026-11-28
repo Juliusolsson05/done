@@ -9,6 +9,7 @@ import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
+import { unsentCount, type Held, type Pending } from '@/lib/account-switch'
 
 // What the desktop app knows about itself: its version, where its program is
 // (for connecting an agent), and whether an update is waiting for a restart.
@@ -116,8 +117,16 @@ export const loadMe = async (): Promise<Me> => {
   return readMe(response.status, await response.json().catch(() => null))
 }
 
+// An app that is not signed in first takes off anything a past account
+// left of its shared workspaces: a session the server ended, a sign-out on
+// an older version, or a sign-out whose own clean-up failed. Once per window;
+// with nothing left over it changes nothing. See crates/core/src/account.rs.
+let leftOver: Promise<unknown> | null = null
+const settled = (): Promise<unknown> =>
+  tauri && !hosted ? (leftOver ??= tauri.core.invoke('leave_account', { deleted: false }).catch(() => 0)) : Promise.resolve()
+
 export const loadState = (today: Day): Promise<Data> =>
-  local ? local.core.invoke<Data>('state', { today }) : get('/api/state?today=' + today).then((r) => answer<Data>(r))
+  local ? settled().then(() => local.core.invoke<Data>('state', { today })) : get('/api/state?today=' + today).then((r) => answer<Data>(r))
 
 export const sync = (change: Change): Promise<{ rev: number }> =>
   local ? local.core.invoke<{ rev: number }>('sync', { change }) : post<{ rev: number }>('/api/sync', change)
@@ -149,13 +158,17 @@ export const deleteNote = (id: number): Promise<void> =>
   local ? local.core.invoke<void>('delete_note', { id }) : post<unknown>('/api/notes/delete', { id }).then(() => undefined)
 
 // One round of keeping a signed-in app's file in step with its account: send
-// what changed here, take in what changed elsewhere. True when something
-// arrived, so the window reloads. Does nothing for a browser or an app that
-// is not signed in.
+// what changed here, take in what changed elsewhere. `arrived` when something
+// did, so the window reloads. Does nothing for a browser or an app that is
+// not signed in. `held` when the file holds another account's tasks: then
+// nothing is sent until the person says (`takeOver` is their answer to take
+// those tasks off this device).
 export const canReplicate = tauri !== undefined && hosted !== null
-export async function replicate(): Promise<boolean> {
-  if (!tauri || !hosted) return false
-  const outbox = await tauri.core.invoke<{ upto: number; renumbered: number }>('outbox')
+const account = hosted && { id: hosted.account.id, email: hosted.account.email }
+export async function replicate(takeOver = false): Promise<{ arrived: boolean; held: Held | null }> {
+  if (!tauri || !hosted) return { arrived: false, held: null }
+  const outbox = await tauri.core.invoke<{ upto: number; renumbered: number; held?: Held | null }>('outbox', { account, takeOver })
+  if (outbox.held) return { arrived: false, held: outbox.held }
   const response = await fetch(at + '/api/replicate', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...who },
@@ -164,11 +177,22 @@ export async function replicate(): Promise<boolean> {
     signal: AbortSignal.timeout(20_000),
   })
   const reply = await answer<unknown>(response)
-  const arrived = await tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto })
+  const arrived = await tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto, account })
   // The first round gives rows counted up on this device new ids; what the
-  // window holds must be loaded again whether or not anything arrived.
-  return arrived || outbox.renumbered > 0
+  // window holds must be loaded again whether or not anything arrived; and
+  // so must a take-over, which emptied the file.
+  return { arrived: arrived || outbox.renumbered > 0 || takeOver, held: null }
 }
+
+// How many changes here have not reached the account: asked before signing out.
+export async function unsentChanges(): Promise<number> {
+  if (!tauri || !hosted) return 0
+  return unsentCount(await tauri.core.invoke<Pending>('outbox', { account, takeOver: false }))
+}
+
+// Shared workspaces leave this device with the account; the person's own
+// tasks stay. If this fails, the next load does it (`settled`).
+const leaveDevice = (deleted: boolean) => tauri?.core.invoke('leave_account', { deleted }).catch(() => {})
 
 // Workspaces: made, changed and joined on the hosted server, never on a
 // device's own file (a device learns the result at its next sync). Only for a
@@ -197,16 +221,23 @@ export const liveTicket = (ask: { note?: number; space?: number }) => post<{ tic
 export const signOut = async (): Promise<void> => {
   // An app's session is its token: forgetting it is signing out. A browser's
   // is a cookie only the server can take back.
-  // The app keeps its file, with everything synced so far, and goes on
-  // without an account.
-  if (hosted) forgetCloudSession()
-  else await post<unknown>('/auth/signout', {})
+  // The app keeps its own tasks, with everything synced so far, and goes on
+  // without an account; shared workspaces leave the device. A last round and
+  // the question about unsent changes come first (store.ts `signOutChecked`).
+  if (hosted) {
+    forgetCloudSession()
+    await leaveDevice(false)
+  } else await post<unknown>('/auth/signout', {})
   await clearWidgets()
   location.reload()
 }
 export const deleteAccount = async (): Promise<void> => {
   await post<unknown>('/api/account/delete', {})
-  if (hosted) forgetCloudSession()
+  if (hosted) {
+    forgetCloudSession()
+    // The account is gone: what stays is plain local data.
+    await leaveDevice(true)
+  }
   await clearWidgets()
   location.reload()
 }

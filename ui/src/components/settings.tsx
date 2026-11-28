@@ -9,7 +9,9 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, deleteAccount, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, signOut } from '@/lib/backend'
+import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword } from '@/lib/backend'
+import { signOutQuestion } from '@/lib/account-switch'
+import { deleteAccountHere, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -96,6 +98,9 @@ function AccountPane() {
   // Deleting takes two clicks. A dialog would be the usual way, but this is
   // the one place it would be used, and the second button says all it would.
   const [sure, setSure] = useState(false)
+  // Changes not sent when signing out was asked, and a sign-out under way.
+  const [unsent, setUnsent] = useState<number | null>(null)
+  const [leaving, setLeaving] = useState(false)
   if (!account) {
     // An app that could sign in and has not.
     if (!canSignIn) return null
@@ -122,7 +127,16 @@ function AccountPane() {
       </Pane>
     )
   }
-  const remove = () => void deleteAccount().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  const remove = () => void deleteAccountHere().catch(() => say('Your account could not be deleted. Nothing was removed.'))
+  // Signing out tries one last sync; if changes are still unsent, the
+  // person is asked (lib/store.ts signOutChecked).
+  const leave = (force: boolean) => {
+    setLeaving(true)
+    void signOutChecked(force)
+      .then((n) => setUnsent(n > 0 ? n : null))
+      .catch(() => say('Signing out did not work. Try again.'))
+      .finally(() => setLeaving(false))
+  }
   return (
     <Pane title="Account">
       {/* Your Google picture, as the people in your workspaces see it. */}
@@ -150,8 +164,8 @@ function AccountPane() {
             Verify Apple Account
           </Button>
         )}
-        <Button variant="outline" size="sm" onClick={() => void signOut()}>
-          Sign out
+        <Button variant="outline" size="sm" disabled={leaving} onClick={() => leave(false)}>
+          {leaving ? 'Signing out…' : 'Sign out'}
         </Button>
         {sure ? (
           <>
@@ -168,6 +182,19 @@ function AccountPane() {
           </Button>
         )}
       </div>
+      {unsent !== null && (
+        <div className="space-y-2 text-sm">
+          <p className="text-muted-foreground">{signOutQuestion(unsent)}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="destructive" size="sm" disabled={leaving} onClick={() => leave(true)}>
+              Sign out anyway
+            </Button>
+            <Button variant="ghost" size="sm" disabled={leaving} onClick={() => setUnsent(null)}>
+              Stay signed in
+            </Button>
+          </div>
+        </div>
+      )}
       {sure && (
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>Your personal space and feedback will be deleted. Other members keep shared workspaces. This cannot be undone.</p>

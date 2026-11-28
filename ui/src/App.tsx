@@ -12,6 +12,7 @@ import { ListView } from '@/components/list-view'
 import { isTab, ListsScreen, NewTaskButton, TabBar, useEdgeSwipeBack } from '@/components/phone'
 import { MobileQuickAdd } from '@/components/quick-add'
 import { MoveProjectDialog } from '@/components/move-project'
+import { HeldDialog } from '@/components/held-dialog'
 import { NotificationsScreen } from '@/components/notifications'
 import { Notes } from '@/components/notes'
 import { Settings } from '@/components/settings'
@@ -571,6 +572,7 @@ export default function App() {
                 </div>
                 <TaskEditorDialog task={editing} />
                 <MoveProjectDialog />
+                <HeldDialog />
                 <SearchDialog />
                 <FindBar />
               </SidebarInset>

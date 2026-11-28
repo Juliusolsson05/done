@@ -6,7 +6,7 @@ afterEach(() => {
   vi.resetModules()
 })
 
-it('ends only the watched Apple session and clears its widgets without deleting any tasks', async () => {
+it('ends only the watched Apple session, takes shared workspaces off the device and clears its widgets', async () => {
   vi.stubEnv('VITE_DONE_CLOUD_URL', 'https://example.test')
   const session = { token: 'first', appleUser: 'subject', account: { id: 'apple-id', email: 'me@example.test' } }
   const values = new Map([['done-cloud-session', JSON.stringify(session)]])
@@ -37,7 +37,10 @@ it('ends only the watched Apple session and clears its widgets without deleting 
   report({ payload: id })
   await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce())
   expect(values.has('done-cloud-session')).toBe(false)
-  expect(invoke.mock.calls.map(([command]) => command)).toEqual(['watch_apple_user', 'widget_snapshot'])
+  // No last round and no question: Apple ended the credential. The person's
+  // own tasks stay (crates/core/src/account.rs `leave_account`).
+  expect(invoke.mock.calls.map(([command]) => command)).toEqual(['watch_apple_user', 'leave_account', 'widget_snapshot'])
+  expect(invoke).toHaveBeenCalledWith('leave_account', { deleted: false })
   dispose?.()
   await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
 })
