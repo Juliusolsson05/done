@@ -374,7 +374,9 @@ export default function App() {
       // Cmd+Z: undo the last thing done, anywhere. In a text field it is
       // left to the field, which undoes the typing.
       if (command && event.code === 'KeyZ') {
-        const inField = event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')
+        // A task button inside a note is its own non-editable widget. Its
+        // completion belongs to the same undo history as a task in a list.
+        const inField = event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.closest('input, textarea'))
         if (inField) return
         event.preventDefault()
         if (undoLast()) {
