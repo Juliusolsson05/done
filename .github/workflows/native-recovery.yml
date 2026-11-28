@@ -1,44 +1,25 @@
 name: Store native iPad verification
 on:
   push:
-    branches: [qa/native-final-298]
+    branches: [qa/native-final-input-298]
 permissions:
   contents: read
+  actions: read
 jobs:
-  compile:
-    runs-on: macos-26
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: 22}
-      - uses: dtolnay/rust-toolchain@stable
-        with: {targets: aarch64-apple-ios-sim}
-      - uses: Swatinem/rust-cache@v2
-      - name: Compile and package the simulator app
-        run: |
-          command -v xcodegen || brew install xcodegen
-          mkdir -p crates/app/gen/apple/assets crates/app/gen/apple/Externals/arm64/debug
-          cd crates/app
-          npx --yes @tauri-apps/cli@2 ios build --target aarch64-sim --debug --no-sign --archive-only --ci > "$RUNNER_TEMP/compiler.log" 2>&1 || { tail -80 "$RUNNER_TEMP/compiler.log"; exit 1; }
-          app=$(find gen/apple/build -type d -name done.app -print -quit)
-          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/done-simulator.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: simulator-application-298
-          path: ${{ runner.temp }}/done-simulator.zip
-          retention-days: 2
   devices:
     strategy:
       fail-fast: false
       matrix: {family: [iPad]}
-    needs: compile
     runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: {name: simulator-application-298, path: /tmp/done-qa}
+        with:
+          name: simulator-application-298
+          run-id: 46099340426
+          github-token: ${{ github.token }}
+          path: /tmp/done-qa
       - name: Boot device
         timeout-minutes: 7
         run: |

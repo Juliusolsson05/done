@@ -48,31 +48,38 @@ final class Capture: XCTestCase {
     func testWriteAndReopen() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
-        app.activate()
-        open("Today")
+        app.launch()
         let taskName = "Pick up picnic blankets"
         let noteName = "Picnic packing list"
-        open("Add task")
+        let firstTask = app.buttons["Sketch the invitation"].firstMatch
+        XCTAssertTrue(firstTask.waitForExistence(timeout: 25), app.debugDescription)
+        // Begin on Today, the native default. No touch on a sidebar row is needed.
+        button("Add task").tap()
         let task = app.textFields["New task"]
         XCTAssertTrue(task.waitForExistence(timeout: 8), app.debugDescription)
-        task.tap()
-        task.typeText(taskName + "\n")
-        if button("Close").isHittable { button("Close").tap() }
+        task.typeText(taskName)
+        app.buttons.matching(NSPredicate(format: "label ==[c] %@", "Add task")).firstMatch.tap()
+        if app.buttons["Close"].isHittable { app.buttons["Close"].tap() }
         XCTAssertTrue(button(taskName).waitForExistence(timeout: 8), app.debugDescription)
-        open("Notes")
-        if button("All notes").isHittable { button("All notes").tap() }
-        open("New note")
-        app.typeText(noteName + "\n1. Blankets\n2. Water")
+        // Use the app's existing iPad hardware-keyboard shortcut to avoid long-press context menus.
+        app.typeKey("8", modifierFlags: [])
+        let newNote = app.buttons["New note"].firstMatch
+        XCTAssertTrue(newNote.waitForExistence(timeout: 8), app.debugDescription)
+        newNote.tap()
+        app.typeText(noteName + "\nPacking for Saturday")
         if button("Done").isHittable { button("Done").tap() }
-        open("Today")
+        app.typeKey("2", modifierFlags: [])
+        XCTAssertTrue(button(taskName).waitForExistence(timeout: 8), app.debugDescription)
         app.terminate()
         app.launch()
-        open("Today")
-        XCTAssertTrue(button(taskName).waitForExistence(timeout: 8), app.debugDescription)
-        open("Notes")
-        if button("All notes").isHittable { button("All notes").tap() }
-        open(noteName)
+        XCTAssertTrue(button(taskName).waitForExistence(timeout: 15), app.debugDescription)
+        app.typeKey("8", modifierFlags: [])
+        let note = button(noteName)
+        XCTAssertTrue(note.waitForExistence(timeout: 8), app.debugDescription)
+        note.tap()
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@ OR value CONTAINS[c] %@", noteName, noteName)).firstMatch.waitForExistence(timeout: 8), app.debugDescription)
+        let editor = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR value CONTAINS[c] %@", "Note", noteName)).firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 8), app.debugDescription)
+        capture("reopened-note-landscape")
     }
 }
