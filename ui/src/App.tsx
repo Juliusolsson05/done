@@ -45,6 +45,9 @@ import { createRouter } from '@/lib/router'
 // The address follows where the app is (lib/route.ts), and the browser's
 // Back and Forward move the app (lib/router.ts).
 const router = createRouter(window)
+// Where a phone's page is scrolled on Back is the app's to put back (see
+// `leaving`); the browser's own would put it where the pushed page left it.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual'
 const loaded = (): Route | null => parseRoute(location.pathname + location.search)
 // The phone's Back button names the place it goes to: the entry this one was
 // pushed from.
