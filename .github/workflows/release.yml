@@ -1,7 +1,5 @@
 name: Release
 
-# Builds the Mac app from main and publishes it as a GitHub release, which is
-# also where installed copies of done look for updates.
 on:
   schedule:
     # 08:00 UTC is midnight in California in winter (01:00 in summer).
@@ -9,89 +7,139 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  release:
-    runs-on: macos-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      build: ${{ steps.plan.outputs.build }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # The version is 0.1.<number of commits on main>. It goes up with every
-      # commit and never repeats, which is all the updater needs, and it means
-      # "is there anything new?" is the same question as "does this version's
-      # release exist yet?".
-      - name: Decide whether there is anything to release
+      - name: Check for an unpublished version
         id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="0.1.$(git rev-list --count HEAD)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "Nothing new since v$version."
+          if [[ "$(gh release view "v$version" --json isDraft --jq .isDraft 2>/dev/null)" == false ]]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            platform: darwin-aarch64
+          - runner: windows-2025
+            platform: windows-x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.plan.outputs.build == 'true'
       - uses: Swatinem/rust-cache@v2
-        if: steps.plan.outputs.build == 'true'
       - uses: actions/setup-node@v4
-        if: steps.plan.outputs.build == 'true'
         with:
           node-version: 22
-
-      # The interface first: its own checks, and the web server embeds its build.
-      - name: Interface
-        if: steps.plan.outputs.build == 'true'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build and check the interface
         working-directory: ui
+        env:
+          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
         run: npm ci && npm run typecheck && npm test && npm run build
-
-      - name: Test
-        if: steps.plan.outputs.build == 'true'
-        # What the Mac app is made of. The hosted server is not in it, and its
-        # tests need a Postgres that a Mac runner cannot run as a service; CI
-        # runs them, with one, on every change before it reaches main.
-        run: cargo test -p done-core -p done-mcp
-
-      # The update archive is signed with the updater key. An installed app
-      # refuses any update that was not, so a release cannot be swapped for
-      # something else on the way to a Mac.
-      - name: Build the app
-        if: steps.plan.outputs.build == 'true'
+      - name: Test desktop data and MCP
+        run: cargo test --locked -p done-core -p done-mcp
+      - name: Build the signed update
         working-directory: crates/app
         env:
-          # The hosted server the app offers to sign in to. A repository
-          # variable, not written here: a copy of this project built by someone
-          # else has none, and is then an app without accounts.
-          VITE_DONE_CLOUD_URL: ${{ vars.DONE_CLOUD_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          VERSION: ${{ steps.plan.outputs.version }}
-        run: npx --yes @tauri-apps/cli@2 build --config "{\"version\":\"$VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}"
-
-      - name: Publish the release
-        if: steps.plan.outputs.build == 'true'
-        working-directory: target/release/bundle/macos
-        env:
-          VERSION: ${{ steps.plan.outputs.version }}
         run: |
-          # For people: a zip of the app (the download in Settings is a
-          # notarized disk image made from it on a Mac, done-infra's
-          # notarize-mac.sh, on the release `mac`). For installed apps: the
-          # signed archive, and latest.json telling them which version it is.
-          ditto -c -k --keepParent done.app done-mac-arm64.zip
+          # A file avoids command-line JSON quoting differences on Windows.
+          jq -n --arg v "$VERSION" '{version: $v, build: {beforeBuildCommand: ""}, bundle: {createUpdaterArtifacts: true}}' > release-config.json
+          npx --yes @tauri-apps/cli@2 build --config release-config.json
+      - name: Stage the Mac download and update
+        if: runner.os == 'macOS'
+        run: |
+          test "$(uname -m)" = arm64
+          mkdir assets
+          cd target/release/bundle/macos
+          ditto -c -k --keepParent done.app "$GITHUB_WORKSPACE/assets/done-mac-arm64.zip"
+          cp done.app.tar.gz done.app.tar.gz.sig "$GITHUB_WORKSPACE/assets/"
+      - name: Stage the Windows installer and update
+        if: runner.os == 'Windows'
+        run: |
+          mkdir assets
+          installers=(target/release/bundle/nsis/*-setup.exe)
+          test "${#installers[@]}" -eq 1
+          cp "${installers[0]}" assets/done-windows-x64-setup.exe
+          cp "${installers[0]}.sig" assets/done-windows-x64-setup.exe.sig
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: assets
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  publish:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Publish both downloads and their update feed
+        working-directory: assets
+        run: |
+          tag="v$VERSION"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          for file in done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig done-windows-x64-setup.exe done-windows-x64-setup.exe.sig; do
+            test -s "$file"
+          done
           jq -n \
-            --arg version "$VERSION" \
-            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg signature "$(cat done.app.tar.gz.sig)" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/done.app.tar.gz" \
-            '{version: $version, pub_date: $date, platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' \
-            > latest.json
-          gh release create "v$VERSION" --title "done $VERSION" --generate-notes \
-            done-mac-arm64.zip done.app.tar.gz done.app.tar.gz.sig latest.json
+            --arg version "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg macURL "$base/done.app.tar.gz" --arg macSig "$(cat done.app.tar.gz.sig)" \
+            --arg winURL "$base/done-windows-x64-setup.exe" --arg winSig "$(cat done-windows-x64-setup.exe.sig)" \
+            '{version: $version, pub_date: $date, platforms: {
+              "darwin-aarch64": {signature: $macSig, url: $macURL},
+              "windows-x86_64": {signature: $winSig, url: $winURL}
+            }}' > latest.json
+          # An interrupted upload can resume on its draft. The public feed
+          # changes only after both platforms' files have uploaded.
+          draft=$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [[ "$draft" == false ]]; then exit 0; fi
+          if [[ "$draft" != true ]]; then
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "done $VERSION" --generate-notes --draft
+          fi
+          gh release upload "$tag" -R "$GITHUB_REPOSITORY" --clobber ./*
+          gh release edit "$tag" -R "$GITHUB_REPOSITORY" --draft=false
