@@ -2,7 +2,7 @@ param([Parameter(Mandatory)][string]$Installer)
 $ErrorActionPreference = 'Stop'
 # This test installs and uninstalls done, and uses the real default data path.
 if ($env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Run on a disposable GitHub-hosted Windows runner.' }
-$database = Join-Path $env:LOCALAPPDATA 'done/done.db'
+$database = Join-Path $env:LOCALAPPDATA 'dev.done.app/done.db'
 if ($env:DONE_DB -or (Test-Path $database)) { throw 'Expected a fresh Windows profile.' }
 
 function Run-Installer([string]$path) {

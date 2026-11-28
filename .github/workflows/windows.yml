@@ -29,12 +29,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows-x64-release
+          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Test the shared local database and MCP
+        id: core
+        continue-on-error: true
         run: cargo test --locked -p done-core -p done-mcp --release
       - name: Build the Windows installer
         working-directory: crates/app
@@ -57,6 +60,9 @@ jobs:
           if-no-files-found: error
       - name: Install, launch and reopen local data
         run: ./.github/scripts/test-windows-installer.ps1 -Installer "$env:RUNNER_TEMP/done-windows-x64-setup.exe"
+      - name: Require shared database and MCP tests to pass
+        if: steps.core.outcome == 'failure'
+        run: throw 'The shared database or MCP tests failed.'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
