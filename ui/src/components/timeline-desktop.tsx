@@ -17,7 +17,7 @@ import { AddRow } from '@/components/quick-add'
 import { ProjectTimelineMarks, ProjectTimelineRows, SprintCaption } from '@/components/timeline-project-rows'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { TimelineCompletedTask } from '@/components/timeline-completed-task'
-import { TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
+import { PastHiddenChip, TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { projectStyle, useApp } from '@/lib/app-context'
 import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from '@/lib/days'
@@ -25,6 +25,7 @@ import { play } from '@/lib/sounds'
 import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { completedByProject, completedItems, completionDates } from '@/lib/timeline-completion'
 import { DAY_PX, placed, type Placed, type Zoom } from '@/lib/timeline-layout'
+import { hidePast, isWhollyPast, withoutPastProjects } from '@/lib/timeline-past'
 import { projectTimelines, timelineProjectDates } from '@/lib/timeline-projects'
 import { LEAD, onScreen, spanFor } from '@/lib/timeline-window'
 import { cn } from '@/lib/utils'
@@ -118,9 +119,15 @@ export function TimelineDesktop() {
 
   const filter = useTaskFilter()
   const completion = useTimelineCompletion()
-  const visible = filter.apply(inScope.tasks)
-  const visibleCompleted = filter.apply(completion.completed)
-  const projectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
+  // Past tasks, when hidden, go before anything is counted, grouped or spanned.
+  const matching = filter.apply(inScope.tasks)
+  const matchingCompleted = filter.apply(completion.completed)
+  const visible = completion.hidePast ? hidePast(matching, TODAY) : matching
+  const visibleCompleted = completion.hidePast ? hidePast(matchingCompleted, TODAY) : matchingCompleted
+  const allProjectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
+  const projectRows = completion.hidePast
+    ? withoutPastProjects(allProjectRows, [...visible, ...visibleCompleted], [...matching, ...matchingCompleted].filter((t) => isWhollyPast(t, TODAY)), TODAY)
+    : allProjectRows
   const projectSpans = new Map(projectRows.map((row) => [row.project.id, row]))
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
@@ -132,7 +139,11 @@ export function TimelineDesktop() {
   const finishedByProject = completedByProject(finishedItems)
   const groups = timelineGroups(inScope.projects, visible, 'project', new Set([...projectSpans.keys(), ...finishedByProject.keys()]))
   const shown = open.length + finishedItems.length
-  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, span).length
+  // The total is what the chart would hold with nothing hidden, so hidden past tasks show in "x of y".
+  const countSpan = completion.hidePast
+    ? spanFor([...dated, ...timelineProjectDates(projectTimelines(inScope.projects, [...matching, ...matchingCompleted], filter.filter), TODAY), ...completionDates(matchingCompleted, TODAY)], TODAY)
+    : span
+  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, countSpan).length
   const days = useMemo(() => Array.from({ length: span.days }, (_, i) => addDays(span.start, i)), [span.start, span.days])
   const width = span.days * px
   const x = (day: Day) => daysBetween(span.start, day) * px
@@ -421,7 +432,7 @@ export function TimelineDesktop() {
         </Button>
         <HeaderButton onClick={() => showDay(TODAY)}>Today</HeaderButton>
         <FilterButton />
-        <TimelineCompletionOption showCompleted={completion.showCompleted} setShowCompleted={completion.setShowCompleted} />
+        <TimelineCompletionOption {...completion} />
         <Button
           variant="ghost"
           size="sm"
@@ -434,7 +445,7 @@ export function TimelineDesktop() {
           {undated.length > 0 && <span className="tabular-nums">{undated.length}</span>}
         </Button>
       </ViewHeader>
-      <FilterBar shown={shown} total={total} />
+      <FilterBar shown={shown} total={total} extra={completion.hidePast && <PastHiddenChip setHidePast={completion.setHidePast} />} />
 
       {filter.on && shown === 0 && projectRows.length === 0 ? (
         <NothingMatches />

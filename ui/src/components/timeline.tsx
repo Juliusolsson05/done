@@ -16,7 +16,7 @@ import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
 import { TimelineCompletedTask } from '@/components/timeline-completed-task'
-import { TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
+import { PastHiddenChip, TimelineCompletionOption, useTimelineCompletion } from '@/components/timeline-completion'
 import { ProjectTimelineMarks, ProjectTimelineRows, SprintCaption } from '@/components/timeline-project-rows'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -27,6 +27,7 @@ import { play } from '@/lib/sounds'
 import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { completedByProject, completedItems, completionDates } from '@/lib/timeline-completion'
 import { placed, type Placed } from '@/lib/timeline-layout'
+import { hidePast, isWhollyPast, withoutPastProjects } from '@/lib/timeline-past'
 import { projectTimelines, timelineProjectDates } from '@/lib/timeline-projects'
 import { swallowClick } from '@/lib/swallow-click'
 import { daysDragged, HOLD_MS, IDLE, press, released, SLOP, type PressState } from '@/lib/timeline-press'
@@ -150,11 +151,17 @@ export function Timeline() {
 
   const filter = useTaskFilter()
   const completion = useTimelineCompletion()
-  const visible = filter.apply(inScope.tasks)
-  const visibleCompleted = filter.apply(completion.completed)
+  // Past tasks, when hidden, go before anything is counted, grouped or spanned.
+  const matching = filter.apply(inScope.tasks)
+  const matchingCompleted = filter.apply(completion.completed)
+  const visible = completion.hidePast ? hidePast(matching, TODAY) : matching
+  const visibleCompleted = completion.hidePast ? hidePast(matchingCompleted, TODAY) : matchingCompleted
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
-  const projectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
+  const allProjectRows = projectTimelines(inScope.projects, [...visible, ...visibleCompleted], filter.filter)
+  const projectRows = completion.hidePast
+    ? withoutPastProjects(allProjectRows, [...visible, ...visibleCompleted], [...matching, ...matchingCompleted].filter((t) => isWhollyPast(t, TODAY)), TODAY)
+    : allProjectRows
   const projectSpans = new Map(projectRows.map((row) => [row.project.id, row]))
   const timelineDates = [...dated, ...timelineProjectDates(projectRows, TODAY), ...completionDates(visibleCompleted, TODAY)]
   const naturalSpan = spanFor(timelineDates, TODAY)
@@ -163,7 +170,11 @@ export function Timeline() {
   const groups = timelineGroups(inScope.projects, visible, 'project', new Set([...projectSpans.keys(), ...finishedByProject.keys()]))
   const undated = open.filter((t) => !t.due && !t.start)
   const shown = open.length + finishedItems.length
-  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, naturalSpan).length
+  // The total is what the chart would hold with nothing hidden, so hidden past tasks show in "x of y".
+  const countSpan = completion.hidePast
+    ? spanFor([...dated, ...timelineProjectDates(projectTimelines(inScope.projects, [...matching, ...matchingCompleted], filter.filter), TODAY), ...completionDates(matchingCompleted, TODAY)], TODAY)
+    : naturalSpan
+  const total = openTasks(inScope.tasks).length + completedItems(completion.completed, countSpan).length
   // A filter that matches nothing replaces the chart, including when none of
   // the matching completions fall inside the date range.
   const chartShown = !filter.on || shown > 0 || projectRows.length > 0
@@ -670,7 +681,7 @@ export function Timeline() {
       <div className="flex items-center [&>button]:h-11 [&>button]:text-sm">
         <FilterButton />
       </div>
-      <TimelineCompletionOption showCompleted={completion.showCompleted} setShowCompleted={completion.setShowCompleted} />
+      <TimelineCompletionOption {...completion} />
       {layout.side && (
         <Button
           variant="ghost"
@@ -721,7 +732,7 @@ export function Timeline() {
       <ViewHeader title="Timeline" sub={`${shortDay(range[0])} to ${shortDay(range[1])}`}>
         {controls}
       </ViewHeader>
-      <FilterBar shown={shown} total={total} />
+      <FilterBar shown={shown} total={total} extra={completion.hidePast && <PastHiddenChip setHidePast={completion.setHidePast} />} />
       {/* On a phone the help goes above the chart: below it, New task would sit on it. */}
       {/* Not on a phone on its side, which needs the height for the chart. */}
       {isMobile && <p className="mb-2 shrink-0 text-xs text-faint [@media(max-height:500px)]:hidden">{help}</p>}

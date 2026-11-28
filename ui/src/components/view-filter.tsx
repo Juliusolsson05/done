@@ -297,14 +297,17 @@ export function FilterButton({ className }: { className?: string } = {}) {
 // Under the title while a filter is on, on every task view: what is
 // filtered, each removable, how many choices this view decides itself
 // ("hidden here"), how many tasks are shown of how many, and Clear.
-export function FilterBar({ shown, total }: { shown: number; total: number }) {
+// `extra`: a view's own reason for hiding tasks (the Timeline's past tasks),
+// shown as a chip here, with the count, even when no filter is set.
+export function FilterBar({ shown, total, extra }: { shown: number; total: number; extra?: ReactNode }) {
   const { data, team } = useApp()
   const { filter, fixed, on } = useTaskFilter()
-  if (!on) return null
+  if (!on && !extra) return null
   const people = (team?.spaces ?? []).flatMap((s) => s.members).map((m) => ({ id: m.id, name: m.name || m.email }))
   const hidden = hiddenHere(filter, fixed)
   return (
     <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5 max-md:mt-0 max-md:mb-3" role="group" aria-label="Filter">
+      {extra}
       {filterChips(filter, data.projects, people, fixed).map((chip) => (
         <span key={chip.key} className="flex items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1 pl-2.5 text-xs">
           {chip.key.startsWith('p') && <ProjectDot id={chip.key === 'pinbox' ? null : Number(chip.key.slice(1))} />}
@@ -330,9 +333,11 @@ export function FilterBar({ shown, total }: { shown: number; total: number }) {
       <span className="ml-1 text-xs text-muted-foreground tabular-nums">
         {shown} of {total} tasks
       </span>
-      <Button variant="ghost" size="xs" className="text-muted-foreground pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
-        Clear
-      </Button>
+      {on && (
+        <Button variant="ghost" size="xs" className="text-muted-foreground pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
+          Clear
+        </Button>
+      )}
     </div>
   )
 }
