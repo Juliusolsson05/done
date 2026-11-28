@@ -387,7 +387,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mirror=\"${TARGET_TEMP_DIR:?}/done-ios-rust\"\npython3 \"$SRCROOT/../../ios-rust/prepare.py\" \"$mirror\"\nexport TAURI_APP_PATH=\"$mirror/crates/app\"\ncd \"$TAURI_APP_PATH\"\nnpx --yes @tauri-apps/cli@2 ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
+			shellScript = "mirror=\"${TARGET_TEMP_DIR:?}/done-ios-rust\"\nCARGO_TARGET_DIR=\"$(python3 \"$SRCROOT/../../ios-rust/prepare.py\" \"$mirror\")\"\nexport CARGO_TARGET_DIR\nexport TAURI_APP_PATH=\"$mirror/crates/app\"\ncd \"$TAURI_APP_PATH\"\nnpx --yes @tauri-apps/cli@2 ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

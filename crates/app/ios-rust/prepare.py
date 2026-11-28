@@ -1,4 +1,5 @@
 """Prepare Xcode's Rust workspace without changing other platforms' SQLite."""
+import json
 import re
 import shutil
 import subprocess
@@ -39,3 +40,12 @@ for name in ['core', 'mcp', 'app', 'server']:
     for child in source.iterdir():
         if child.name not in {'Cargo.toml', 'ios-rust', 'target'}:
             link(child, dest / child.name)
+
+
+# Keep the target directory cargo would have used in the original project.
+# Otherwise each Xcode configuration creates a second copy of the Rust build.
+metadata = subprocess.check_output([
+    'cargo', 'metadata', '--no-deps', '--format-version', '1',
+    '--manifest-path', str(root / 'Cargo.toml'),
+])
+print(json.loads(metadata)['target_directory'])
