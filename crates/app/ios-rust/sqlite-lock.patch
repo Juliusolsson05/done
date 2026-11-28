@@ -13,11 +13,11 @@
 +dependencies = [
 + "foldhash",
 +]
- 
+
  [[package]]
  name = "hashbrown"
 @@ -2557,11 +2566,10 @@
- 
+
  [[package]]
  name = "libsqlite3-sys"
 -version = "0.40.0"
@@ -31,7 +31,7 @@
   "vcpkg",
  ]
 @@ -3801,18 +3809,19 @@
- 
+
  [[package]]
  name = "rsqlite-vfs"
 -version = "0.2.0"
@@ -43,7 +43,7 @@
 + "hashbrown 0.16.1",
   "thiserror 2.0.21",
  ]
- 
+
  [[package]]
  name = "rusqlite"
 -version = "0.42.0"
@@ -55,7 +55,7 @@
   "bitflags 2.13.2",
   "fallible-iterator 0.3.0",
 @@ -4474,12 +4483,14 @@
- 
+
  [[package]]
  name = "sqlite-wasm-rs"
 -version = "0.6.3"
@@ -69,5 +69,5 @@
   "rsqlite-vfs",
 + "wasm-bindgen",
  ]
- 
+
  [[package]]
