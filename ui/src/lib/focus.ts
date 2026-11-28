@@ -262,6 +262,26 @@ export function moveBlock(blocks: Block[], id: string, by: -1 | 1): Block[] {
   return next
 }
 
+// What became of a queued block's task: still to do, finished, or deleted,
+// perhaps on another device or by an agent while the block waited. A block
+// on no task is always 'open'. `tasks` is every task, not a view's share:
+// a task out of the current view is not gone.
+export type BlockTask = 'open' | 'finished' | 'deleted'
+export function blockTask(block: Block, tasks: Task[]): BlockTask {
+  if (block.taskId === null) return 'open'
+  const task = tasks.find((t) => t.id === block.taskId)
+  return !task ? 'deleted' : task.done ? 'finished' : 'open'
+}
+
+// The block to start next: the first whose task is still to do. The ones
+// before it, on tasks finished or deleted since, are skipped rather than
+// run on no task under their old title; `skipped` lists them so they can be
+// taken off the list too.
+export function nextBlock(blocks: Block[], tasks: Task[]): { block: Block | null; skipped: Block[] } {
+  const at = blocks.findIndex((b) => blockTask(b, tasks) === 'open')
+  return at === -1 ? { block: null, skipped: blocks } : { block: blocks[at], skipped: blocks.slice(0, at) }
+}
+
 // The session for a queued block. Its task is used as it is now (renamed,
 // perhaps); if it has been finished or deleted since it was queued, the
 // block still runs under the title it was queued with, on no task, so the

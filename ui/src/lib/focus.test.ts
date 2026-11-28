@@ -16,6 +16,8 @@ import {
   newReminder,
   nextReminderAt,
   optionsSummary,
+  blockTask,
+  nextBlock,
   storedLength,
   start,
   timeLeft,
@@ -375,5 +377,28 @@ describe('storedLength', () => {
   it('falls back to the usual length for anything else', () => {
     for (const bad of [null, '', '0', '-5', '601', '12.5', 'abc', 'NaN', 'Infinity', ' '])
       expect(storedLength(bad), String(bad)).toBe(25)
+  })
+})
+
+describe('queued blocks whose task changed meanwhile', () => {
+  const tasks = [task(1, { title: 'write the launch post' }), task(2, { title: 'fix sign-in', done: true, doneDay: '2026-11-26' })]
+  const block = (id: string, taskId: number | null): Block => ({ id, taskId, title: 'queued ' + id, minutes: 25 })
+  const onOpen = block('a', 1)
+  const onFinished = block('b', 2)
+  const onDeleted = block('c', 99)
+  const onNothing = block('d', null)
+
+  it('says what became of each block’s task', () => {
+    expect([onOpen, onFinished, onDeleted, onNothing].map((b) => blockTask(b, tasks))).toEqual(['open', 'finished', 'deleted', 'open'])
+  })
+
+  it('starts the first block still to do, skipping finished and deleted ones', () => {
+    expect(nextBlock([onFinished, onDeleted, onOpen, onNothing], tasks)).toEqual({ block: onOpen, skipped: [onFinished, onDeleted] })
+    expect(nextBlock([onNothing, onFinished], tasks)).toEqual({ block: onNothing, skipped: [] })
+  })
+
+  it('has nothing to start when every block’s task is gone', () => {
+    expect(nextBlock([onFinished, onDeleted], tasks)).toEqual({ block: null, skipped: [onFinished, onDeleted] })
+    expect(nextBlock([], tasks)).toEqual({ block: null, skipped: [] })
   })
 })

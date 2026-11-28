@@ -3,6 +3,7 @@
 // so it survives a reload, and never saved to the tasks file.
 import { play } from '@/lib/sounds'
 import { recordEntry, showInMenuBar } from '@/lib/backend'
+import { newId } from '@/lib/ids'
 import {
   DEFAULT_MINUTES,
   dismiss,
@@ -14,6 +15,7 @@ import {
   moveBlock,
   newBlock,
   newReminder,
+  nextBlock,
   nextReminderAt,
   start,
   startBlock,
@@ -134,7 +136,7 @@ function setReminders(next: Reminder[]) {
 
 // False when there was no label or no interval, and nothing was added.
 export function addReminder(label: string, minutes: number): boolean {
-  const reminder = newReminder(crypto.randomUUID(), label, minutes)
+  const reminder = newReminder(newId(), label, minutes)
   if (reminder) setReminders([...reminders, reminder])
   return reminder !== null
 }
@@ -152,7 +154,7 @@ function setUpNext(next: Block[]) {
 
 // False when the length was not sensible, and nothing was added.
 export function queueBlock(task: Task | null, minutes: number): boolean {
-  const block = newBlock(crypto.randomUUID(), task, minutes)
+  const block = newBlock(newId(), task, minutes)
   if (block) setUpNext([...upNext, block])
   return block !== null
 }
@@ -274,12 +276,14 @@ export function endFocus(reward: unknown = true): void {
 }
 
 // Ends this block, if one is running, and starts the first one in Up next.
+// `tasks` is every task (data.tasks), so a block is never skipped for being
+// outside the view on screen.
 export function startNext(tasks: Task[]): void {
-  const [block, ...rest] = upNext
+  const { block, skipped } = nextBlock(upNext, tasks)
   if (!block) return
   play(timeIsUp() ? 'focusDone' : 'focusStart')
   const ending = session
-  setUpNext(rest)
+  setUpNext(upNext.filter((b) => b !== block && !skipped.includes(b)))
   set(startBlock(block, tasks, Date.now(), reminders))
   record(ending)
 }

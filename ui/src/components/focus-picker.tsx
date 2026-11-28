@@ -9,13 +9,17 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useIsMobile, useIsTouch } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
-import { describeDay, TODAY } from '@/lib/days'
-import { cursorAt, moveCursor, pickerGroups, type Cursor, type RowKey } from '@/lib/focus-picker'
-import { projectName, type Task } from '@/lib/tasks'
+import { loadEntries } from '@/lib/backend'
+import { onRecorded } from '@/lib/focus-store'
+import { addDays, describeDay, TODAY } from '@/lib/days'
+import { cursorAt, moveCursor, pickerGroups, recentTaskIds, type Cursor, type RowKey } from '@/lib/focus-picker'
+import { goalTask, projectName, type Task } from '@/lib/tasks'
 import { cn } from '@/lib/utils'
 
 // Never shorter than this, so a few rows always show even with the keyboard up.
 const SHORTEST_LIST = 132
+// How far back "Recent" looks.
+const RECENT_DAYS = 7
 
 // The project and due day under a title, so two tasks with near names can
 // be told apart.
@@ -208,23 +212,65 @@ function Finder({
   )
 }
 
+// The tasks focused on in the last week, from the time sheet: true on every
+// device, where something kept in this window would not be. Read when a
+// picker opens, kept for the next one, and read again once a block has been
+// written to the sheet. A day that fails to load just adds nothing.
+let recentRead: Promise<number[]> | null = null
+const readRecent = (): Promise<number[]> =>
+  (recentRead ??= Promise.allSettled(Array.from({ length: RECENT_DAYS }, (_, i) => loadEntries(addDays(TODAY, -i)))).then((results) =>
+    recentTaskIds(results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))),
+  ))
+onRecorded(() => {
+  recentRead = null
+})
+
+function useRecent(open: boolean): number[] {
+  const [recent, setRecent] = useState<number[]>([])
+  // Bumped when a block is written, so a picker on screen then reads again.
+  const [written, setWritten] = useState(0)
+  useEffect(() => {
+    const stop = onRecorded(() => {
+      recentRead = null
+      setWritten((n) => n + 1)
+    })
+    return () => {
+      stop()
+    }
+  }, [])
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    readRecent().then((ids) => live && setRecent(ids))
+    return () => {
+      live = false
+    }
+  }, [open, written])
+  return recent
+}
+
+// Reads the tasks, today's goal and what was focused on lately itself, so
+// each place that asks for a task (the Focus page, Up next) passes only the
+// choice.
 export function FocusPicker({
   id,
-  tasks,
-  recent,
-  goalId,
+  title = 'What are you working on?',
   chosen,
   onChoose,
 }: {
   id: string
-  tasks: Task[]
-  recent: number[]
-  goalId: number | null
+  // Read out as the phone sheet's name.
+  title?: string
   chosen: Task | null
   onChoose: (task: Task | null) => void
 }) {
+  const { shown, me } = useApp()
+  const tasks = shown.tasks
+  const goal = goalTask(tasks, TODAY, me)
+  const goalId = goal && !goal.done ? goal.id : null
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
+  const recent = useRecent(open)
   const choose = (task: Task | null) => {
     onChoose(task)
     setOpen(false)
@@ -233,6 +279,7 @@ export function FocusPicker({
   const trigger = (
     <Button
       id={id}
+      type="button"
       variant="outline"
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -264,7 +311,7 @@ export function FocusPicker({
           {/* As its trigger, the button gets the focus back when the sheet closes. */}
           <SheetTrigger asChild>{trigger}</SheetTrigger>
           <SheetContent side="top" showCloseButton={false} className="gap-0 rounded-b-xl pt-[env(safe-area-inset-top)]">
-            <SheetTitle className="sr-only">What are you working on?</SheetTitle>
+            <SheetTitle className="sr-only">{title}</SheetTitle>
             <SheetDescription className="sr-only">Type to find a task, then choose it.</SheetDescription>
             {finder()}
           </SheetContent>
