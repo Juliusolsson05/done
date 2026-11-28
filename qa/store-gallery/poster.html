@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>done · Store gallery</title>
+<style>
+* { box-sizing: border-box }
+:root { font-family: "Helvetica Neue", Arial, sans-serif; color: #101f43; -webkit-font-smoothing: antialiased }
+body { margin: 0 }
+main { width: 100vw; height: 100vh; overflow: hidden; position: relative; container-type: inline-size; background: var(--paper) }
+header { position: absolute; left: 8.1%; right: 5%; top: 5.9%; z-index: 2 }
+.wordmark { display: flex; gap: .3em; align-items: center; font-size: 5cqw; font-weight: 720; letter-spacing: -.07em }
+.mark { background: #2456c4; border-radius: 100%; width: .88em; aspect-ratio: 1; position: relative }
+.mark::after { content: ""; display: block; width: 42%; height: 24%; position: absolute; left: 29%; top: 30%; border: solid white; border-width: 0 0 .082em .082em; transform: rotate(-47deg) }
+h1 { font-size: 10.4cqw; line-height: 1.005; letter-spacing: -.068em; font-weight: 650; margin: .53em 0 0 }
+h1 span { display: block }
+.device { position: absolute; background: linear-gradient(98deg,#777f8c,#31353c 2.2%,#101218 12%,#171a21 88%,#697888 97%,#383c43); padding: 1.32cqw; border-radius: 12.7cqw; box-shadow: inset 0 0 0 .13cqw #c9d0d6, inset 0 0 0 .35cqw #5d646e, 2cqw 3.6cqw 5.8cqw -2.6cqw #16335259 }
+.glass { overflow:hidden; position:relative; border: .7cqw solid #121419; border-radius: 11.6cqw; background:#101218 }
+.glass img { width: 100%; display:block; height:auto }
+.phone .glass::after { content:""; position:absolute; width:25%; height:1.75%; top:1.05%; left:37.5%; border-radius:10cqw; background:#141519 }
+.phone::before,.phone::after { content:""; position:absolute; background:linear-gradient(90deg,#59606c,#181b24); width:.47cqw; border-radius:.26cqw; top:26%; height:6%; left:-.25cqw }
+.phone::after { left:auto; right:-.24cqw; height:9%; top:29% }
+.device.phone { width:80%; left:10%; top:26.3% }
+main[data-family=iphone] { background:radial-gradient(ellipse at 115% 100%, var(--tint), transparent 66%),var(--paper) }
+main[data-family=ipad] header { top:5.6%;left:7% }
+main[data-family=ipad] .wordmark { font-size:3.2cqw }
+main[data-family=ipad] h1 { font-size:7.9cqw; margin-top:.36em }
+.device.tablet { width:91%; left:4.5%; top:23.6%; padding:1.06cqw; border-radius:4.9cqw; box-shadow:inset 0 0 0 .12cqw #c4cbd2, inset 0 0 0 .31cqw #59606c, 1.8cqw 3.2cqw 5cqw -2.4cqw #142d554d }
+.tablet .glass { border:.55cqw solid #15171c; border-radius:3.85cqw }
+main[data-family=duo] { background:radial-gradient(ellipse at 78% 92%,#a8c5ec,transparent 60%),#d5e8fb }
+main[data-family=duo] header { top:11%;left:6.2%;right:56% }
+main[data-family=duo] .wordmark { font-size:2.1cqw }
+main[data-family=duo] h1 { font-size:5.35cqw;line-height:1.01;margin-top:.65em }
+main[data-family=duo] .tablet { width:42%;left:53.5%;top:10%;border-radius:2.2cqw;padding:.52cqw; }
+main[data-family=duo] .tablet .glass { border:.26cqw solid #15171c;border-radius:1.72cqw }
+main[data-family=duo] .phone { width:19%;left:44.8%;top:33%;padding:.32cqw;border-radius:3.1cqw;z-index:1;box-shadow:inset 0 0 0 .11cqw #a0a8b3,.45cqw .9cqw 1.5cqw #192a443d }
+main[data-family=duo] .phone .glass { border:.19cqw solid #15171c;border-radius:2.7cqw }
+main[data-family=duo] .phone::before, main[data-family=duo] .phone::after { width:.11cqw;left:-.075cqw }
+main[data-family=duo] .phone::after { left:auto;right:-.065cqw }
+</style>
+<main><header><div class="wordmark"><i class="mark" aria-hidden="true"></i>done</div><h1></h1></header></main>
+<script>
+const cards = {
+  Today: {title:['One goal','for today.'], tablet:['One goal for today.'], paper:'#d5e7fa', tint:'#adcdee'},
+  Notes: {title:['Keep the plan','with the tasks.'], tablet:['Keep the plan','with the tasks.'], paper:'#e4edfb', tint:'#c0d7f3'},
+  Board: {title:['See work','in progress.'], tablet:['See work in progress.'], paper:'#bed8f7', tint:'#a5c5eb'},
+  Upcoming: {title:['Plan the','week ahead.'], tablet:['Plan the week ahead.'], paper:'#e0edfa', tint:'#c4dbf6'}
+};
+const query = new URLSearchParams(location.search);
+const family = query.get('family') || 'iphone';
+const view = query.get('view') || 'Today';
+const card = cards[view];
+const main = document.querySelector('main');
+main.dataset.family = family;
+main.style.setProperty('--paper',card.paper);
+main.style.setProperty('--tint',card.tint);
+const title = family === 'duo' ? ['Tasks and notes','for you and','your team.'] : family === 'ipad' ? card.tablet : card.title;
+for (const line of title) {const span=document.createElement('span'); span.textContent=line; document.querySelector('h1').append(span);}
+function frame(kind,source){
+  const device=document.createElement('div');device.className='device '+kind;
+  const glass=document.createElement('div');glass.className='glass';
+  const img=document.createElement('img');img.src=source;img.alt='Done '+view+' screen';
+  glass.append(img);device.append(glass);main.append(device);
+}
+if (family==='duo') {frame('tablet',query.get('tablet') || 'captures/iPad-Notes.png');frame('phone',query.get('phone') || 'captures/iPhone-Today.png');}
+else frame(family==='iphone'?'phone':'tablet',query.get('image') || 'captures/'+(family==='iphone'?'iPhone':'iPad')+'-'+view+'.png');
+</script>
+</html>
