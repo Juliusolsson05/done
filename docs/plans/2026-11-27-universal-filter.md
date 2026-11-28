@@ -137,3 +137,25 @@ Saved or named filters, a query language, OR/NOT across dimensions, a status fil
 - Existing view-filter, focus-picker and search tests pass unchanged (the only edit to the old test file is its import lines).
 - `npm run typecheck`, `npm test` (38 files, 689 tests) and `npm run build` pass.
 - Not verified here: the panel in a browser. The code path is unchanged apart from `cleanFilter` keeping 0 and words being folded; board.tsx, timeline.tsx, timeline-desktop.tsx and components/view-filter.tsx are not touched.
+
+## Verified in steps 2 to 5 (feat/filter-views)
+
+As built, per view (person is also fixed wherever the scope has nobody to choose):
+
+| View | Offered | Fixed (shown as "hidden here" when set) |
+|---|---|---|
+| Inbox | words, priority, when | project, person |
+| Today | words, project, person, priority | when (goal never filtered) |
+| Upcoming | words, project, person, priority | when |
+| Project | words, person, priority, when | project |
+| Assigned to me | words, project, priority, when | person |
+| Board, Timeline (desktop and touch) | all five | none |
+| Completed | words, project, priority | person, when |
+
+- `npm run typecheck`, `npm test` (47 files, 757 tests), `npm run build`; `cargo test -p done-mcp` (13 passed).
+- New unit tests: chips and "hidden here" per view, person fixed without people, quick add defaults per view, fortnight read back as week (view-filter.test.ts); the @ list ignores accents (mentions.test.ts, fails on main: "cafe" missed "Café").
+- `ui/checks/filter-views.cjs` (1280x800 mouse, 390x844 touch): Today and Inbox have the Filter, the bar follows with "1 hidden here" and the right counts, Clear clears everywhere. Fails on main ("Today has a Filter button"), passes on the branch.
+- Existing checks on the branch: touch-timeline (25 passed), touch-sizes (passed, after the header button was given no height of its own on iPad: it had cost one row of Today), up-next-picker (passed). board-heights fails one case (844x390, "the columns get room") on main as well; notes-header-menu and touch-note-toolbar fail on main too (4 controls in the iPad note header; a Playwright browser not installed). None of these are touched here.
+- A browser run on a faked API with a workspace, at 1440x900 (mouse and keys), 820x1180 and 390x844 (touch), 147 checks: every task view has the Filter and no bar with no filter; F opens it with the caret in the words; Escape closes it and focus goes back to the button; words + Wedding + P2 set on Today show the right chips and "x of y" on all eight views, "1 hidden here" on Inbox and the project; "No tasks match the filter" on Assigned to me; quick add on Today (Wedding, P2, today) and on Inbox (P2, no project) stays on the page; reload keeps the filter, a new browser context starts with none; Clear and "Clear the filter" clear it; a Hop launch filter on Board is dropped when switching to one's own space; panel rows and choices are 44 px on touch, the phone sheet keeps 16 px margins; localStorage holds no filter.
+- Board and Timeline with no filter: screenshots byte-identical to main at all three sizes.
+- Not verified: arrow keys do not move between the priority or when choices in the panel (Tab does); the same on main's Board, so not changed here. The Tauri app and a real iPhone were not run.

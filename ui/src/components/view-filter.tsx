@@ -3,7 +3,7 @@
 // the title that keeps what is filtered in sight as chips, with a count. One
 // filter for all of them; each view offers only what it does not decide
 // itself (see lib/view-filter).
-import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { CheckIcon, ListFilterIcon, SearchIcon, UserXIcon, XIcon } from 'lucide-react'
 import { Avatar } from '@/components/avatars'
 import { Button } from '@/components/ui/button'
@@ -55,7 +55,7 @@ export function useViewFilter(): ViewFilter {
   const stored = useSyncExternalStore(subscribeViewFilter, getStoredFilter)
   const filter = useMemo(() => cleanFilter(stored, shown.projects), [stored, shown.projects])
   useEffect(() => {
-    if (scopeChanged(scope) && isFiltering(filter)) setViewFilter(filter)
+    if (scopeChanged(scope)) setViewFilter(filter)
     // Only a change of scope writes; a read never does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope])
@@ -237,8 +237,10 @@ export function FilterButton({ className }: { className?: string } = {}) {
   const open = useSyncExternalStore(subscribeViewFilter, getFilterOpen)
   const isMobile = useIsMobile()
   const count = filterChips(filter, [], [], fixed).length
+  const trigger = useRef<HTMLButtonElement>(null)
   const button = (
     <Button
+      ref={trigger}
       variant={count ? 'secondary' : 'ghost'}
       size="sm"
       // 44 points tall for a finger (#109); the Mac keeps 28.
@@ -277,7 +279,15 @@ export function FilterButton({ className }: { className?: string } = {}) {
   return (
     <Popover open={open} onOpenChange={setFilterOpen}>
       <PopoverTrigger asChild>{button}</PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
+      <PopoverContent
+        align="end"
+        className="w-80"
+        // Opened with F, nothing had focus: it goes back to the button, not to the page.
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          trigger.current?.focus()
+        }}
+      >
         <FilterChoices />
       </PopoverContent>
     </Popover>
@@ -294,7 +304,7 @@ export function FilterBar({ shown, total }: { shown: number; total: number }) {
   const people = (team?.spaces ?? []).flatMap((s) => s.members).map((m) => ({ id: m.id, name: m.name || m.email }))
   const hidden = hiddenHere(filter, fixed)
   return (
-    <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter">
+    <div className="-mt-3 mb-5 flex flex-wrap items-center gap-1.5 max-md:mt-0 max-md:mb-3" role="group" aria-label="Filter">
       {filterChips(filter, data.projects, people, fixed).map((chip) => (
         <span key={chip.key} className="flex items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-1 pl-2.5 text-xs">
           {chip.key.startsWith('p') && <ProjectDot id={chip.key === 'pinbox' ? null : Number(chip.key.slice(1))} />}
@@ -333,7 +343,7 @@ export function NothingMatches() {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-14 text-center">
       <p className="text-sm text-muted-foreground">No tasks match the filter.</p>
-      <Button variant="outline" size="sm" onClick={() => setViewFilter(NO_FILTER)}>
+      <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => setViewFilter(NO_FILTER)}>
         Clear the filter
       </Button>
     </div>
