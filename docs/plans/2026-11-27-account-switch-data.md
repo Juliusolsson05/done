@@ -68,5 +68,17 @@ Ruling: a 401 is treated as a sign-out, not a deletion — the device cannot tel
 
 ## Verified / not verified
 
-- Verified: see the PR (test runs before and after).
-- Not verified: a real iPhone or Mac app run; the widgets and the Live Activity on a device (the widget snapshot path is read, not run); the Settings question and the held dialog in a running app.
+Verified (27 Nov, on this branch):
+
+- The audit's three tests fail on origin/main (eea3210) for the stated reasons (output in the PR).
+- The reshaped tests fail with the fix switched off (holding, leaving, the refused re-send and the Inbox space fix disabled in core) and pass with it. `a_refused_row_is_sent_again` (core) fails with only the re-send switched off.
+- `cargo test -p done-core -p done-mcp -p done-server`: 40, 13 and 49 passed. `cargo check -p done-app` and `cargo check -p done-app --target aarch64-apple-ios` pass.
+- `npm run typecheck`, `npm test` (638 passed), `npm run build` pass. `note-list.test.ts` failed once in a full run and passed alone and on the next full run; it does not touch anything changed here.
+
+Not verified:
+
+- A real iPhone, iPad or Mac app run: the Settings question, the held dialog, signing out and deleting on a device.
+- The widgets and the Live Activity on a device. Read, not run: after leaving the window reloads, and `App.tsx` builds the snapshot from what `state()` returns, which no longer has workspace rows; a focus session on a workspace task is ended first.
+- Two windows of the Mac app open while signing out (each reloads; the second loads after the file was cleaned).
+
+Privacy of `refused`: it only names ids the writer sent itself. Whether such an id exists elsewhere could already be told from the reply (a row that did not exist comes back placed in the writer's space; one that did, does not).
