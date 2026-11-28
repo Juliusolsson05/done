@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 mkdir -p qa/output
+(cd qa/capture/automation && xcodegen generate)
 app=$(find crates/app/gen/apple/build -type d -name done.app -print -quit)
 if [[ -z "$app" ]]; then app=$(find "$HOME/Library/Developer/Xcode/DerivedData" -type d -name done.app -print -quit); fi
 test -n "$app"
@@ -23,5 +24,13 @@ for family in iPhone iPad; do
   xcrun simctl launch "$device" app.thedone.ios
   sleep 6
   xcrun simctl io "$device" screenshot "qa/output/$family-today.png"
+  if xcodebuild -project qa/capture/automation/StoreQA.xcodeproj -scheme StoreQA -destination "id=$device" -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/$family.xcresult" test > "$RUNNER_TEMP/$family.log" 2>&1; then
+    mkdir -p "qa/output/$family"
+    xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$family.xcresult" --output-path "qa/output/$family"
+  else
+    tail -80 "$RUNNER_TEMP/$family.log"
+    mkdir -p "qa/output/$family"
+    xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$family.xcresult" --output-path "qa/output/$family" || true
+  fi
   xcrun simctl shutdown "$device"
 done
