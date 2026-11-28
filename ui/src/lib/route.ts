@@ -2,7 +2,8 @@
 // of it; crates/server/src/routes.rs keeps the same table so the web server
 // answers these paths with the app. Ids are the only data an address holds:
 // never a title, an email or a token.
-import type { View } from '@/lib/tasks'
+import type { Data, View } from '@/lib/tasks'
+import { inScope, isPersonal, spaceOfTask, workspaces, type Scope, type Team } from '@/lib/team'
 
 export interface Route {
   view: View
@@ -172,4 +173,57 @@ export function stepTo(current: Entry, next: Route, replace = false): Step {
   // Back goes to the view it was opened over.
   if (current.over || replace) return { kind: 'replace', entry: { path, prev: current.prev, over: false } }
   return { kind: 'push', entry: { path, prev: current.path, over: here !== null && isOver(here, next) } }
+}
+
+// Said for a link to something this account cannot see. Deleted and not
+// yours are one message on purpose: two would tell a non-member the id exists.
+export const NO_ACCESS = "You don't have access to this, or it was deleted."
+
+// The picker's place for a row in `spaceId`.
+export const scopeFor = (spaceId: number | null | undefined, team: Team | null | undefined): Scope =>
+  isPersonal(spaceId, team) ? (workspaces(team).length ? 'personal' : 'all') : (spaceId as number)
+
+// Where an address takes this account, given what it holds: the place, the
+// scope to move the picker to (a link into another space you are in), and
+// what to say when part of it is not there. Notes are checked by the Notes
+// page, which loads them itself. `phone` is whether Lists and the
+// notifications are pages of their own here.
+export function resolve(
+  route: Route,
+  data: Pick<Data, 'projects' | 'tasks'>,
+  team: Team | null | undefined,
+  scope: Scope,
+  phone: boolean,
+): { route: Route; scope?: Scope; said?: string } {
+  let view = route.view
+  let task = route.task
+  let said: string | undefined
+  let to: Scope | undefined
+  const visit = (spaceId: number | null | undefined) => {
+    if (!inScope(spaceId, to ?? scope, team)) to = scopeFor(spaceId, team)
+  }
+  if (view.kind === 'project') {
+    const project = data.projects.find((p) => p.id === (view as { id: number }).id)
+    if (project) visit(project.spaceId)
+    else {
+      said = NO_ACCESS
+      view = { kind: 'today' }
+      task = null
+    }
+  }
+  if (view.kind === 'settings' && view.space !== undefined && !workspaces(team).some((s) => s.id === (view as { space: number }).space)) {
+    said = NO_ACCESS
+    view = { kind: 'settings' }
+  }
+  if ((view.kind === 'lists' || view.kind === 'notifications') && !phone) view = { kind: 'today' }
+  if (view.kind === 'mine' && workspaces(team).length === 0) view = { kind: 'today' }
+  if (task !== null) {
+    const found = data.tasks.find((t) => t.id === task)
+    if (found) visit(spaceOfTask(found, data))
+    else {
+      said = NO_ACCESS
+      task = null
+    }
+  }
+  return { route: { view, task }, ...(to !== undefined && to !== scope ? { scope: to } : {}), ...(said ? { said } : {}) }
 }

@@ -275,14 +275,16 @@ function DesktopDownloads() {
 }
 
 export function Settings() {
-  const { info, zoom, setZoom } = useApp()
+  const { info, zoom, setZoom, ui, openView } = useApp()
   // A browser on a phone or an iPad has no terminal: the agent commands are
   // for a browser with a mouse (#109), however narrow its window. (The
   // download pane reads the operating system itself.)
   const desktopBrowser = typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches
   const account = useAccount()
-  // A workspace's page opens in place of the settings, with a way back.
-  const [space, setSpace] = useState<number | null>(null)
+  // A workspace's page opens in place of the settings, with a way back. It
+  // is in the address (/settings/workspace/<id>), so Back closes it.
+  const space = ui.view.kind === 'settings' ? (ui.view.space ?? null) : null
+  const setSpace = (id: number | null) => openView(id === null ? { kind: 'settings' } : { kind: 'settings', space: id })
   const path = info.mcpCommand
   const commandPath = windowsDevice ? "'" + path.replaceAll("'", "''") + "'" : `"${path}"`
   if (space !== null) return <WorkspacePage id={space} onBack={() => setSpace(null)} />

@@ -16,6 +16,8 @@ interface State {
   done: 1
   prev: string | null
   over: boolean
+  // Where a phone's page was scrolled when it was left, for Back.
+  scroll?: number
 }
 const isState = (s: unknown): s is State =>
   typeof s === 'object' && s !== null && (s as State).done === 1 && (typeof (s as State).prev === 'string' || (s as State).prev === null)
@@ -61,11 +63,16 @@ export function createRouter(win: Win) {
   return {
     entry,
     go,
-    // The place the address names now, written the one way it is written,
-    // keeping the entry's way back. Null if the address is not a place.
-    start(route: Route) {
+    // Keep where the page is scrolled in the entry being left.
+    keepScroll(y: number) {
+      if (popping) return
       const e = entry()
-      write('replaceState', { ...e, path: formatPath(route) })
+      win.history.replaceState({ done: 1, prev: e.prev, over: e.over, scroll: y } satisfies State, '', e.path)
+    },
+    // Where this entry's page was when it was left, if that was kept.
+    scrollOf(): number | null {
+      const state = win.history.state
+      return isState(state) && typeof state.scroll === 'number' ? state.scroll : null
     },
     // A Back the person asked for (a phone's Back button or edge swipe): the
     // browser goes back when there is an entry of the app's behind this one.

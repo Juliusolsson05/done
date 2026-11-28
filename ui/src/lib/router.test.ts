@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { HOME, type Route } from '@/lib/route'
+import type { Route } from '@/lib/route'
 import { createRouter, type Win } from '@/lib/router'
 
 // A browser's history as the spec describes it: push drops what is ahead,
@@ -54,10 +54,17 @@ const view = (kind: 'today' | 'upcoming' | 'focus' | 'lists', task: number | nul
 const settled = () => new Promise((resolve) => setTimeout(resolve, 20))
 
 describe('router', () => {
-  it('writes the loaded place the one way it is written', () => {
-    const b = browser('/')
-    createRouter(b.win).start(HOME)
-    expect(b.urls()).toEqual(['/today'])
+  it('keeps where a page was scrolled in its own entry, for Back', async () => {
+    const b = browser('/lists')
+    const router = createRouter(b.win)
+    router.listen(() => {})
+    expect(router.scrollOf()).toBeNull()
+    router.keepScroll(300)
+    router.go(view('focus'))
+    expect(router.scrollOf()).toBeNull()
+    b.win.history.back()
+    await settled()
+    expect(router.scrollOf()).toBe(300)
   })
 
   it('closes an open task by going back, so Back does not reopen it and Forward does', async () => {

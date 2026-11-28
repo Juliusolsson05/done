@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatRoute, HOME, isOver, parseRoute, stepTo, titleOf, type Entry, type Route } from '@/lib/route'
+import { formatRoute, HOME, isOver, NO_ACCESS, parseRoute, resolve, stepTo, titleOf, type Entry, type Route } from '@/lib/route'
+import type { Team } from '@/lib/team'
 import type { View } from '@/lib/tasks'
 
 const at = (view: View, task: number | null = null): Route => ({ view, task })
@@ -148,5 +149,60 @@ describe('steps through history', () => {
 
   it('replaces for a move the app made by itself', () => {
     expect(stepTo(entry('/notes', '/today'), at({ kind: 'notes', id: 5 }), true)).toEqual({ kind: 'replace', entry: entry('/notes/5', '/today') })
+  })
+})
+
+describe('arriving at an address', () => {
+  const team: Team = {
+    me: 'a',
+    personal: 1,
+    spaces: [
+      { id: 1, kind: 'personal', name: 'Mine', owner: 'a', role: 'owner', members: [], invites: [] },
+      { id: 2, kind: 'workspace', name: 'Hop', owner: 'a', role: 'owner', members: [], invites: [] },
+    ],
+    notifications: [],
+  }
+  const data = {
+    projects: [
+      { id: 10, name: 'Home', color: 1, spaceId: 1 },
+      { id: 20, name: 'Launch', color: 2, spaceId: 2 },
+    ],
+    tasks: [
+      { id: 100, title: 'Mine', notes: '', projectId: 10, start: null, due: null, priority: 4, status: null, done: false },
+      { id: 200, title: 'Hop', notes: '', projectId: 20, start: null, due: null, priority: 4, status: null, done: false },
+      { id: 201, title: 'Step', notes: '', projectId: null, parentId: 200, start: null, due: null, priority: 4, status: null, done: false },
+    ],
+  }
+  const go = (address: string, scope: 'all' | 'personal' | number = 'personal', phone = false) => resolve(parseRoute(address)!, data, team, scope, phone)
+
+  it('opens a place that is there as it is', () => {
+    expect(go('/project/10')).toEqual({ route: at({ kind: 'project', id: 10 }) })
+    expect(go('/today?task=100')).toEqual({ route: at({ kind: 'today' }, 100) })
+    expect(go('/board', 2)).toEqual({ route: at({ kind: 'board' }) })
+  })
+
+  it('moves the picker to the space of a project or task in another of yours', () => {
+    expect(go('/project/20')).toEqual({ route: at({ kind: 'project', id: 20 }), scope: 2 })
+    expect(go('/today?task=201')).toEqual({ route: at({ kind: 'today' }, 201), scope: 2 })
+    expect(go('/project/10', 2)).toEqual({ route: at({ kind: 'project', id: 10 }), scope: 'personal' })
+    expect(go('/project/20', 'all')).toEqual({ route: at({ kind: 'project', id: 20 }) })
+  })
+
+  it('says the same, and shows nothing of it, for what is gone and what is not yours', () => {
+    expect(go('/project/999')).toEqual({ route: HOME, said: NO_ACCESS })
+    expect(go('/project/999?task=100')).toEqual({ route: HOME, said: NO_ACCESS })
+    expect(go('/upcoming?task=999')).toEqual({ route: at({ kind: 'upcoming' }), said: NO_ACCESS })
+    expect(go('/settings/workspace/3')).toEqual({ route: at({ kind: 'settings' }), said: NO_ACCESS })
+  })
+
+  it('keeps the phone’s own pages to the phone', () => {
+    expect(go('/lists')).toEqual({ route: HOME })
+    expect(go('/lists', 'personal', true)).toEqual({ route: at({ kind: 'lists' }) })
+    expect(go('/notifications')).toEqual({ route: HOME })
+  })
+
+  it('has no Assigned without a workspace', () => {
+    expect(resolve(parseRoute('/assigned')!, data, null, 'all', false)).toEqual({ route: HOME })
+    expect(go('/assigned')).toEqual({ route: at({ kind: 'mine' }) })
   })
 })
