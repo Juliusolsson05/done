@@ -60,25 +60,21 @@ describe('where the Timeline opens', () => {
   })
 })
 
-describe('how the Timeline divides its width', () => {
-  it('gives a phone a narrow title column, a compact header and No date as a section', () => {
-    // About half for the titles, which are what a phone is read by.
-    expect(paneLayout(402)).toEqual({ left: 209, compact: true, side: false, narrow: true })
-    // Never narrower than a title can be read in.
-    expect(paneLayout(320).left).toBe(170)
+describe('how the Timeline uses its width', () => {
+  it('gives a phone a compact header, rows without dot or faces, and No date as a section', () => {
+    expect(paneLayout(402)).toEqual({ compact: true, side: false, narrow: true })
     expect(paneLayout(499).narrow).toBe(true)
   })
 
   it('keeps iPhone landscape and iPad portrait compact, with No date as a section', () => {
     // The content beside the sidebar: 874 pt and 820 pt windows.
-    expect(paneLayout(554)).toEqual({ left: 211, compact: true, side: false, narrow: false })
+    expect(paneLayout(554)).toEqual({ compact: true, side: false, narrow: false })
     expect(paneLayout(780).compact).toBe(true)
     expect(paneLayout(780).side).toBe(false)
-    expect(paneLayout(780).left).toBe(260)
   })
 
   it('gives a wide window the full controls and the No date column', () => {
-    expect(paneLayout(1100)).toEqual({ left: 260, compact: false, side: true, narrow: false })
+    expect(paneLayout(1100)).toEqual({ compact: false, side: true, narrow: false })
   })
 })
 
