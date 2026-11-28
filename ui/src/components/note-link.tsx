@@ -2,9 +2,8 @@
 // small chip with the linked note's title as it is now, in the editor (as an
 // atom, components/mention-atoms) and when the note is read (here).
 //
-// The Notes page holds the notes, so it hands them down with a way to open
-// one: the read view and the editor are deep inside it, and the editor's
-// chips are plain DOM that cannot take props.
+// The Notes page owns navigation and the latest note titles. The same
+// context reaches chips in the reader and chips mounted in the editor.
 import { createContext, useContext, type ReactNode } from 'react'
 import { FileTextIcon } from 'lucide-react'
 import { titleOf, type Note } from '@/lib/notes'
@@ -36,7 +35,7 @@ export function linkedTitle(notes: Note[], id: number): string | null {
 
 export const MISSING_HINT = 'This note is missing: it was deleted'
 
-// A link to a note in a note being read: tapped, that note opens. One that
+// A link to another note: tapped, that note opens. One that
 // is missing shows the words it was written with, greyed, and does nothing.
 export function NoteLinkChip({ id, fallback }: { id: number; fallback: ReactNode }) {
   const { notes, open } = useNoteLinks()

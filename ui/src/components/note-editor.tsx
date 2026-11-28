@@ -13,24 +13,27 @@
 // line is the title with the date under it, and a checklist has circles to
 // tap. On a touch screen a bar of writing tools sits above the keyboard
 // (components/writing-bar).
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { history, historyKeymap, defaultKeymap, indentWithTab, redo, undo } from '@codemirror/commands'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactPortal } from 'react'
+import { createPortal } from 'react-dom'
+import { history, historyKeymap, defaultKeymap, redo, undo } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, Prec, Transaction, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as placeholderText } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import * as Y from 'yjs'
 import type { Awareness } from 'y-protocols/awareness'
-import { MentionPicker } from '@/components/task-mention'
-import { mentionAtoms, notesChanged, type LinkedNotes } from '@/components/mention-atoms'
-import { linkedTitle, useNoteLinks } from '@/components/note-link'
+import { MentionPicker, TaskMention, TaskMentionInline } from '@/components/task-mention'
+import { mentionAtoms } from '@/components/mention-atoms'
+import { NoteLinkChip, useNoteLinks } from '@/components/note-link'
 import { livePreview, setNoteDate } from '@/components/live-preview'
-import { BAR_HEIGHT, useCoarsePointer, useVisualViewport, WritingBar } from '@/components/writing-bar'
+import { BAR_HEIGHT, NoteListMenu, useCoarsePointer, useVisualViewport, WritingBar } from '@/components/writing-bar'
 import { openLink } from '@/lib/backend'
 import { linkAt } from '@/lib/links'
+import { minimalChange } from '@/lib/live-preview'
 import { atQuery, insertMention, mentionLink, noteLink, noteSuggestions, suggestions, type Offer } from '@/lib/mentions'
+import { continueList, indentList, outdentList } from '@/lib/note-list'
 import { isBlank, titleOf } from '@/lib/notes'
 import type { Task } from '@/lib/tasks'
 
@@ -125,6 +128,7 @@ export function NoteEditor({
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
+  const [menuView, setMenuView] = useState<EditorView | null>(null)
   const [picker, setPicker] = useState<Picker>({ offered: [], chosen: 0, at: null })
   // Read by the editor's handlers, which are set up once.
   const links = useNoteLinks()
@@ -134,12 +138,7 @@ export function NoteEditor({
   latest.current.tasks = tasks
   latest.current.links = links
   latest.current.id = id
-  // The linked notes as the chips read them, always the latest: the editor
-  // is made once, the notes change under it.
-  const linked = useRef<LinkedNotes>({
-    title: (note) => linkedTitle(latest.current.links.notes, note),
-    open: (note) => latest.current.links.open(note),
-  })
+  const [mentions, setMentions] = useState<Map<HTMLElement, ReactPortal>>(() => new Map())
   const activity = useRef(onActivity)
   activity.current = onActivity
   const editable = useRef(new Compartment())
@@ -228,13 +227,15 @@ export function NoteEditor({
       pick(picker.offered[Math.min(picker.chosen, picker.offered.length - 1)])
       return true
     }
+    let nextPortal = 0
     const undoKeys: Extension = live ? keymap.of(yUndoManagerKeymap) : [history(), keymap.of(historyKeymap)]
     const state = EditorState.create({
       doc: live ? live.text.toString() : text,
       extensions: [
         pickerKeys,
         undoKeys,
-        keymap.of([...defaultKeymap, indentWithTab]),
+        Prec.high(keymap.of([{ key: 'Enter', run: continueList }, { key: 'Tab', run: indentList, shift: outdentList }])),
+        keymap.of(defaultKeymap),
         // GitHub's Markdown: checklists and strikethrough as well.
         markdown({ base: markdownLanguage }),
         syntaxHighlighting(QUIET),
@@ -243,9 +244,16 @@ export function NoteEditor({
           const bar = document.querySelector('[data-note-bar]')?.getBoundingClientRect().bottom ?? 0
           return { top: Math.max(0, bar) + 8, bottom: margins.current.bottom }
         }),
-        // A task mention is one piece, shown as @ and its title; a note
-        // link likewise, as the linked note's title.
-        mentionAtoms(() => linked.current),
+        mentionAtoms((host, link) => {
+          const Component = link?.kind === 'note' ? NoteLinkChip : link?.card ? TaskMention : TaskMentionInline
+          const portal = link && createPortal(<Component id={link.id} fallback={link.label} />, host, String(nextPortal++))
+          setMentions((before) => {
+            const next = new Map(before)
+            if (portal) next.set(host, portal)
+            else next.delete(host)
+            return next
+          })
+        }),
         EditorView.lineWrapping,
         // Written as any text on an iPhone: corrected, capitalised, spelled
         // and suggested (CodeMirror turns all four off by default).
@@ -262,7 +270,7 @@ export function NoteEditor({
         editable.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
         live ? yCollab(live.text, live.awareness, { undoManager: live.undo }) : [],
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) latest.current.onChange(update.state.doc.toString())
+          if (update.transactions.some((tr) => tr.docChanged && !tr.isUserEvent('sync'))) latest.current.onChange(update.state.doc.toString())
           // Only what you did, not the others' typing arriving.
           if (update.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete') || t.isUserEvent('select') || t.isUserEvent('move'))) activity.current?.()
           if (update.docChanged || update.selectionSet || update.focusChanged) lookAt(update.view)
@@ -289,9 +297,11 @@ export function NoteEditor({
     })
     const v = new EditorView({ state, parent: host.current })
     view.current = v
+    setMenuView(v)
     // Undo and redo, taken before anything else on the page sees them: in the
     // Mac app's web view a key with Cmd can be lost to the app's menus.
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.target !== v.contentDOM) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       const key = event.key.toLowerCase()
       const redoing = (key === 'z' && event.shiftKey) || (key === 'y' && !event.shiftKey)
@@ -325,18 +335,13 @@ export function NoteEditor({
     const v = view.current
     if (!v || live || v.hasFocus) return
     const now = v.state.doc.toString()
-    if (now === text) return
-    v.dispatch({ changes: { from: 0, to: now.length, insert: text }, userEvent: 'sync' })
+    const changes = minimalChange(now, text)
+    if (changes) v.dispatch({ changes, annotations: Transaction.addToHistory.of(false), userEvent: 'sync' })
   }, [text, live])
 
   useEffect(() => {
     view.current?.dispatch({ effects: editable.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) })
   }, [readOnly])
-
-  // A linked note renamed or deleted: its chip is drawn again.
-  useEffect(() => {
-    view.current?.dispatch({ effects: notesChanged.of(null) })
-  }, [links.notes])
 
   // The date under the title follows the note's last change.
   useEffect(() => {
@@ -354,8 +359,10 @@ export function NoteEditor({
 
   return (
     <div className="relative" aria-expanded={picker.offered.length > 0}>
+      {!readOnly && <div className="flex max-w-[68ch] justify-end pointer-coarse:hidden"><NoteListMenu view={menuView} /></div>}
       {/* Apple Notes' body: 17 on a touch screen, at 1.45. */}
       <div ref={host} className="w-full max-w-[68ch] text-[16px] leading-[1.45] max-md:text-[17px] pointer-coarse:text-[17px]" />
+      {[...mentions.values()]}
       {point && (
         <MentionPicker
           offers={picker.offered}

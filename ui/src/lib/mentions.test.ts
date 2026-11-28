@@ -164,6 +164,18 @@ describe("a mentioned task's card", () => {
     expect(mentionRanges('[a web link](https://x.com)')).toEqual([])
   })
 
+  it('uses the same card placement while writing and reading, without changing examples inside code', () => {
+    const link = '[Call the bank](done:task/1)'
+    const note = [link, '1. Plan', '   1. ' + link, '- [ ] ' + link + '.', 'Before ' + link, link + ' and ' + link, '`' + link + '`', '```md', link, '```'].join('\n')
+    const ranges = mentionRanges(note)
+    expect(ranges.map((r) => r.card)).toEqual([true, true, true, false, false, false])
+    expect(ranges.map((r) => note.slice(r.from, r.to))).toEqual(ranges.map(() => link))
+    const read = markInline(note)
+    expect(read.match(/#inline/g)).toHaveLength(3)
+    expect(read).toContain('`' + link + '`')
+    expect(read).toContain('```md\n' + link + '\n```')
+  })
+
   it('draws a mention alone on its line as a card, and one among words small', () => {
     const text = [
       '- [Call the bank](done:task/1)',

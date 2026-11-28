@@ -225,6 +225,7 @@ const look = EditorView.theme({
     paddingLeft: 'calc((var(--depth, 1) - 1) * 1.5em + 1.75em)',
     textIndent: '-1.75em',
   },
+  '.cm-line.cm-li-source': { paddingLeft: '0', textIndent: '0' },
   '.cm-li-mark': {
     display: 'inline-flex',
     alignItems: 'center',

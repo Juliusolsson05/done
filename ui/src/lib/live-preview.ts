@@ -13,7 +13,7 @@ export interface Hide {
   to: number
   // hide: gone. bullet / number / task: drawn as a widget in the margin.
   kind: 'hide' | 'bullet' | 'number' | 'task'
-  // For a task: whether it is ticked. For a number: the number as written.
+  // For a task: whether it is ticked. For a number: the displayed ordinal.
   checked?: boolean
   label?: string
 }
@@ -34,6 +34,7 @@ const MENTION_URL = /^done:(?:task|note)\//
 // holds the lines the selection is on: nothing is hidden there.
 export function previewRanges(state: EditorState, active: Set<number>): { hides: Hide[]; lines: LineLook[] } {
   const hides: Hide[] = []
+  const nextOrdinal = new Map<number, number>()
   const looks = new Map<number, LineLook>()
   const doc = state.doc
   const lineOf = (pos: number) => doc.lineAt(pos)
@@ -108,6 +109,15 @@ export function previewRanges(state: EditorState, active: Set<number>): { hides:
         const to = text[ref.to - line.from] === ' ' ? ref.to + 1 : ref.to
         const lineLook = look(line.number)
         lineLook.depth = depth
+        // Editing the words leaves the marker and the text in place. Moving
+        // the caret into the prefix exposes the spaces and punctuation.
+        const showMarker = (end: number) => {
+          const source = active.has(line.number) && state.selection.ranges.some(range =>
+            range.empty ? range.head >= from && range.head < end : range.from < end && range.to > from,
+          )
+          if (source) lineLook.classes.push('cm-li-source')
+          return !source
+        }
         const task = node.nextSibling
         const marker = task?.name === 'Task' ? task.firstChild : null
         if (list.name === 'BulletList' && marker?.name === 'TaskMarker') {
@@ -116,13 +126,16 @@ export function previewRanges(state: EditorState, active: Set<number>): { hides:
           if (state.sliceDoc(end, end + 1) === ' ') end++
           lineLook.classes.push('cm-li', 'cm-li-task')
           if (checked) lineLook.classes.push('cm-task-done')
-          if (quiet(from)) hides.push({ from, to: end, kind: 'task', checked })
+          if (showMarker(end)) hides.push({ from, to: end, kind: 'task', checked })
         } else if (list.name === 'BulletList') {
           lineLook.classes.push('cm-li', 'cm-li-bullet')
-          if (quiet(from)) hides.push({ from, to, kind: 'bullet' })
+          if (showMarker(to)) hides.push({ from, to, kind: 'bullet' })
         } else {
           lineLook.classes.push('cm-li', 'cm-li-number')
-          if (quiet(from)) hides.push({ from, to, kind: 'number', label: state.sliceDoc(ref.from, ref.to) })
+          const source = state.sliceDoc(ref.from, ref.to)
+          const ordinal = nextOrdinal.get(list.from) ?? parseInt(source, 10)
+          nextOrdinal.set(list.from, ordinal + 1)
+          if (showMarker(to)) hides.push({ from, to, kind: 'number', label: String(ordinal) + source.slice(-1) })
         }
         return
       }
@@ -160,6 +173,13 @@ export function toggleBullet(line: string): string {
   const rest = line.slice(whole.length)
   if (/^\s*[-*+]\s+/.test(whole) && !TASK.test(line)) return indent + rest
   return indent + '- ' + rest.replace(/^#{1,6}\s+/, '')
+}
+
+export function toggleNumbered(line: string): string {
+  const [whole, indent] = LIST.exec(line) as RegExpExecArray
+  const rest = line.slice(whole.length)
+  if (/^\s*\d+[.)]\s+/.test(whole)) return indent + rest
+  return indent + '1. ' + rest.replace(/^#{1,6}\s+/, '')
 }
 
 // Heading, step by step: none, then #, then ##, then none again. A list

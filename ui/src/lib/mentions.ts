@@ -1,12 +1,10 @@
 // Tasks mentioned in a note. A mention is an ordinary Markdown link whose
 // address is done:task/<id>, such as [Call the bank](done:task/1795306779859023).
 //
-// Why a plain link and not a syntax of our own: the Markdown parser already
-// finds links (and already leaves them alone inside code), so reading a note
-// needs no second pass over its text; only the drawing of that one link
-// element changes. Mixing a custom parser with Markdown rendering is what has
-// gone wrong before. The text also stays readable everywhere a note goes: the
-// editor, older versions of the app, other devices, an AI agent over MCP.
+// Keeping the link in Markdown lets the reader and the editor recognize
+// the same reference, and lets older clients and agents read its label.
+import type { syntaxTree } from '@codemirror/language'
+import { markdownLanguage } from '@codemirror/lang-markdown'
 import { describeDay, type Day } from '@/lib/days'
 import { byPriority, openTasks, type Task } from '@/lib/tasks'
 
@@ -32,15 +30,11 @@ const unescapeLabel = (label: string): string => label.replace(/\\([\\[\]])/g, '
 
 export const mentionLink = (task: Pick<Task, 'id' | 'title'>): string => `[${escapeLabel(task.title)}](${mentionHref(task.id)})`
 
-// A mention as it is written: the label (escaped brackets allowed) and the id.
-const MENTION = /\[((?:\\.|[^\]\\\n])*)\]\(done:task\/(\d{1,20})\)/g
-
 // A link to another note is the same kind of link with done:note/<id>:
 // [Seed round](done:note/1795306779859023). Its own scheme rather than a flag
 // on the task one, so everything that reads task mentions (the read view's
 // cards, the refs above a note, agents) keeps reading tasks only.
 const NOTE_SCHEME = 'done:note/'
-const NOTE_LINK = /\[((?:\\.|[^\]\\\n])*)\]\(done:note\/(\d{1,20})\)/g
 // Either kind, for what treats both alike: the editor's atoms, a title read
 // as words.
 const ANY_LINK = /\[((?:\\.|[^\]\\\n])*)\]\(done:(task|note)\/(\d{1,20})\)/g
@@ -55,35 +49,11 @@ export function noteLinkId(href: string | undefined): number | null {
 
 export const noteLink = (note: { id: number; title: string }): string => `[${escapeLabel(note.title)}](${noteLinkHref(note.id)})`
 
-// Code is shown as written, so a mention inside it is text, not a task: the
-// same rule the Markdown parser follows when it draws the note.
-// Fences may be indented (inside a list item, say), and a code span may use
-// more than one backtick (``a `b` c``).
-// Code is blanked to spaces rather than cut out, so every other position in
-// the text stays where it was: the editor draws links at those positions.
-const blank = (code: string): string => code.replace(/[^\n]/g, ' ')
-const withoutCode = (text: string): string =>
-  text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?(^[ \t]*\1[^\n]*$|(?![\s\S]))/gm, blank).replace(/(`+)[^\n]*?\1/g, blank)
-
-// The tasks a note mentions, in the order they first appear, once each.
-export function mentionsIn(text: string): number[] {
-  const ids: number[] = []
-  for (const match of withoutCode(text).matchAll(MENTION)) {
-    const id = Number(match[2])
-    if (!ids.includes(id)) ids.push(id)
-  }
-  return ids
-}
-
-// The notes a note links to, in the order they first appear, once each.
-export function noteLinksIn(text: string): number[] {
-  const ids: number[] = []
-  for (const match of withoutCode(text).matchAll(NOTE_LINK)) {
-    const id = Number(match[2])
-    if (!ids.includes(id)) ids.push(id)
-  }
-  return ids
-}
+// A task reference fills its own line, with an optional list marker, checkbox
+// and trailing punctuation. In the middle of a sentence it stays compact.
+const LIST_PREFIX = /^\s*(?:[-*+]|\d+[.)])?\s*(?:\[[ xX]\]\s*)?$/
+const END_PUNCTUATION = /^[\s.,;:!?]*$/
+const EXACT_LINK = new RegExp('^' + ANY_LINK.source + '$')
 
 export interface LinkRange {
   from: number
@@ -91,41 +61,54 @@ export interface LinkRange {
   kind: 'task' | 'note'
   id: number
   label: string
+  card: boolean
 }
 
-// Where each mention or note link is in the text, for the editor to draw it
-// as one piece ("@Call the bank") that the cursor steps over and Backspace
-// takes whole: half a link would leave text that is neither a link nor readable.
-// One written inside code stays text, as the read view shows it.
-export function mentionRanges(text: string): LinkRange[] {
+// Use the editor's Markdown grammar so a link inside a fence, code span,
+// escaped example or image alt text never turns into an interactive task.
+export function mentionRanges(text: string, parsed?: ReturnType<typeof syntaxTree>): LinkRange[] {
+  if (!text.includes('](done:')) return []
   const ranges: LinkRange[] = []
-  for (const match of withoutCode(text).matchAll(ANY_LINK)) {
-    // The label from the text itself: code inside a label is blanked above.
-    const label = text.slice(match.index + 1, match.index + 1 + match[1].length)
-    ranges.push({ from: match.index, to: match.index + match[0].length, kind: match[2] as 'task' | 'note', id: Number(match[3]), label: unescapeLabel(label) })
-  }
+  const tree = parsed ?? markdownLanguage.parser.parse(text)
+  tree.iterate({
+    enter(ref) {
+      if (ref.name === 'Image') return false
+      if (ref.name !== 'Link') return
+      const match = EXACT_LINK.exec(text.slice(ref.from, ref.to))
+      if (match) {
+        const kind = match[2] as 'task' | 'note'
+        const start = text.lastIndexOf('\n', ref.from - 1) + 1
+        const newline = text.indexOf('\n', ref.to)
+        const before = text.slice(start, ref.from)
+        const after = text.slice(ref.to, newline < 0 ? undefined : newline)
+        const card = kind === 'task' && LIST_PREFIX.test(before) && END_PUNCTUATION.test(after)
+        ranges.push({ from: ref.from, to: ref.to, kind, id: Number(match[3]), label: unescapeLabel(match[1]), card })
+      }
+      return false
+    },
+  })
   return ranges
 }
 
-// In the read view, a mention alone on its line (a list item or paragraph
-// with nothing else, a checkbox or trailing punctuation aside) is drawn as
-// the task's full card; one that shares its line with other words is drawn
-// small, inside the sentence. Marked here by an #inline on its address,
-// which mentionId still reads as the same task. Code is left as written.
-const ALONE = /^\s*(?:[-*+]|\d+[.)])?\s*(?:\[[ xX]\]\s*)?$/
+function linkedIds(text: string, kind: LinkRange['kind']): number[] {
+  if (!text.includes('](done:' + kind + '/')) return []
+  return [...new Set(mentionRanges(text).filter((link) => link.kind === kind).map((link) => link.id))]
+}
+
+export const mentionsIn = (text: string) => linkedIds(text, 'task')
+export const noteLinksIn = (text: string) => linkedIds(text, 'note')
+
+// The reader's link renderer receives an href rather than a source range.
+// Tag inline tasks just for rendering; the note itself stays as written.
 export function markInline(text: string): string {
-  let fenced = false
-  return text
-    .split('\n')
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
-      if (fenced || !line.includes('](done:task/')) return line
-      const matches = [...line.matchAll(MENTION)]
-      const rest = line.replace(MENTION, '').replace(/[\s.,;:!?]+$/, '')
-      if (matches.length === 1 && ALONE.test(rest)) return line
-      return line.replace(MENTION, (whole) => whole.replace(/\)$/, '#inline)'))
-    })
-    .join('\n')
+  let copied = 0
+  const parts: string[] = []
+  for (const link of mentionRanges(text)) {
+    if (link.kind !== 'task' || link.card) continue
+    parts.push(text.slice(copied, link.to - 1), '#inline')
+    copied = link.to - 1
+  }
+  return parts.join('') + text.slice(copied)
 }
 
 // A mention or note link read as its words alone, for a note's title in the

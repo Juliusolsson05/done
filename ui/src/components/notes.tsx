@@ -104,8 +104,20 @@ export function Notes() {
   // through the matches one by one does not lose it.
   const [query, setQuery] = useState('')
   // Reading: the open note shown formatted as a document, on its own, with
-  // the list put away. Writing is always plain text.
+  // the list put away. Both views read the same Markdown.
   const [reading, setReading] = useState(false)
+  const editorPane = useRef<HTMLDivElement>(null)
+  const returnToWriting = useRef(false)
+  const toggleReading = () => {
+    returnToWriting.current = reading
+    setReading(!reading)
+  }
+  useLayoutEffect(() => {
+    if (!reading && returnToWriting.current) {
+      returnToWriting.current = false
+      editorPane.current?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus({ preventScroll: true })
+    }
+  }, [reading])
   // The note just made: its field opens with the cursor in it.
   const [fresh, setFresh] = useState<number | null>(null)
   // The folder chosen; null is All notes.
@@ -221,7 +233,10 @@ export function Notes() {
   useEffect(() => {
     if (!reading) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setReading(false)
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        returnToWriting.current = true
+        setReading(false)
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -232,6 +247,7 @@ export function Notes() {
     setSheet(false)
     if (id === openId) return
     leave(openId)
+    setFresh(null)
     setOpenId(id)
   }
 
@@ -500,11 +516,22 @@ export function Notes() {
       className={reading ? 'text-foreground' : 'text-muted-foreground'}
       aria-pressed={reading}
       aria-label={reading ? 'Back to writing' : 'Read as a document'}
-      onClick={() => setReading((r) => !r)}
+      onClick={toggleReading}
     >
       {reading ? <PenLineIcon /> : <BookOpenIcon />}
       {reading ? 'Edit' : 'Read'}
     </Button>
+  )
+
+  // Keep the editor mounted while reading so Edit restores the caret, undo
+  // history, and live binding that belong to this particular note.
+  const noteBody = current && (
+    <div key={current.id}>
+      <div ref={editorPane} hidden={reading}>
+        <NoteText note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />
+      </div>
+      {reading && <NoteDocument text={current.text} />}
+    </div>
   )
 
   // The sidebar lists the folders under Notes while this page is open, and
@@ -540,7 +567,7 @@ export function Notes() {
           </NotesBar>
           {/* 20 points from the screen's edges, as Apple Notes sets its text. */}
           <div className="px-1">
-            {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+            {noteBody}
           </div>
           {sheet && (
             <NoteSheet
@@ -552,7 +579,7 @@ export function Notes() {
               projects={data.projects}
               onProject={(id) => refileOpen({ projectId: id })}
               reading={isBlank(current.text) ? null : reading}
-              onRead={() => setReading((r) => !r)}
+              onRead={toggleReading}
               onDelete={() => remove(current)}
             />
           )}
@@ -593,7 +620,7 @@ export function Notes() {
             </div>
           </header>
           <div className="mx-auto max-w-3xl">
-            {reading ? <NoteDocument text={current.text} /> : <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />}
+            {noteBody}
           </div>
         </div>
       </NoteLinksContext.Provider>
@@ -789,11 +816,7 @@ export function Notes() {
               // As long as the note is: the page scrolls, not a box inside it.
               // Held to a readable line length.
               <div className={cn('min-w-0 max-w-3xl flex-1', reading && 'mx-auto')}>
-                {reading ? (
-                  <NoteDocument text={current.text} />
-                ) : (
-                  <NoteText key={current.id} note={current} live={live} focused={current.id === fresh} onChange={type} onLive={typeLive} />
-                )}
+                {noteBody}
               </div>
             )}
           </div>
