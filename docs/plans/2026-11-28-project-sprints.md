@@ -9,3 +9,12 @@ The local demo uses a fresh SQLite file with a regular project, an active sprint
 ## Verification
 
 The frontend typecheck, production build and 821 tests passed. All 123 Rust tests passed across core, MCP and the server with disposable Postgres databases. A legacy-device fixture replays previously read project metadata while preserving pending edits. Desktop browser checks used the local HTTP server and checked persisted Undo, deadline set and clear, complete and reopen, refresh, and tasks staying open. The phone layout revealed a completed sprint from Lists and opened an active sprint by direct link. The sprint feature was previewed in the browser. Packaged native and production acceptance remain outside this local preview.
+
+
+## Project headers and Timeline
+
+Project maintenance actions use the desktop More menu and the phone's existing action sheet. Filter remains directly available, and completion stays in the sprint panel.
+
+Timeline shows project-coloured spans for scheduled work in both layouts. A span covers the earliest and latest visible scheduled task dates and includes the sprint deadline when set. A sprint with a deadline alone shows a marker on its deadline. Labels connect the chart back to the project. Completed sprints stay folded in project navigation and remain visible on Timeline for historical context.
+
+Verified the More menu hides Rename and Delete until opened, focuses the rename field, and retains the delete confirmation. Desktop and phone browser checks confirmed always-visible project ranges, sprint deadlines and links from the Timeline to the project. The final frontend suite passed all 824 tests.

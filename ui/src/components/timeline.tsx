@@ -15,6 +15,7 @@ import { ViewHeader } from '@/components/list-view'
 import { ProjectDot } from '@/components/marks'
 import { AddRow } from '@/components/quick-add'
 import { TaskCheck, useFinish } from '@/components/task-row'
+import { ProjectTimelineRows } from '@/components/timeline-project-rows'
 import { FilterBar, FilterButton, NothingMatches, useTaskFilter } from '@/components/view-filter'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { projectStyle, useApp } from '@/lib/app-context'
@@ -22,7 +23,8 @@ import { addDays, daysBetween, fullDay, shortDay, toDate, TODAY, type Day } from
 import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
 import { dragBar, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
-import { placed, spanOf, type Placed } from '@/lib/timeline-layout'
+import { placed, type Placed } from '@/lib/timeline-layout'
+import { projectTimelines, timelineProjectDates } from '@/lib/timeline-projects'
 import { swallowClick } from '@/lib/swallow-click'
 import { daysDragged, HOLD_MS, IDLE, press, released, SLOP, type PressState } from '@/lib/timeline-press'
 import { dayWidth, daysToFill, parseZoom, ticks, TOUCH_ZOOMS, type TouchZoom } from '@/lib/timeline-touch'
@@ -148,30 +150,32 @@ export function Timeline() {
   const groups = timelineGroups(inScope.projects, visible, 'project')
   const open = openTasks(visible)
   const dated = open.filter((t) => t.due || t.start)
+  const projectRows = projectTimelines(inScope.projects, visible, filter.filter)
+  const timelineDates = [...dated, ...timelineProjectDates(projectRows, TODAY)]
   const undated = open.filter((t) => !t.due && !t.start)
   const shown = open.length
   const total = openTasks(inScope.tasks).length
   // A filter that matches nothing replaces the chart; when it is cleared
   // the chart comes back, scrolled to where it was (or to today).
-  const chartShown = !(filter.on && shown === 0)
+  const chartShown = !filter.on || shown > 0 || projectRows.length > 0
   // The chart's own width (the view less the No date column, if any): a day
   // is fitted to it, and the names and No date are kept within it.
   const chartWidth = useWidth(scroller, chartShown)
   const px = dayWidth(zoom, chartWidth)
   const tick = ticks(px)
 
-  // The days drawn: a week before the earliest task to four weeks after the
-  // latest, all at once, so the scrollbar shows the whole range.
-  const datesKey = dated.map((t) => `${t.start}|${t.due}`).join(',')
+  // Include sprint deadlines in the chart's scroll range, even when the
+  // sprint has no dated tasks of its own.
+  const datesKey = timelineDates.map((t) => `${"start" in t ? t.start : ""}|${t.due}`).join(',')
   const span = useMemo(() => {
-    const need = spanFor(dated, TODAY)
+    const need = spanFor(timelineDates, TODAY)
     return { start: need.start, days: daysToFill(need.days, chartWidth, px) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datesKey, chartWidth, px])
-  const earliest = useMemo(() => dated.reduce<Day | null>((first, t) => {
-    const day = (t.start ?? t.due)!
-    return !first || day < first ? day : first
-  }, null), [datesKey])
+  const earliest = timelineDates.reduce<Day | null>((first, t) => {
+    const day = ("start" in t ? t.start : null) ?? t.due
+    return day && (!first || day < first) ? day : first
+  }, null)
   const days = useMemo(() => Array.from({ length: span.days }, (_, i) => addDays(span.start, i)), [span.start, span.days])
   const width = span.days * px
   const x = (day: Day) => daysBetween(span.start, day) * px
@@ -543,18 +547,10 @@ export function Timeline() {
         // A project with nothing dated is only in No date.
         if (!items.length) return null
         const isFolded = folded.has(key)
-        const whole = spanOf(items)
         return (
           <div key={key} className="border-b border-border/60">
-            {/* The project: its name, how many of its tasks are on the chart, and the days they span. */}
+            {/* The project name and how many of its tasks are on the chart. */}
             <div className="relative h-12" style={{ width }} {...dropTarget}>
-              {whole && (
-                <div
-                  aria-hidden
-                  className="absolute bottom-1 h-1.5 rounded-full bg-project-edge"
-                  style={{ ...projectStyle(data.projects, group.id ?? null), left: x(whole.from) + INSET, width: Math.max((daysBetween(whole.from, whole.to) + 1) * px - INSET * 2, LEAST_BAR) }}
-                />
-              )}
               <div className="pointer-events-none absolute inset-0">
                 <button
                   type="button"
@@ -726,6 +722,7 @@ export function Timeline() {
               {header}
               <div className="relative">
                 {columns}
+                <ProjectTimelineRows rows={projectRows} start={span.start} dayWidth={px} width={width} />
                 {rows}
               </div>
               {undatedSection}

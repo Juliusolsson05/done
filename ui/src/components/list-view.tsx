@@ -1,8 +1,9 @@
 // Inbox, Today, Upcoming and a project: the views that are a list of tasks.
 import { useEffect, useState, type ReactNode } from 'react'
-import { CalendarDaysIcon, CheckIcon, NotebookPenIcon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CheckIcon, EllipsisIcon, NotebookPenIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { ProjectDot } from '@/components/marks'
 import { PhoneHeader } from '@/components/phone'
@@ -65,6 +66,43 @@ export const IN_HEADER = 'wide:pointer-coarse:-my-1.5'
 export function HeaderButton({ danger = false, ...props }: { danger?: boolean; onClick: () => void; children: ReactNode }) {
   // 44 points tall for a finger (they were 28 on iPhone and iPad, #109).
   return <Button variant="ghost" size="sm" className={cn('pointer-coarse:h-11', danger ? 'text-destructive hover:text-destructive' : 'text-muted-foreground')} {...props} />
+}
+
+type ProjectAction = { label: string; run: () => void; danger?: boolean }
+
+function ProjectOptions({ actions }: { actions: ProjectAction[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="More project options"
+          title="More project options"
+          className={cn(IN_HEADER, 'text-muted-foreground pointer-coarse:size-11')}
+        >
+          <EllipsisIcon />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Project options" className="w-44 p-1">
+        {actions.map(({ label, run, danger }) => (
+          <Button
+            key={label}
+            variant="ghost"
+            size="sm"
+            className={cn('w-full justify-start pointer-coarse:h-11', danger && 'text-destructive hover:text-destructive')}
+            onClick={() => {
+              setOpen(false)
+              run()
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 // Today's goal: the one thing that has to happen today. It is the only task
@@ -161,6 +199,14 @@ export function ListView() {
   const changeSprint = (settings: Sprint) => {
     if (project) update((current) => patchProject(current, project.id, { sprint: settings }))
   }
+  const projectActions: ProjectAction[] = [
+    { label: 'Rename', run: rename },
+    ...(project ? [{
+      label: sprint ? 'Turn off sprint' : 'Make sprint',
+      run: () => changeSprint({ enabled: !sprint, deadline: null, completed: false }),
+    }] : []),
+    { label: 'Delete project', run: askDelete, danger: true },
+  ]
   const [onlyMe, setOnlyMe] = useState(readOnlyMe)
   const toggleOnlyMe = () => {
     const next = !onlyMe
@@ -236,16 +282,14 @@ export function ListView() {
               </HeaderButton>
               <HeaderButton onClick={closeAll}>Keep it</HeaderButton>
             </>
+          ) : isMobile ? (
+            projectActions.map(({ label, run, danger }) => (
+              <HeaderButton key={label} onClick={run} danger={danger}>{label}</HeaderButton>
+            ))
           ) : (
             <>
-              <HeaderButton onClick={rename}>Rename</HeaderButton>
-              {project && (
-                <HeaderButton onClick={() => changeSprint({ enabled: !sprint, deadline: null, completed: false })}>
-                  {sprint ? 'Turn off sprint' : 'Make sprint'}
-                </HeaderButton>
-              )}
-              <HeaderButton onClick={askDelete}>Delete project</HeaderButton>
-              {!isMobile && <FilterButton className={IN_HEADER} />}
+              <FilterButton className={IN_HEADER} />
+              <ProjectOptions key={view.id} actions={projectActions} />
             </>
           )}
         </ViewHeader>
