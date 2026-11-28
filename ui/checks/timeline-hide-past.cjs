@@ -85,7 +85,18 @@ const read = (page) =>
     // The axis: the day drawn at the very left of the chart's header.
     const header = [...document.querySelectorAll('.sticky.top-0')].find((h) => h.closest('.overflow-auto'))
     const first = [...header.querySelectorAll('div')].find((d) => d.style.left === '0px' && /bottom-/.test(d.className))
-    return { titles, groups, bar: bar?.textContent ?? null, firstDate: first ? Number([...first.querySelectorAll('span')].pop().textContent) : null }
+    // The Website project's bar against its only open task's bar.
+    const edges = (e) => (e ? [e.getBoundingClientRect().left, e.getBoundingClientRect().right] : null)
+    const websiteSpan = edges(document.querySelector('[role="img"][aria-label^="Website spans "]'))
+    const websiteTask = edges(document.querySelector('[data-timeline-bar][data-task="3"]') ?? document.querySelector('[data-task="3"]'))
+    return {
+      titles,
+      groups,
+      bar: bar?.textContent ?? null,
+      firstDate: first ? Number([...first.querySelectorAll('span')].pop().textContent) : null,
+      websiteSpan,
+      websiteTask,
+    }
   })
 
 async function check() {
@@ -134,6 +145,12 @@ async function check() {
         `${name}: with the option off the Archive group should show`,
       )
       expect(off.bar === null, `${name}: with the option off there should be no hint under the header (${off.bar})`)
+      // A project's bar covers its open tasks' days and no more: Website's
+      // completed task is not counted, so its bar ends with task 3's.
+      expect(
+        off.websiteSpan && off.websiteTask && Math.abs(off.websiteSpan[0] - off.websiteTask[0]) <= 2 && Math.abs(off.websiteSpan[1] - off.websiteTask[1]) <= 2,
+        `${name}: the Website bar should match its task's bar within 2px (${off.websiteSpan}, ${off.websiteTask})`,
+      )
 
       // Turned on in the Timeline's menu.
       await page.getByRole('button', { name: 'More timeline options' }).click()

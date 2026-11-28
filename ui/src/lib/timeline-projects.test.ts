@@ -30,6 +30,18 @@ describe('project ranges on Timeline', () => {
     ])
   })
 
+  it('covers exactly the open tasks of a project, and nothing else stretches it', () => {
+    const rows = projectTimelines(projects, [
+      task(10, 3, '2026-12-03', { start: '2026-12-01' }),
+      task(11, 3, '2026-12-05', { start: '2026-12-04' }),
+      task(12, 3, null, { start: '2026-12-02' }),
+      task(13, 3, '2026-12-15', { parentId: 10 }),
+      task(14, 3, '2026-12-16', { done: true, doneDay: '2026-12-16' }),
+      task(15, 3, null),
+    ], { ...NO_FILTER, projects: [3] })
+    expect(rows).toMatchObject([{ from: '2026-12-01', to: '2026-12-05', deadline: null }])
+  })
+
   it('keeps later tasks in the range when the sprint deadline comes first', () => {
     expect(projectTimelines(projects, [task(10, 1, '2026-12-09')], { ...NO_FILTER, projects: [1] })).toMatchObject([
       { from: '2026-12-04', to: '2026-12-09', deadline: '2026-12-04' },
