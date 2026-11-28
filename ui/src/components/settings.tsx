@@ -1,7 +1,7 @@
-import { modifierKey, windowsDevice } from '@/lib/platform'
+import { currentPlatform, downloadOffer, modifierKey, readPlatform, windowsDevice, type Download } from '@/lib/platform'
 import { CLOUD_URL } from '@/lib/cloud'
 import { Avatar } from '@/components/avatars'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -189,6 +189,43 @@ function AccountPane() {
 // self-update (the updater is the Mac's; 23 Nov audit showed all three there).
 const onIos = isIosApp
 
+const DOWNLOAD: Record<Download, { href: string; name: string }> = {
+  windows: { href: WINDOWS_DOWNLOAD, name: 'Windows (x64)' },
+  mac: { href: MAC_DOWNLOAD, name: 'Mac (Apple silicon)' },
+}
+
+// One button for the computer this is, the others as small links. Which
+// computer is read in the page only (lib/platform.ts); nothing is sent.
+function DesktopDownloads() {
+  const [platform, setPlatform] = useState(currentPlatform)
+  useEffect(() => void readPlatform().then(setPlatform), [])
+  const offer = downloadOffer(platform)
+  return (
+    <>
+      <p className="text-muted-foreground">The desktop app keeps your tasks on the computer and works offline.</p>
+      {offer.primary === 'browser' ? (
+        <p>{platform.os === 'ios' ? 'Use done in the browser: it is what you are using now.' : 'done works right here in your browser.'}</p>
+      ) : (
+        <Button asChild size="sm" className="self-start">
+          <a href={DOWNLOAD[offer.primary].href}>{offer.label}</a>
+        </Button>
+      )}
+      {offer.note && <p className="text-sm text-muted-foreground">{offer.note}</p>}
+      <p className="text-sm text-muted-foreground">
+        Also for{' '}
+        {offer.also.map((d, i) => (
+          <span key={d}>
+            {i > 0 && ' · '}
+            <a className="underline underline-offset-2 hover:text-foreground" href={DOWNLOAD[d].href}>
+              {DOWNLOAD[d].name}
+            </a>
+          </span>
+        ))}
+      </p>
+    </>
+  )
+}
+
 export function Settings() {
   const { info, zoom, setZoom } = useApp()
   const account = useAccount()
@@ -246,15 +283,7 @@ export function Settings() {
 
         {!isDesktop && (
           <Pane title="Desktop app">
-            <p className="text-muted-foreground">Keep tasks on this computer and work offline.</p>
-            <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm" variant={windowsDevice ? 'default' : 'outline'}>
-                <a href={WINDOWS_DOWNLOAD}>Download for Windows (x64)</a>
-              </Button>
-              <Button asChild size="sm" variant={windowsDevice ? 'outline' : 'default'}>
-                <a href={MAC_DOWNLOAD}>Download for Mac (Apple silicon)</a>
-              </Button>
-            </div>
+            <DesktopDownloads />
           </Pane>
         )}
 

@@ -24,6 +24,8 @@
     h1 { font-size:clamp(48px,8vw,88px); letter-spacing:-.055em; line-height:.98; font-weight:660; }
     header p { max-width:34em; margin-top:20px; color:var(--muted); font-size:clamp(16px,2vw,19px); line-height:1.5; }
     .downloads { display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:18px; font-size:15px; }
+    .downloads.chosen { flex-direction:column; align-items:flex-start; gap:8px; }
+    .downloads .small { margin:0; color:var(--muted); font-size:14px; }
     .board { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:clamp(24px,4vw,48px); align-items:start; padding-bottom:64px; }
     .compose { background:#fff; padding:clamp(22px,3vw,30px); border:1px solid var(--line); border-radius:12px; }
     h2 { font-size:22px; line-height:1.2; letter-spacing:-.04em; }
@@ -66,9 +68,11 @@
       <header>
         <h1>A to-do list for you<br>and your team.</h1>
         <p>Completely free. No bloat, no AI bullshit, no maze of confusing features.</p>
-        <div class="downloads">
-          <a href="https://github.com/Juliusolsson05/done/releases/latest/download/done-windows-x64-setup.exe">Download for Windows (x64)</a>
-          <a href="https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg">Download for Mac (Apple silicon)</a>
+        <!-- Every option as a plain link; the script below only promotes the one for this computer. -->
+        <div class="downloads" id="downloads">
+          <a data-get="windows" href="https://github.com/Juliusolsson05/done/releases/latest/download/done-windows-x64-setup.exe">Download for Windows (x64)</a>
+          <a data-get="mac" href="https://github.com/Juliusolsson05/done/releases/download/mac/Done.dmg">Download for Mac (Apple silicon)</a>
+          <a data-get="browser" href="{{APP_URL}}/">Open done in your browser</a>
         </div>
       </header>
       <div class="board">
@@ -104,6 +108,37 @@
     </main>
     <footer><a href="{{APP_URL}}/privacy">Privacy policy</a><a href="{{APP_URL}}/support">Support</a><a href="{{APP_URL}}/terms">Terms</a></footer>
   </div>
+  <script>
+    // Which download to put first. The tested source of this rule is
+    // ui/src/lib/platform.ts (detectPlatform, downloadOffer); this page cannot
+    // import the interface, so it keeps this small copy. Keep the two the same.
+    // Nothing read here leaves the page.
+    (async () => {
+      const box = document.getElementById('downloads')
+      const link = Object.fromEntries([...box.querySelectorAll('a')].map((a) => [a.dataset.get, a.href]))
+      const n = navigator, ua = n.userAgent || '', data = n.userAgentData
+      let arch
+      try { arch = (await data?.getHighEntropyValues?.(['architecture']))?.architecture } catch { /* not told */ }
+      const hint = { windows:'windows', macos:'mac', android:'android', linux:'linux', 'chrome os':'other', chromeos:'other', ios:'ios' }[(data?.platform || '').toLowerCase()]
+      const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && n.maxTouchPoints > 1)
+      const os = ios ? 'ios' : hint || (/Android/.test(ua) ? 'android' : /CrOS/.test(ua) ? 'other' : /Windows NT/.test(ua) || /^Win/.test(n.platform) ? 'windows'
+        : /Macintosh|Mac OS X/.test(ua) || /^Mac/.test(n.platform) ? 'mac' : /Linux|X11/.test(ua) || /Linux/.test(n.platform) ? 'linux' : 'other')
+      const browser = { primary:'browser', label:'Open done in your browser', also:['mac', 'windows'] }
+      const offer = os === 'windows' && arch !== 'arm' ? { primary:'windows', label:'Download for Windows', also:['mac'] }
+        : os === 'windows' ? { ...browser, note:'There is no build for Windows on ARM yet.', also:['windows', 'mac'] }
+        : os === 'mac' && arch !== 'x86' ? { primary:'mac', label:'Download for Mac', note:'For Macs with Apple silicon.', also:['windows'] }
+        : os === 'mac' ? { ...browser, note:'The Mac app needs Apple silicon, and this Mac has an Intel chip.', also:['mac', 'windows'] }
+        : os === 'ios' ? { ...browser, label:'Use done in the browser' }
+        : browser
+      const name = { windows:'Windows (x64)', mac:'Mac (Apple silicon)' }
+      const a = (href, text, className) => Object.assign(document.createElement('a'), { href, textContent:text, className:className || '' })
+      const line = (...parts) => { const p = document.createElement('p'); p.className = 'small'; p.append(...parts); return p }
+      const also = line('Also for ')
+      offer.also.forEach((d, i) => also.append(...(i ? [' · '] : []), a(link[d], name[d])))
+      box.replaceChildren(a(link[offer.primary], offer.label, 'button'), ...(offer.note ? [line(offer.note)] : []), also)
+      box.classList.add('chosen')
+    })()
+  </script>
   <script>
     const byId = (id) => document.getElementById(id)
     const form = byId('composer')
