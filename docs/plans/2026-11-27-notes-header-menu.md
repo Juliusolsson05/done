@@ -78,7 +78,25 @@ links", opened with +, remembered per note for the session. Nothing to add.
 
 ## Verified
 
-(filled in as it is done)
+Chromium (Chrome channel) with touch emulation, on a copy of the audit's
+seeded database, the server at :4520 and Vite at :4521. Controls in the note
+header, measured:
+
+| Viewport | Before | After |
+| --- | --- | --- |
+| iPad 820x1180 | Folder, Project, Read, Delete, New note (all 28 tall) | Read, New note, ⋯ (all 44) |
+| iPad 1024x1366 (one note at a time) | Notes, Folder, Project, Read, Delete (28) | Notes, Read, ⋯ (44) |
+| iPad 1366x1024 | Folder, Project, Read, Delete, New note (28) | Read, New note, ⋯ (44) |
+| iPhone 390x844, note | All notes, ⋯ (44) | unchanged |
+| iPhone 390x844, folder | Folders, Rename 28, Delete 28, compose | Folders, ⋯ (44), compose |
+| Desktop 1440x900 | Folder, Project, Read, Delete, New note | unchanged |
+
+- `ui/checks/notes-header-menu.cjs` passes, and fails on origin/main ("at most
+  3 controls in the note header, found 5").
+- iPhone: Rename folder through the ⋯ renames in place; opening Folder and
+  Project in the note sheet logs no console error; the Lists menu in the
+  writing bar shows "1." and "-" and no Tab hints.
+- typecheck, 639 unit tests, build.
 
 ## Not verified
 

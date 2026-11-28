@@ -126,7 +126,7 @@ export function NoteListMenu({ view, touch = false }: { view: EditorView | null;
         setOpen(false)
       }}
     >
-      {icon}{label}<kbd className="ml-auto text-xs text-muted-foreground">{shortcut}</kbd>
+      {icon}{label}{shortcut && <kbd className="ml-auto text-xs text-muted-foreground">{shortcut}</kbd>}
     </button>
   )
   return (
@@ -161,8 +161,9 @@ export function NoteListMenu({ view, touch = false }: { view: EditorView | null;
           <>
             {action('Numbered list', <ListOrderedIcon />, '1.', numberedList)}
             {action('Bulleted list', <ListIcon />, '-', bulletedList)}
-            {action('Indent', <IndentIncreaseIcon />, 'Tab', indentList, !listMoveAt(view.state, 'in'))}
-            {action('Outdent', <IndentDecreaseIcon />, '⇧ Tab', outdentList, !listMoveAt(view.state, 'out'))}
+            {/* Tab is a hardware key: no hint for it on a touch screen. */}
+            {action('Indent', <IndentIncreaseIcon />, touch ? '' : 'Tab', indentList, !listMoveAt(view.state, 'in'))}
+            {action('Outdent', <IndentDecreaseIcon />, touch ? '' : '⇧ Tab', outdentList, !listMoveAt(view.state, 'out'))}
           </>
         )}
       </PopoverContent>

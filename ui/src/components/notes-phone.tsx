@@ -1,7 +1,7 @@
 // The Notes page's pieces for an iPhone, drawn as Apple Notes draws them:
 // a bar at the top with one way back, a ⋯ that brings up the note's actions
 // as an action sheet, and a compose button at the bottom right.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, SquarePenIcon } from 'lucide-react'
 import { ProjectDot } from '@/components/marks'
@@ -42,14 +42,15 @@ export function NotesBar({ back, onBack, children }: { back: string; onBack: () 
   )
 }
 
-// ⋯ in the bar.
-export function MoreButton({ onClick }: { onClick: () => void }) {
+// ⋯ in the bar, 44 points square around its circle. Takes a trigger's props,
+// so it can open a menu as well as a sheet.
+export function MoreButton({ label = 'Note actions', className, ...props }: { label?: string } & ComponentProps<'button'>) {
   return (
     <button
       type="button"
-      aria-label="Note actions"
-      onClick={onClick}
-      className="flex size-11 items-center justify-center active:opacity-40"
+      aria-label={label}
+      className={cn('flex size-11 shrink-0 items-center justify-center active:opacity-40', className)}
+      {...props}
     >
       <span className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
         <EllipsisIcon className="size-5" strokeWidth={2.4} />
@@ -109,8 +110,9 @@ export function NoteSheet({
   onDelete: () => void
 }) {
   const [step, setStep] = useState<'main' | 'folder' | 'project'>('main')
-  const row = (content: ReactNode, onClick: () => void, className?: string) => (
+  const row = (content: ReactNode, onClick: () => void, className?: string, key?: string) => (
     <button
+      key={key}
       type="button"
       onClick={(event) => {
         event.stopPropagation()
@@ -171,6 +173,8 @@ export function NoteSheet({
                   {check(folder !== null && folder.toLocaleLowerCase() === name.toLocaleLowerCase())}
                 </>,
                 done(() => onFolder(name)),
+                undefined,
+                name,
               ),
             )}
           </>
@@ -194,6 +198,8 @@ export function NoteSheet({
                   {check(project.id === p.id)}
                 </>,
                 done(() => onProject(p.id)),
+                undefined,
+                String(p.id),
               ),
             )}
           </>
@@ -209,6 +215,37 @@ export function NoteSheet({
         className="h-14 shrink-0 animate-rise rounded-2xl bg-background text-body font-semibold text-primary active:bg-accent"
       >
         {step === 'main' ? 'Cancel' : 'Back'}
+      </button>
+    </div>,
+    document.body,
+  )
+}
+
+// A short action sheet: its actions, then Cancel. A destructive one is red
+// and goes last.
+export function ActionSheet({ actions, onClose }: { actions: { label: string; onClick: () => void; destructive?: boolean }[]; onClose: () => void }) {
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex flex-col justify-end gap-2 bg-black/40 p-2 pb-[calc(var(--safe-bottom)+0.5rem)]" onClick={onClose}>
+      <div className="flex animate-rise flex-col overflow-hidden rounded-2xl bg-background/95 backdrop-blur-xl" onClick={(event) => event.stopPropagation()}>
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={() => {
+              onClose()
+              action.onClick()
+            }}
+            className={cn(
+              'flex min-h-14 w-full items-center justify-center border-b border-border px-4 text-body last:border-b-0 active:bg-accent',
+              action.destructive ? 'text-destructive' : 'text-primary',
+            )}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" onClick={onClose} className="h-14 shrink-0 animate-rise rounded-2xl bg-background text-body font-semibold text-primary active:bg-accent">
+        Cancel
       </button>
     </div>,
     document.body,

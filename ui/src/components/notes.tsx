@@ -8,15 +8,15 @@ import { BookOpenIcon, ChevronLeftIcon, FolderIcon, PenLineIcon, PlusIcon, Searc
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { HeaderButton, ViewHeader } from '@/components/list-view'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { ViewHeader } from '@/components/list-view'
+import { useIsMobile, useLayout } from '@/hooks/use-mobile'
 import { useApp } from '@/lib/app-context'
 import { ProjectDot } from '@/components/marks'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { projectName } from '@/lib/tasks'
 import { deleteNote, loadNotes, openLink, saveNote } from '@/lib/backend'
 import { SYNCED } from '@/lib/store'
-import { FolderActions, FolderNav } from '@/components/note-folders'
+import { FolderNav, NameField } from '@/components/note-folders'
 import { publishFolderPanel } from '@/lib/note-folder-panel'
 import {
   byNewest,
@@ -40,7 +40,8 @@ import { LinkedFrom, NoteLinkChip, NoteLinksContext, type NoteLinks } from '@/co
 import { TaskMention, TaskMentionInline } from '@/components/task-mention'
 import { NoteRefs } from '@/components/note-refs'
 import { NoteEditor } from '@/components/note-editor'
-import { ComposeButton, MoreButton, NoteSheet, NotesBar } from '@/components/notes-phone'
+import { ActionSheet, ComposeButton, MoreButton, NoteSheet, NotesBar } from '@/components/notes-phone'
+import { NoteMenu } from '@/components/note-menu'
 import { notesLayout } from '@/lib/live-preview'
 import { LiveBar, LiveFaces, useLiveNote, useLiveStatus } from '@/components/live-note'
 import type { LiveNote } from '@/lib/collab'
@@ -83,6 +84,9 @@ const NO_NOTES: Note[] = []
 export function Notes() {
   const { ui, data, scope, team } = useApp()
   const isMobile = useIsMobile()
+  // An iPad: the window layout, for a finger. The note's header keeps what is
+  // used all the time and puts the rest behind one ⋯, every control 44 tall.
+  const tablet = useLayout() === 'tablet'
   // On a wide screen too narrow for the list and a note side by side (an
   // iPad upright, a narrow window), one at a time, as on a phone: a note is
   // never squeezed into a sliver.
@@ -90,6 +94,9 @@ export function Notes() {
   const stacked = !isMobile && width !== null && notesLayout(width) === 'stacked'
   // The note's actions on a phone, as an action sheet.
   const [sheet, setSheet] = useState(false)
+  // A folder's actions on a phone (Rename, Delete), and its name being edited.
+  const [folderSheet, setFolderSheet] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [stored, setNotes] = useState<Note[] | null>(null)
   // The notes of the space the picker is on. A note is where its project is,
   // else where it was written.
@@ -513,7 +520,7 @@ export function Notes() {
     <Button
       variant={reading ? 'secondary' : 'ghost'}
       size="sm"
-      className={reading ? 'text-foreground' : 'text-muted-foreground'}
+      className={cn(reading ? 'text-foreground' : 'text-muted-foreground', tablet && 'h-11')}
       aria-pressed={reading}
       aria-label={reading ? 'Back to writing' : 'Read as a document'}
       onClick={toggleReading}
@@ -521,6 +528,21 @@ export function Notes() {
       {reading ? <PenLineIcon /> : <BookOpenIcon />}
       {reading ? 'Edit' : 'Read'}
     </Button>
+  )
+
+  const currentFolder = current && (folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? null)
+
+  // On an iPad, Folder, Project and Delete in one menu.
+  const noteMenu = current && (
+    <NoteMenu
+      folder={currentFolder ?? null}
+      folders={folders.map((f) => f.name)}
+      onFolder={(name) => refileOpen({ folder: name })}
+      project={current.projectId ?? null}
+      projects={data.projects}
+      onProject={(id) => refileOpen({ projectId: id })}
+      onDelete={() => remove(current)}
+    />
   )
 
   // Keep the editor mounted while reading so Edit restores the caret, undo
@@ -572,7 +594,7 @@ export function Notes() {
           {sheet && (
             <NoteSheet
               onClose={() => setSheet(false)}
-              folder={folders.find((f) => current.folder && sameFolder(f.name, current.folder))?.name ?? null}
+              folder={currentFolder ?? null}
               folders={folders.map((f) => f.name)}
               onFolder={(name) => refileOpen({ folder: name })}
               project={{ id: current.projectId ?? null, name: current.projectId != null ? projectName(data.projects, current.projectId) : 'None' }}
@@ -605,18 +627,22 @@ export function Notes() {
       <NoteLinksContext.Provider value={noteLinks}>
         <div ref={measure}>
           <header className="mb-4 flex min-h-8 flex-wrap items-center gap-1">
-            <Button variant="ghost" size="sm" className="-ml-2.5 max-w-56 text-primary" onClick={() => open(null)}>
+            <Button variant="ghost" size="sm" className={cn('-ml-2.5 max-w-56 text-primary', tablet && 'h-11')} onClick={() => open(null)}>
               <ChevronLeftIcon />
               <span className="truncate">{folder ?? 'Notes'}</span>
             </Button>
             <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
               <LiveFaces live={live} />
-              {folderPicker}
-              {projectPicker}
+              {!tablet && folderPicker}
+              {!tablet && projectPicker}
               {readToggle}
-              <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete note" onClick={() => remove(current)}>
-                <Trash2Icon />
-              </Button>
+              {tablet ? (
+                noteMenu
+              ) : (
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete note" onClick={() => remove(current)}>
+                  <Trash2Icon />
+                </Button>
+              )}
             </div>
           </header>
           <div className="mx-auto max-w-3xl">
@@ -645,26 +671,44 @@ export function Notes() {
               onBack={() => {
                 setAtFolders(true)
                 setFolder(null)
+                setRenaming(false)
               }}
-            />
+            >
+              {folder !== null && <MoreButton label="Folder actions" onClick={() => setFolderSheet(true)} />}
+            </NotesBar>
             <header className="mb-3 flex flex-col">
-              <h1 className="text-large-title font-bold tracking-tight">{folder ?? 'All notes'}</h1>
-              {folder !== null && (
-                <div className="-ml-2.5 pt-1">
-                  <FolderActions name={folder} onRename={renameFolder} onDelete={deleteFolder} />
-                </div>
+              {folder !== null && renaming ? (
+                <NameField
+                  initial={folder}
+                  label="Folder name"
+                  onDone={(to) => {
+                    setRenaming(false)
+                    if (to !== null) renameFolder(folder, to)
+                  }}
+                />
+              ) : (
+                <h1 className="text-large-title font-bold tracking-tight">{folder ?? 'All notes'}</h1>
               )}
             </header>
             <ComposeButton onClick={() => void create(null)} />
+            {folderSheet && folder !== null && (
+              <ActionSheet
+                onClose={() => setFolderSheet(false)}
+                actions={[
+                  { label: 'Rename folder', onClick: () => setRenaming(true) },
+                  { label: 'Delete folder', onClick: () => deleteFolder(folder), destructive: true },
+                ]}
+              />
+            )}
           </>
         ) : (
           // On a wide screen the folders are in the sidebar, so the title says which one is open.
           <ViewHeader title={folder ?? 'Notes'}>
             {split && current && <LiveFaces live={live} />}
-            {split && folderPicker}
-            {split && projectPicker}
+            {split && !tablet && folderPicker}
+            {split && !tablet && projectPicker}
             {split && readToggle}
-            {split && current && (
+            {split && !tablet && current && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -675,10 +719,11 @@ export function Notes() {
                 <Trash2Icon />
               </Button>
             )}
-            <HeaderButton onClick={() => void create(null)}>
+            <Button variant="ghost" size="sm" className={cn('text-muted-foreground', tablet && 'h-11')} onClick={() => void create(null)}>
               <PlusIcon />
               New note
-            </HeaderButton>
+            </Button>
+            {split && tablet && noteMenu}
           </ViewHeader>
         )}
         {notes && (
