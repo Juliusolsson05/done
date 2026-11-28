@@ -600,6 +600,16 @@ mod tests {
 
     /// A hosted server with a database of its own, and the Google it trusts.
     async fn hosted(key: u8) -> (String, Google, Arc<Db>) {
+        hosted_with_apple(key, None).await
+    }
+
+    async fn hosted_with_apple(key: u8, apple_grants: Option<auth::apple_grants::Client>) -> (String, Google, Arc<Db>) {
+        hosted_on(Arc::new(pg::testing::db().await), key, apple_grants).await
+    }
+
+    /// A hosted server on a database another one may be using too: the same
+    /// service after a redeploy with different settings.
+    async fn hosted_on(db: Arc<Db>, key: u8, apple_grants: Option<auth::apple_grants::Client>) -> (String, Google, Arc<Db>) {
         let (google, google_at) = Google::start().await;
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let at = format!("http://{}", listener.local_addr().unwrap());
@@ -614,10 +624,10 @@ mod tests {
             collab_url: None,
             apple_audience: "app.thedone.ios".into(),
             apple_keys_url: format!("{google_at}/keys"),
+            apple_grants,
             review_password: Some(REVIEW_PASSWORD.into()),
             time_zone: "America/Los_Angeles".into(),
         };
-        let db = Arc::new(pg::testing::db().await);
         let operator = Arc::new(pages::Operator { name: "Anna & <Co>".into(), contact: "anna@example.com".into() });
         let state = Cloud { db: db.clone(), config: Arc::new(config), operator, http: reqwest::Client::new() };
         tokio::spawn(async move { axum::serve(listener, cloud(state)).await.unwrap() });
@@ -833,7 +843,9 @@ mod tests {
             assert_eq!(anna.post(path, write("idea", "A suggestion")).await.status(), 200);
         }
         assert_eq!(anna.post(path, write("idea", "One more")).await.status(), 429);
-        assert_eq!(anna.post("/api/account/delete", serde_json::json!({})).await.status(), 200);
+        let deleted = anna.post("/api/account/delete", serde_json::json!({})).await;
+        assert_eq!(deleted.status(), 200);
+        assert_eq!(deleted.json::<serde_json::Value>().await.unwrap(), serde_json::json!({ "apple": "none" }), "a Google account has nothing at Apple");
         assert_eq!(bo.get(path).await.json::<serde_json::Value>().await.unwrap(), serde_json::json!([newest]));
     }
 
@@ -1107,6 +1119,291 @@ mod tests {
         let again: serde_json::Value = b.post("/auth/apple", sign_in(apple_token(apple_claims("app.thedone.ios", 4102444800), "test"), "")).await.json().await.unwrap();
         assert_eq!(again["account"]["id"], first["account"]["id"]);
         assert_eq!(again["account"]["name"], "Ana Lind");
+        let deleted = b.http.post(format!("{at}/api/account/delete")).bearer_auth(again["token"].as_str().unwrap())
+            .json(&serde_json::json!({})).send().await.unwrap();
+        assert_eq!(deleted.status(), StatusCode::OK, "a legacy account without a saved Apple grant can still be deleted");
+        assert_eq!(deleted.json::<serde_json::Value>().await.unwrap()["apple"], "none");
+    }
+
+    #[tokio::test]
+    async fn apple_code_exchange_keeps_the_newest_grant_and_deletion_revokes_it() {
+        let apple = apple_stand_in().await;
+        let (at, _, db) = hosted_with_apple(7, Some(apple.client())).await;
+        let http = reqwest::Client::new();
+        let subject = "001234.abcdef0123456789.1234";
+        let id = auth::apple_id(subject);
+        let other: serde_json::Value = apple_login(&http, &at, "someone-else", "theirs").await.error_for_status().unwrap().json().await.unwrap();
+        let mut token = String::new();
+        for code in ["one", "two"] {
+            let signed: serde_json::Value = apple_login(&http, &at, subject, code).await.error_for_status().unwrap().json().await.unwrap();
+            assert!(signed.get("refresh_token").is_none());
+            token = signed["token"].as_str().unwrap().to_owned();
+        }
+        // One grant per account: the newest replaces the one before.
+        let stored = pg::testing::stored_apple_grants(&db, &id).await;
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0][0], 1, "sealed with the key derived from DONE_SESSION_KEY: version 1");
+        assert!(!stored[0].windows(8).any(|window| window == b"refresh-"), "the database must not contain the refresh token as plaintext");
+
+        let deleted = delete_with(&http, &at, &token).await;
+        assert_eq!(deleted.status(), StatusCode::OK);
+        assert_eq!(deleted.json::<serde_json::Value>().await.unwrap()["apple"], "revoked");
+        assert_eq!(apple.revoked.lock().unwrap().as_slice(), [format!("refresh-{subject}|two")]);
+        assert!(pg::testing::stored_apple_grants(&db, &id).await.is_empty());
+        assert_eq!(state_with(&http, &at, &token).await, StatusCode::UNAUTHORIZED);
+        // The other account's grant was untouched, and is its own to revoke.
+        assert_eq!(delete_with(&http, &at, other["token"].as_str().unwrap()).await.json::<serde_json::Value>().await.unwrap()["apple"], "revoked");
+        assert_eq!(apple.revoked.lock().unwrap().last().map(String::as_str), Some("refresh-someone-else|theirs"));
+
+        // Every call carried a client secret Apple would take: signed with
+        // the key, the team, the app and a five-minute life.
+        let public = {
+            use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+            let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &apple.pkcs8, &ring::rand::SystemRandom::new()).unwrap();
+            jsonwebtoken::DecodingKey::from_ec_der(pair.public_key().as_ref())
+        };
+        let secrets = apple.secrets.lock().unwrap().clone();
+        assert_eq!(secrets.len(), 5, "three exchanges, two revocations");
+        for jwt in secrets {
+            assert_eq!(jsonwebtoken::decode_header(&jwt).unwrap().kid.as_deref(), Some("test-kid"));
+            let mut rules = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::ES256);
+            rules.set_audience(&["https://appleid.apple.com"]);
+            rules.set_issuer(&["test-team"]);
+            let claims = jsonwebtoken::decode::<serde_json::Value>(&jwt, &public, &rules).unwrap().claims;
+            assert_eq!(claims["sub"], "app.thedone.ios");
+            assert_eq!(claims["exp"].as_u64().unwrap() - claims["iat"].as_u64().unwrap(), 300);
+        }
+    }
+
+    #[tokio::test]
+    async fn no_apple_secret_reaches_the_log_or_an_answer() {
+        let apple = apple_stand_in().await;
+        let (at, _, db) = hosted_with_apple(7, Some(apple.client())).await;
+        let http = reqwest::Client::new();
+        let mut said = String::new();
+        let mut sent = Vec::new();
+        // Exchanges that fail every way, then deletions whose revocation does.
+        for (n, code) in ["x-unavailable", "x-invalid-grant", "x-invalid-client", "x-slow", "x-other-subject"].into_iter().enumerate() {
+            let subject = format!("0010.{n}");
+            sent.push(format!("{subject}|{code}"));
+            said += &apple_login(&http, &at, &subject, code).await.text().await.unwrap();
+        }
+        for (n, code) in ["r-unavailable", "r-invalid-grant", "r-invalid-client", "r-slow", "fine"].into_iter().enumerate() {
+            let subject = format!("0011.{n}");
+            sent.push(format!("{subject}|{code}"));
+            let signed = apple_login(&http, &at, &subject, code).await.text().await.unwrap();
+            said += &signed;
+            let token: serde_json::Value = serde_json::from_str(&signed).unwrap();
+            if code == "r-invalid-grant" {
+                pg::testing::garble_apple_grants(&db, &auth::apple_id(&subject)).await;
+            }
+            said += &delete_with(&http, &at, token["token"].as_str().unwrap()).await.text().await.unwrap();
+        }
+        let log = auth::apple_grants::LOG.lock().unwrap().join("\n");
+        let pkcs8 = base64::engine::general_purpose::STANDARD.encode(&apple.pkcs8);
+        let mut secrets: Vec<String> = sent.iter().flat_map(|code| [code.clone(), format!("refresh-{code}")]).collect();
+        secrets.extend(apple.secrets.lock().unwrap().iter().cloned());
+        secrets.extend([pkcs8[..40].to_string(), pkcs8[pkcs8.len() - 40..].to_string(), "PRIVATE KEY".into()]);
+        for secret in &secrets {
+            assert!(!log.contains(secret.as_str()), "the log holds {secret}");
+            assert!(!said.contains(secret.as_str()), "an answer holds {secret}");
+        }
+        // What the operator gets instead: the status and Apple's own word.
+        for line in [
+            "Apple code exchange failed: status 503, error none",
+            "Apple code exchange failed: status 400, error invalid_grant",
+            "Apple code exchange failed: status 401, error invalid_client",
+            "Apple code exchange failed: timed out",
+            "Apple grant revocation failed: status 401, error invalid_client",
+            "Apple grant revocation failed: the grant could not be decrypted (key version 1)",
+            "Apple grant revocation failed: timed out",
+        ] {
+            assert!(log.contains(line), "{line} in {log}");
+        }
+    }
+
+    /// Apple's token and revocation endpoints, here. What they answer is
+    /// picked by the code the device sent: `x-…` troubles the exchange,
+    /// `r-…` the revocation of the refresh token made from it
+    /// (`refresh-<code>`). The troubles: `unavailable` (503), `invalid-grant`,
+    /// `invalid-client`, `slow` (no answer for 10 s), and `x-other-subject`
+    /// (Apple's id_token names someone else). Anything else works.
+    struct AppleStandIn {
+        origin: String,
+        pkcs8: Vec<u8>,
+        revoked: Arc<Mutex<Vec<String>>>,
+        secrets: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn apple_trouble(what: &str, prefix: &str) -> Option<Response> {
+        if what.contains(&format!("{prefix}slow")) {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+        if what.contains(&format!("{prefix}unavailable")) {
+            return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+        }
+        if what.contains(&format!("{prefix}invalid-grant")) {
+            return Some((StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid_grant", "error_description": "bad code" }))).into_response());
+        }
+        if what.contains(&format!("{prefix}invalid-client")) {
+            return Some((StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid_client" }))).into_response());
+        }
+        None
+    }
+
+    async fn apple_stand_in() -> AppleStandIn {
+        use axum::extract::Form;
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &ring::rand::SystemRandom::new()).unwrap().as_ref().to_vec();
+        let revoked = Arc::new(Mutex::new(Vec::new()));
+        let secrets = Arc::new(Mutex::new(Vec::new()));
+        let token = {
+            let secrets = secrets.clone();
+            move |Form(form): Form<HashMap<String, String>>| async move {
+                secrets.lock().unwrap().push(form["client_secret"].clone());
+                let code = form["code"].clone();
+                if let Some(trouble) = apple_trouble(&code, "x-").await {
+                    return trouble;
+                }
+                let mut claims = apple_claims("app.thedone.ios", 4102444800);
+                claims["sub"] = if code.contains("x-other-subject") { "someone-else".into() } else { form["code"].split('|').next().unwrap().into() };
+                Json(serde_json::json!({ "id_token": apple_token(claims, "test"), "refresh_token": format!("refresh-{code}") })).into_response()
+            }
+        };
+        let revoke = {
+            let (revoked, secrets) = (revoked.clone(), secrets.clone());
+            move |Form(form): Form<HashMap<String, String>>| async move {
+                secrets.lock().unwrap().push(form["client_secret"].clone());
+                let token = form["token"].clone();
+                if let Some(trouble) = apple_trouble(&token, "r-").await {
+                    return trouble;
+                }
+                revoked.lock().unwrap().push(token);
+                StatusCode::OK.into_response()
+            }
+        };
+        let origin = serve(Router::new().route("/auth/token", post(token)).route("/auth/revoke", post(revoke))).await;
+        AppleStandIn { origin, pkcs8, revoked, secrets }
+    }
+
+    impl AppleStandIn {
+        fn client(&self) -> auth::apple_grants::Client {
+            // Half a second where Apple's is eight, so a test of the bound is quick.
+            let timeout = std::time::Duration::from_millis(500);
+            auth::apple_grants::Client::new("test-team".into(), "test-kid".into(), jsonwebtoken::EncodingKey::from_ec_der(&self.pkcs8), &self.origin, &[7; 64], None, timeout)
+        }
+    }
+
+    /// Signs in with Apple as `subject`, sending `code` as the sheet's
+    /// one-time code. The stand-in reads the subject back out of the code.
+    async fn apple_login(http: &reqwest::Client, at: &str, subject: &str, code: &str) -> reqwest::Response {
+        let mut claims = apple_claims("app.thedone.ios", 4102444800);
+        claims["sub"] = subject.into();
+        let code = if code.is_empty() { String::new() } else { format!("{subject}|{code}") };
+        http.post(format!("{at}/auth/apple"))
+            .json(&serde_json::json!({ "identity_token": apple_token(claims, "test"), "authorization_code": code, "name": "Synthetic Apple User" }))
+            .send().await.unwrap()
+    }
+
+    async fn delete_with(http: &reqwest::Client, at: &str, token: &str) -> reqwest::Response {
+        http.post(format!("{at}/api/account/delete")).bearer_auth(token).json(&serde_json::json!({})).send().await.unwrap()
+    }
+
+    async fn state_with(http: &reqwest::Client, at: &str, token: &str) -> StatusCode {
+        http.get(format!("{at}/api/state?today=2026-11-18")).bearer_auth(token).send().await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn a_failed_apple_code_exchange_still_signs_in() {
+        let apple = apple_stand_in().await;
+        let (at, _, db) = hosted_with_apple(7, Some(apple.client())).await;
+        let http = reqwest::Client::new();
+        // Apple down, a single-use code sent twice, a wrong team id or a
+        // revoked key, and no code at all: signed in, nothing kept.
+        for code in ["x-unavailable", "x-invalid-grant", "x-invalid-client", ""] {
+            let subject = format!("0001.{code}.fails");
+            let signed = apple_login(&http, &at, &subject, code).await;
+            assert_eq!(signed.status(), StatusCode::OK, "{code}");
+            let signed: serde_json::Value = signed.json().await.unwrap();
+            assert_eq!(state_with(&http, &at, signed["token"].as_str().unwrap()).await, StatusCode::OK, "{code}");
+            assert!(pg::testing::stored_apple_grants(&db, &auth::apple_id(&subject)).await.is_empty(), "{code}");
+        }
+        // Apple's own answer names somebody else: the one refusal.
+        let subject = "0002.mismatch";
+        assert_eq!(apple_login(&http, &at, subject, "x-other-subject").await.status(), StatusCode::UNAUTHORIZED);
+        assert!(db.name_of(&auth::apple_id(subject)).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_code_sent_to_a_server_without_apple_settings_still_signs_in() {
+        let (at, _, db) = hosted(7).await;
+        let http = reqwest::Client::new();
+        let subject = "0003.unconfigured";
+        assert_eq!(apple_login(&http, &at, subject, "fine").await.status(), StatusCode::OK);
+        assert!(pg::testing::stored_apple_grants(&db, &auth::apple_id(subject)).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_code_exchange_apple_does_not_answer_signs_in_within_the_bound() {
+        let apple = apple_stand_in().await;
+        let (at, _, db) = hosted_with_apple(7, Some(apple.client())).await;
+        let http = reqwest::Client::new();
+        let subject = "0004.slow";
+        let started = std::time::Instant::now();
+        let signed = apple_login(&http, &at, subject, "x-slow").await;
+        assert_eq!(signed.status(), StatusCode::OK);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "took {:?}", started.elapsed());
+        assert!(pg::testing::stored_apple_grants(&db, &auth::apple_id(subject)).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deleting_the_account_wins_whatever_apple_says() {
+        let apple = apple_stand_in().await;
+        let (at, _, db) = hosted_with_apple(7, Some(apple.client())).await;
+        let http = reqwest::Client::new();
+        let sign_in = |subject: String, code: &'static str| {
+            let (http, at, db) = (http.clone(), at.clone(), db.clone());
+            async move {
+                let signed: serde_json::Value = apple_login(&http, &at, &subject, code).await.error_for_status().unwrap().json().await.unwrap();
+                assert_eq!(pg::testing::stored_apple_grants(&db, &auth::apple_id(&subject)).await.len(), 1, "{code}");
+                signed["token"].as_str().unwrap().to_owned()
+            }
+        };
+        let deleted = |at: String, token: String, subject: String, expected: &'static str| {
+            let (http, db) = (http.clone(), db.clone());
+            async move {
+                let started = std::time::Instant::now();
+                let answer = delete_with(&http, &at, &token).await;
+                assert_eq!(answer.status(), StatusCode::OK, "{subject}");
+                assert!(started.elapsed() < std::time::Duration::from_secs(3), "{subject} took {:?}", started.elapsed());
+                let body: serde_json::Value = answer.json().await.unwrap();
+                assert_eq!(body["apple"], expected, "{subject}");
+                assert_eq!(state_with(&http, &at, &token).await, StatusCode::UNAUTHORIZED, "{subject}");
+                assert!(pg::testing::stored_apple_grants(&db, &auth::apple_id(&subject)).await.is_empty(), "{subject}");
+            }
+        };
+        // Apple down, Apple refusing the client (a revoked or rotated key),
+        // Apple not answering at all.
+        for code in ["r-unavailable", "r-invalid-client", "r-slow"] {
+            let subject = format!("0005.{code}");
+            let token = sign_in(subject.clone(), code).await;
+            deleted(at.clone(), token, subject, "not_revoked").await;
+        }
+        // A grant this server cannot read (the key it was sealed with is gone).
+        let subject = "0006.garbled".to_string();
+        let token = sign_in(subject.clone(), "fine").await;
+        pg::testing::garble_apple_grants(&db, &auth::apple_id(&subject)).await;
+        deleted(at.clone(), token, subject, "not_revoked").await;
+        // The Apple settings removed since the grant was kept.
+        let subject = "0007.settings-removed".to_string();
+        let token = sign_in(subject.clone(), "fine").await;
+        let (off, _, _) = hosted_on(db.clone(), 7, None).await;
+        deleted(off, token, subject, "not_revoked").await;
+        // And the working case.
+        let subject = "0008.works".to_string();
+        let token = sign_in(subject.clone(), "fine").await;
+        deleted(at.clone(), token, subject, "revoked").await;
+        assert_eq!(apple.revoked.lock().unwrap().as_slice(), ["refresh-0008.works|fine"]);
     }
 
     #[tokio::test]

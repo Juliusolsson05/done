@@ -101,13 +101,13 @@ enum FocusActivity {
 // MARK: Sign in with Apple
 
 /// Called from Rust (`apple_sign_in` in crates/app/src/lib.rs) with a C
-/// function to answer through, once: `{"token", "name"}` on success, or
+/// function to answer through, once: `{"token", "code", "name", "user"}` on success, or
 /// `{"error"}` (`"cancelled"` when the person closed the sheet).
 ///
 /// WHY native and not Apple's web sign-in: the iPhone app must offer Sign in
 /// with Apple next to Google (App Store guideline 4.8), and the native sheet
 /// is what Apple expects there: Face ID, no password, and a token made out to
-/// this app's bundle id, which the server checks without any Apple secret.
+/// this app's bundle id. The server exchanges the code and keeps the revocable grant.
 public typealias DoneAnswer = @convention(c) (UnsafePointer<CChar>) -> Void
 
 @_cdecl("done_apple_sign_in")
@@ -148,13 +148,15 @@ final class AppleSignIn: NSObject, ASAuthorizationControllerDelegate, ASAuthoriz
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
               let tokenData = credential.identityToken,
-              let token = String(data: tokenData, encoding: .utf8) else {
+              let token = String(data: tokenData, encoding: .utf8),
+              let codeData = credential.authorizationCode,
+              let code = String(data: codeData, encoding: .utf8), !code.isEmpty else {
             finish(["error": "no token"])
             return
         }
         // Apple gives the name on the first sign-in only; the server keeps it.
         let name = [credential.fullName?.givenName, credential.fullName?.familyName].compactMap { $0 }.joined(separator: " ")
-        finish(["token": token, "name": name, "user": credential.user])
+        finish(["token": token, "code": code, "name": name, "user": credential.user])
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {

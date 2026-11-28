@@ -66,3 +66,25 @@ it('lets the window sign out when Apple ends the credential', async () => {
   await vi.waitFor(() => expect(ended).toHaveBeenCalledOnce())
   expect(invoke.mock.calls.map(([command]) => command)).toEqual(['watch_apple_user'])
 })
+
+it('sends the sheet’s one-time code with its identity token and keeps only the Done session on the phone', async () => {
+  vi.stubEnv('VITE_DONE_CLOUD_URL', 'https://example.test')
+  const values = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  })
+  vi.stubGlobal('navigator', { userAgent: 'iPhone', maxTouchPoints: 5 })
+  vi.stubGlobal('location', { reload: vi.fn() })
+  const credential = { token: 'apple-identity', code: 'one-use-code', user: 'abc', name: 'Ana' }
+  vi.stubGlobal('window', { __TAURI__: { core: { invoke: async () => credential } } })
+  const session = { token: 'done-session', account: { id: 'appleba7816bf8f01cfea414140de5dae2223b00361a3', email: 'ana@example.test' } }
+  const fetch = vi.fn(async () => Response.json(session))
+  vi.stubGlobal('fetch', fetch)
+  const { signInWithApple } = await import('@/lib/backend')
+  await expect(signInWithApple()).resolves.toBe(true)
+  expect(fetch).toHaveBeenCalledWith('https://example.test/auth/apple', expect.objectContaining({
+    body: JSON.stringify({ identity_token: credential.token, authorization_code: credential.code, name: credential.name }),
+  }))
+  expect(JSON.parse(values.get('done-cloud-session')!)).toEqual({ ...session, appleUser: 'abc' })
+})
