@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { addDefaults, cleanFilter, filterChips, isFiltering, matchesFilter, NO_FILTER, onlyProject, type ViewFilter } from '@/lib/view-filter'
-import type { Task } from '@/lib/tasks'
+import {
+  addDefaults,
+  applyFilter,
+  cleanFilter,
+  filterChips,
+  fixedFor,
+  isFiltering,
+  matchesFilter,
+  matchTask,
+  NO_FILTER,
+  offered,
+  onlyProject,
+  type Dimension,
+  type FilterContext,
+  type ViewFilter,
+} from '@/lib/view-filter'
+import type { Task, View } from '@/lib/tasks'
 
 const today = '2026-11-23'
 const task = (id: number, fields: Partial<Task> = {}): Task => ({
@@ -128,5 +143,151 @@ describe('people', () => {
     expect(chips.map((c) => c.label)).toEqual(['Me', 'Geart', 'Nobody', 'Someone'])
     expect(chips[1].without.people).toEqual(['me', 'nobody', 'gone'])
     expect(cleanFilter({ people: ['me', 'me', 3, ''] }, []).people).toEqual(['me'])
+  })
+})
+
+describe('bugs in the Board and Timeline filter', () => {
+  // #114: the panel offers P0, but the filter is read back through cleanFilter
+  // on every read, which kept only 1 to 4, so P0 never stayed on.
+  it('keeps P0 when the filter is read back', () => {
+    const stored = JSON.parse(JSON.stringify(filter({ priorities: [0, 1] })))
+    expect(cleanFilter(stored, projects).priorities).toEqual([0, 1])
+    const tasks = [task(1, { priority: 0 }), task(2, { priority: 1 }), task(3, { priority: 4 })]
+    expect(ids(tasks, cleanFilter({ priorities: [0] }, projects))).toEqual([1])
+    expect(filterChips(cleanFilter({ priorities: [0] }, projects), projects).map((c) => c.label)).toEqual(['P0'])
+  })
+
+  it('still drops priorities that do not exist', () => {
+    expect(cleanFilter({ priorities: [-1, 0, 1.5, 5, '0'] }, projects).priorities).toEqual([0])
+  })
+
+  it('finds words with or without accents, as Cmd+K does', () => {
+    const tasks = [task(1, { title: 'Book the Café for Friday' }), task(2, { notes: 'Ring the café' }), task(3, { title: 'Cafeteria menu' })]
+    expect(ids(tasks, filter({ words: 'cafe' }))).toEqual([1, 2, 3])
+    expect(ids(tasks, filter({ words: 'CAFÉ friday' }))).toEqual([1])
+  })
+})
+
+describe('one filter for every view (applyFilter)', () => {
+  // A scope with a personal project (Wedding) and a workspace's (Hop), as All
+  // shows them. 1001 is me, 1002 the co-founder.
+  const WEDDING = 3
+  const scope = [
+    { id: HOP, name: 'Hop' },
+    { id: WEDDING, name: 'Wedding' },
+  ]
+  const tasks: Task[] = [
+    task(1, { title: 'Ship the pricing page', projectId: HOP, priority: 0, due: '2026-11-21', assignees: ['1001'], spaceId: 2 }),
+    task(2, { title: 'Answer the angels', projectId: HOP, priority: 1, due: today, assignees: ['1002'], spaceId: 2 }),
+    task(3, { title: 'Sketch onboarding', projectId: HOP, priority: 2, spaceId: 2 }),
+    task(4, { title: 'Book the Café for the dinner', projectId: WEDDING, priority: 3, due: '2026-11-27' }),
+    task(5, { title: 'Renew passport', priority: 4, notes: 'Photo at the café on the corner' }),
+    task(6, { title: 'Pick a photographer', projectId: WEDDING, priority: 1, due: '2026-12-02' }),
+    // Subtasks of the pricing page, listed under it.
+    task(7, { title: 'Write the copy', parentId: 1, projectId: HOP, priority: 4, spaceId: 2 }),
+    task(8, { title: 'Ask Anton for numbers', parentId: 1, projectId: HOP, priority: 4, done: true, spaceId: 2 }),
+  ]
+  const ctx = (fields: Partial<FilterContext> = {}): FilterContext => ({ today, me: '1001', projects: scope, fixed: [], ...fields })
+  const shown = (f: Partial<ViewFilter>, c: Partial<FilterContext> = {}) => applyFilter(tasks, filter(f), ctx(c)).map((t) => t.id)
+
+  it('shows everything with no filter, in the order given', () => {
+    expect(shown({})).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+  })
+
+  it('finds words in the title, the notes or the project name, accents ignored', () => {
+    expect(shown({ words: 'cafe' })).toEqual([4, 5])
+    expect(shown({ words: 'hop' })).toEqual([1, 2, 3, 7, 8])
+    expect(shown({ words: 'wedding dinner' })).toEqual([4])
+    expect(shown({ words: 'inbox' })).toEqual([5])
+    expect(matchTask(tasks[0], 'PRICING hop', scope)).toBe(true)
+    expect(matchTask(tasks[0], 'pricing wedding', scope)).toBe(false)
+  })
+
+  it('keeps P0 and the other chosen priorities', () => {
+    expect(shown({ priorities: [0] })).toEqual([1, 7, 8])
+    expect(shown({ priorities: [0, 1] })).toEqual([1, 2, 6, 7, 8])
+    expect(shown({ priorities: [4] })).toEqual([5])
+  })
+
+  it('lets a subtask follow its task, whatever the subtask itself is', () => {
+    // The subtasks are P4 and match no word of "pricing", yet stay with their task.
+    expect(shown({ words: 'pricing' })).toEqual([1, 7, 8])
+    // And go with it: the task is not P4, so its P4 subtasks are not shown on their own.
+    expect(shown({ priorities: [4] })).not.toContain(7)
+    // A subtask whose task is not in the list is judged by itself.
+    expect(applyFilter([tasks[6]], filter({ words: 'copy' }), ctx()).map((t) => t.id)).toEqual([7])
+    expect(applyFilter([tasks[6]], filter({ words: 'pricing' }), ctx()).map((t) => t.id)).toEqual([])
+  })
+
+  it('keeps late, today, this week and undated tasks by due date', () => {
+    expect(shown({ when: 'late' })).toEqual([1, 7, 8])
+    expect(shown({ when: 'today' })).toEqual([2])
+    expect(shown({ when: 'week' })).toEqual([2, 4])
+    expect(shown({ when: 'none' })).toEqual([3, 5])
+  })
+
+  it('reads a saved "next two weeks" as this week', () => {
+    expect(shown({ when: 'fortnight' })).toEqual(shown({ when: 'week' }))
+    expect(shown({ when: 'fortnight' })).not.toContain(6)
+  })
+
+  it('keeps the tasks of the people chosen, workspace and personal alike', () => {
+    expect(shown({ people: ['me'] })).toEqual([1, 7, 8])
+    expect(shown({ people: ['1002'] })).toEqual([2])
+    // Nobody is on a personal task either.
+    expect(shown({ people: ['nobody'] })).toEqual([3, 4, 5, 6])
+    expect(shown({ people: ['me'] }, { me: null })).toEqual([])
+  })
+
+  it('narrows with every dimension together', () => {
+    expect(shown({ projects: [HOP], priorities: [0, 1], people: ['me'] })).toEqual([1, 7, 8])
+    expect(shown({ projects: [WEDDING, null], words: 'cafe' })).toEqual([4, 5])
+  })
+
+  it('ignores what the view decides itself', () => {
+    // A project page for Wedding: a stored "Hop only" must not empty it.
+    const wedding = tasks.filter((t) => t.projectId === WEDDING)
+    const onPage = applyFilter(wedding, filter({ projects: [HOP], priorities: [1] }), ctx({ fixed: fixedFor({ kind: 'project', id: WEDDING }) }))
+    expect(onPage.map((t) => t.id)).toEqual([6])
+    // Today decides when: "No date" does not apply there.
+    expect(shown({ when: 'none' }, { fixed: fixedFor({ kind: 'today' }) })).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    // Nothing applies on a view with no filter.
+    expect(shown({ words: 'zzz', projects: [HOP], people: ['me'], priorities: [0], when: 'late' }, { fixed: fixedFor({ kind: 'settings' }) })).toHaveLength(8)
+  })
+
+  it('drops a project chosen in another scope', () => {
+    // Hop was chosen in All; the scope is now personal, where Hop is not.
+    const personal = [{ id: WEDDING, name: 'Wedding' }]
+    const mine = tasks.filter((t) => t.spaceId == null)
+    expect(applyFilter(mine, filter({ projects: [HOP] }), ctx({ projects: personal })).map((t) => t.id)).toEqual([4, 5, 6])
+    expect(applyFilter(mine, filter({ projects: [HOP, WEDDING] }), ctx({ projects: personal })).map((t) => t.id)).toEqual([4, 6])
+    // The Inbox is in every scope.
+    expect(applyFilter(mine, filter({ projects: [HOP, null] }), ctx({ projects: personal })).map((t) => t.id)).toEqual([5])
+  })
+})
+
+describe('what each view offers', () => {
+  const views: [View, Dimension[] | null][] = [
+    [{ kind: 'inbox' }, ['words', 'priorities', 'when']],
+    [{ kind: 'today' }, ['words', 'projects', 'people', 'priorities']],
+    [{ kind: 'upcoming' }, ['words', 'projects', 'people', 'priorities']],
+    [{ kind: 'project', id: HOP }, ['words', 'people', 'priorities', 'when']],
+    [{ kind: 'mine' }, ['words', 'projects', 'priorities', 'when']],
+    [{ kind: 'board' }, ['words', 'projects', 'people', 'priorities', 'when']],
+    [{ kind: 'timeline' }, ['words', 'projects', 'people', 'priorities', 'when']],
+    [{ kind: 'completed' }, ['words', 'projects', 'priorities']],
+    [{ kind: 'focus' }, null],
+    [{ kind: 'timesheet' }, null],
+    [{ kind: 'notes' }, null],
+    [{ kind: 'settings' }, null],
+    [{ kind: 'lists' }, null],
+    [{ kind: 'notifications' }, null],
+  ]
+
+  it.each(views)('%o offers %o, and fixes the rest', (view, wanted) => {
+    expect(offered(view)).toEqual(wanted)
+    const fixed = fixedFor(view)
+    expect([...(wanted ?? []), ...fixed].sort()).toEqual(['people', 'priorities', 'projects', 'when', 'words'])
+    expect(fixed.some((d) => wanted?.includes(d))).toBe(false)
   })
 })
