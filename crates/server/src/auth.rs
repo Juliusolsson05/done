@@ -299,7 +299,7 @@ struct SigningIn {
 /// The local destinations that can send someone through sign-in.
 fn back_to(then: Option<String>) -> Option<String> {
     let then = then?;
-    if then == "/feedback" {
+    if then == "/feedback" || crate::routes::is_app_target(&then) {
         return Some(then);
     }
     // A path on this server, so the redirect cannot leave it.
