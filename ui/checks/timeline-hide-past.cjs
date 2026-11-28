@@ -108,6 +108,7 @@ async function check() {
       const { name, ...options } = size
       const context = await browser.newContext(options)
       const syncs = []
+      let finishedReads = 0
       // Grouped by project, so every group's count can be read.
       await context.addInitScript(() => {
         if (!sessionStorage.getItem('seeded')) {
@@ -121,7 +122,10 @@ async function check() {
         const pathname = new URL(request.url()).pathname
         if (pathname === '/api/me') return route.fulfill({ json: { mode: 'local' } })
         if (pathname === '/api/state') return route.fulfill({ json: state })
-        if (pathname === '/api/finished') return route.fulfill({ json: history })
+        if (pathname === '/api/finished') {
+          finishedReads++
+          return route.fulfill({ json: history })
+        }
         if (pathname === '/api/sync') {
           syncs.push(request.postDataJSON())
           return route.fulfill({ json: { rev: 1 + syncs.length } })
@@ -136,7 +140,20 @@ async function check() {
         await page.locator('[data-timeline-completed="6"]').waitFor()
         await page.waitForTimeout(400)
       }
-      await ready()
+      await page.goto('http://done.test/timeline')
+      await page.locator('[data-task="3"]').first().waitFor()
+      const menu = page.getByRole('button', { name: 'More timeline options' })
+      const completed = page.getByRole('checkbox', { name: 'Show completed' })
+      await menu.click()
+      const defaultsToOff = !(await completed.isChecked())
+      expect(defaultsToOff, `${name}: Show completed should start off`)
+      expect((await page.locator('[data-timeline-completed]').count()) === 0, `${name}: no completed rows should show by default`)
+      expect(finishedReads === 0, `${name}: history should only be fetched after enabling it`)
+      if (shots) await page.screenshot({ path: path.join(shots, `${name}-completed-default.png`) })
+      if (defaultsToOff) await completed.check()
+      await page.keyboard.press('Escape')
+      await page.locator('[data-timeline-completed="6"]').waitFor()
+      await page.waitForTimeout(400)
       const off = await read(page)
       if (shots) await page.screenshot({ path: path.join(shots, `${name}-off.png`) })
       expect(off.titles.includes('Old landing page copy'), `${name}: with the option off the long-ago task should be on the chart`)
@@ -153,7 +170,7 @@ async function check() {
       )
 
       // Turned on in the Timeline's menu.
-      await page.getByRole('button', { name: 'More timeline options' }).click()
+      await menu.click()
       const option = page.getByRole('checkbox', { name: 'Hide past tasks' })
       expect(!(await option.isChecked()), `${name}: Hide past tasks should start off`)
       await option.click()
@@ -191,6 +208,7 @@ async function check() {
       // Remembered on this device.
       await ready()
       const again = await read(page)
+      expect(again.titles.includes('Write the press kit'), `${name}: Show completed should stay on after reload`)
       expect(
         !again.titles.includes('Old landing page copy') && /Past hidden/.test(again.bar ?? ''),
         `${name}: the choice was not kept across a reload`,
