@@ -20,6 +20,7 @@ import { play } from '@/lib/sounds'
 import { HOLD_MS, IDLE, SLOP, press, type PressState } from '@/lib/timeline-press'
 import { isSubtask, laneOf, lanes, markOpen, patchTask, projectName, type LaneKey, type Task } from '@/lib/tasks'
 import { matchesFilter, isFiltering } from '@/lib/view-filter'
+import { setFilterOpen } from '@/lib/view-filter-store'
 import { FilterBar, FilterButton, NothingMatches, useViewFilter } from '@/components/view-filter'
 import { cn } from '@/lib/utils'
 
@@ -226,11 +227,18 @@ export function Board() {
   const onPress = useCallback<Press>(
     (event, task) => {
       lastPointer.current = event.pointerType
-      if (event.button !== 0 || pressing.current) return
       const mouse = event.pointerType === 'mouse'
-      // The window's long press (the menu) is the Board's to give: it is not
-      // started for a finger here, and comes on letting go of a held card.
-      if (!mouse) event.stopPropagation()
+      if (!mouse) {
+        // The window's long press (the menu) is the Board's to give: it is
+        // not started for a finger here, not even a second finger while a
+        // card is held, and comes on letting go of a held card.
+        event.stopPropagation()
+        // Stopped here, the press never reaches the document, where the
+        // iPad's Filter popover listens for a press outside it: it is closed
+        // here instead, as that press would have.
+        setFilterOpen(false)
+      }
+      if (event.button !== 0 || pressing.current) return
       const now: Pressing = {
         state: press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: 'touch' }),
         timer: 0,

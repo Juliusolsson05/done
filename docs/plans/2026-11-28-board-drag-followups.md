@@ -29,10 +29,13 @@ phone held sideways still names the Board in its navigation bar.
 ## Decisions
 
 - N1: stop a finger's pointerdown from bubbling before any early return.
-- N2: when a finger presses a card, the Board sends the document a mouse
-  `pointerdown` of its own (not through the app's root, so the page's long
-  press stays off). Every open popover and menu closes as it would for a
-  press outside it; nothing else listens for it on the document.
+- N2: when a finger presses a card, the Board closes the Filter
+  (`setFilterOpen(false)`), as the press outside it would have. The Filter is
+  the only popover on the Board.
+  Ruling: not a synthetic `pointerdown` sent to the document. Tried first; this
+  Radix version defers a primary-button outside press until a click, so it
+  closed nothing. Cost if wrong: a popover added to the Board later must be
+  closed here too.
 - N3: `PhoneHeader` treats a large title that is not drawn (hidden by its
   view) as scrolled away, so the small title shows; it measures again when
   the window is resized (turning the phone).
@@ -58,6 +61,15 @@ Added to `ui/checks/board-heights.cjs`, each failing on origin/main 160f253:
   board's `max-md:-mx-4 max-md:px-4` bleed (16 px) to mismatch the new
   margin. Not done here, since #119 is not merged.
 
-## Verified / not verified
+## Verified (Chrome via Playwright, built UI, mocked `/api`)
 
-Filled in as the work lands.
+- `ui/checks/board-heights.cjs`: 6 failures on origin/main 160f253 (the five
+  new N1/N2/N3 assertions that can fail, plus the drag landing with a second
+  finger down); all 93 assertions pass on this branch.
+- 844x390: the navigation bar shows "Board" (screenshot taken).
+- `npm run typecheck && npm test && npm run build` green (714 tests).
+
+## Not verified
+
+- A real iPhone or iPad: only Chrome's touch emulation.
+- The landscape margins against #119, which is not merged yet (see Rulings).
