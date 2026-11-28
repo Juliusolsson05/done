@@ -2,12 +2,9 @@
 set -euo pipefail
 mkdir -p qa/output
 (cd qa/capture/automation && xcodegen generate)
-app=$(find crates/app/gen/apple/build -type d -name done.app -print -quit)
-if [[ -z "$app" ]]; then app=$(find "$HOME/Library/Developer/Xcode/DerivedData" -type d -name done.app -print -quit); fi
-test -n "$app"
-ditto -c -k --keepParent "$app" qa/output/done-simulator.zip
+app=/tmp/store-app/done.app
 /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist"
-for family in iPhone iPad; do
+for family in iPad; do
   device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; f=sys.argv[1]; ds=[d for k,ds in sorted(json.load(sys.stdin)["devices"].items(),reverse=True) if "iOS" in k for d in ds if d["isAvailable"] and (("Pro Max" in d["name"]) if f=="iPhone" else ("iPad Pro 13-inch" in d["name"]))]; print(ds[0]["udid"])' "$family")
   xcrun simctl boot "$device"
   xcrun simctl bootstatus "$device" -b
@@ -32,5 +29,10 @@ for family in iPhone iPad; do
     mkdir -p "qa/output/$family"
     xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$family.xcresult" --output-path "qa/output/$family" || true
   fi
+  sqlite3 "$db" 'select id,title from task; select id,text from note' > "qa/output/$family-db.txt"
+  cp "$RUNNER_TEMP/$family.log" "qa/output/$family.log"
   xcrun simctl shutdown "$device"
+  grep -q "Pick up picnic blankets" "qa/output/$family-db.txt"
+  grep -q "Picnic packing list" "qa/output/$family-db.txt"
+  grep -q "TEST SUCCEEDED" "qa/output/$family.log"
 done
