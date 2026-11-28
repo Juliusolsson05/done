@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 mod account;
 mod replica;
-pub use account::{Account, Held};
+pub use account::{Account, Held, Leaving, Left};
 pub use replica::{Assignee, Cursor, Exported, Gone, Outbox, Refused, Reply, Rows, Seqs, Stamped};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

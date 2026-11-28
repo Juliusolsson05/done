@@ -9,7 +9,7 @@ import { isIosAgent } from '@/lib/platform'
 import type { Data, Task } from '@/lib/tasks'
 import type { Note, SaveNote } from '@/lib/notes'
 import type { Entry, NewEntry } from '@/lib/time-sheet'
-import { unsentCount, type Held, type Pending } from '@/lib/account-switch'
+import { unsentCount, type Held, type Left, type Pending } from '@/lib/account-switch'
 
 // What the desktop app knows about itself: its version, where its program is
 // (for connecting an agent), and whether an update is waiting for a restart.
@@ -95,9 +95,14 @@ async function answer<T>(response: Response): Promise<T> {
   // was ended in another tab. Starting over shows the sign-in screen, and
   // nothing typed since is lost that could have been saved anyway.
   if (response.status === 401) {
-    // For an app, the token is what stopped working. Without it the app is
-    // back on its local file.
-    if (hosted) forgetCloudSession()
+    // For an app, the token is what stopped working (tokens last 30 days).
+    // Without it the app is back on its local file. Nobody chose to sign
+    // out, so nothing unsent is taken off the device: marked "ended" first,
+    // finished on the next load (`settled`), and the person is told.
+    if (hosted) {
+      await markLeaving('ended')
+      forgetCloudSession()
+    }
     location.reload()
     throw new Error('signed out')
   }
@@ -117,13 +122,24 @@ export const loadMe = async (): Promise<Me> => {
   return readMe(response.status, await response.json().catch(() => null))
 }
 
-// An app that is not signed in first takes off anything a past account
-// left of its shared workspaces: a session the server ended, a sign-out on
-// an older version, or a sign-out whose own clean-up failed. Once per window;
-// with nothing left over it changes nothing. See crates/core/src/account.rs.
-let leftOver: Promise<unknown> | null = null
-const settled = (): Promise<unknown> =>
-  tauri && !hosted ? (leftOver ??= tauri.core.invoke('leave_account', { deleted: false }).catch(() => 0)) : Promise.resolve()
+// The account leaving this device: marked in the file before the session is
+// forgotten or the account deleted, done after (crates/core/src/account.rs).
+type Leaving = 'ended' | 'signed-out' | 'deleted'
+const markLeaving = (how: Leaving | null): Promise<unknown> => tauri?.core.invoke('mark_leaving', { how }).catch(() => {}) ?? Promise.resolve()
+const finishLeaving = (): Promise<Left | null> => tauri?.core.invoke<Left | null>('finish_leaving').catch(() => null) ?? Promise.resolve(null)
+
+// An app that is not signed in first finishes a leaving that was marked and
+// not done: a reload or a crash came between (the 401 above reloads at
+// once). Without a mark it changes nothing: the "done next" preview app is
+// never signed in and runs on the real file. Once per window.
+let leftOver: Promise<Left | null> | null = null
+const settled = (): Promise<Left | null> => (tauri && !hosted ? (leftOver ??= finishLeaving()) : Promise.resolve(null))
+// What that did, for the window to say (a session that ended).
+export const leftOnLoad = settled
+
+// Changes on this device waiting for an account that is signed out.
+export const waitingHere = (): Promise<Held | null> =>
+  tauri && !hosted ? tauri.core.invoke<Held | null>('waiting').catch(() => null) : Promise.resolve(null)
 
 export const loadState = (today: Day): Promise<Data> =>
   local ? settled().then(() => local.core.invoke<Data>('state', { today })) : get('/api/state?today=' + today).then((r) => answer<Data>(r))
@@ -161,13 +177,12 @@ export const deleteNote = (id: number): Promise<void> =>
 // what changed here, take in what changed elsewhere. `arrived` when something
 // did, so the window reloads. Does nothing for a browser or an app that is
 // not signed in. `held` when the file holds another account's tasks: then
-// nothing is sent until the person says (`takeOver` is their answer to take
-// those tasks off this device).
+// nothing is sent until the person says (`takeOverHere`).
 export const canReplicate = tauri !== undefined && hosted !== null
 const account = hosted && { id: hosted.account.id, email: hosted.account.email }
-export async function replicate(takeOver = false): Promise<{ arrived: boolean; held: Held | null }> {
+export async function replicate(): Promise<{ arrived: boolean; held: Held | null }> {
   if (!tauri || !hosted) return { arrived: false, held: null }
-  const outbox = await tauri.core.invoke<{ upto: number; renumbered: number; held?: Held | null }>('outbox', { account, takeOver })
+  const outbox = await tauri.core.invoke<{ upto: number; renumbered: number; held?: Held | null }>('outbox', { account })
   if (outbox.held) return { arrived: false, held: outbox.held }
   const response = await fetch(at + '/api/replicate', {
     method: 'POST',
@@ -179,20 +194,19 @@ export async function replicate(takeOver = false): Promise<{ arrived: boolean; h
   const reply = await answer<unknown>(response)
   const arrived = await tauri.core.invoke<boolean>('inbox', { reply, upto: outbox.upto, account })
   // The first round gives rows counted up on this device new ids; what the
-  // window holds must be loaded again whether or not anything arrived; and
-  // so must a take-over, which emptied the file.
-  return { arrived: arrived || outbox.renumbered > 0 || takeOver, held: null }
+  // window holds must be loaded again whether or not anything arrived.
+  return { arrived: arrived || outbox.renumbered > 0, held: null }
 }
+
+// The person's answer to a held round: the other account's tasks come off
+// this device, which is now this account's. Done before any round.
+export const takeOverHere = (): Promise<void> => (tauri && hosted ? tauri.core.invoke<void>('take_over', { account }) : Promise.resolve())
 
 // How many changes here have not reached the account: asked before signing out.
 export async function unsentChanges(): Promise<number> {
   if (!tauri || !hosted) return 0
-  return unsentCount(await tauri.core.invoke<Pending>('outbox', { account, takeOver: false }))
+  return unsentCount(await tauri.core.invoke<Pending>('outbox', { account }))
 }
-
-// Shared workspaces leave this device with the account; the person's own
-// tasks stay. If this fails, the next load does it (`settled`).
-const leaveDevice = (deleted: boolean) => tauri?.core.invoke('leave_account', { deleted }).catch(() => {})
 
 // Workspaces: made, changed and joined on the hosted server, never on a
 // device's own file (a device learns the result at its next sync). Only for a
@@ -218,25 +232,39 @@ export const liveTicket = (ask: { note?: number; space?: number }) => post<{ tic
 
 // Both are sent as JSON, like every call that changes something: another
 // site can make a browser post a form here, but not JSON.
-export const signOut = async (): Promise<void> => {
+// `how`: 'signed-out' when the person chose to (and was told of anything
+// unsent: lib/leave.ts), 'ended' when they did not (Apple ended the
+// credential, or this device holds another account's tasks), which keeps
+// unsent workspace changes for when the account signs in again.
+export const signOut = async (how: 'signed-out' | 'ended' = 'signed-out'): Promise<void> => {
   // An app's session is its token: forgetting it is signing out. A browser's
   // is a cookie only the server can take back.
   // The app keeps its own tasks, with everything synced so far, and goes on
-  // without an account; shared workspaces leave the device. A last round and
-  // the question about unsent changes come first (store.ts `signOutChecked`).
+  // without an account; shared workspaces leave the device. Marked first, so
+  // a reload or a crash from here on still ends in the clean-up.
   if (hosted) {
+    await markLeaving(how)
     forgetCloudSession()
-    await leaveDevice(false)
+    await finishLeaving()
   } else await post<unknown>('/auth/signout', {})
   await clearWidgets()
   location.reload()
 }
 export const deleteAccount = async (): Promise<void> => {
-  await post<unknown>('/api/account/delete', {})
+  // Marked before the server is asked: a round answered 401 once the account
+  // is gone reloads at once, and the next load must finish a deletion, not
+  // a session that ended. A refusal takes the mark back; a 401 keeps it.
+  if (hosted) await markLeaving('deleted')
+  try {
+    await post<unknown>('/api/account/delete', {})
+  } catch (error) {
+    if (hosted && !(error instanceof Error && error.message === 'signed out')) await markLeaving(null)
+    throw error
+  }
   if (hosted) {
     forgetCloudSession()
     // The account is gone: what stays is plain local data.
-    await leaveDevice(true)
+    await finishLeaving()
   }
   await clearWidgets()
   location.reload()
@@ -323,7 +351,7 @@ export const watchAppleSession = (): (() => void) | undefined => {
   const id = crypto.randomUUID()
   let active = true
   const listening = tauri.event.listen<string>('apple-credential-ended', ({ payload }) => {
-    if (active && payload === id && sameAppleSession(cloudSession(), hosted)) void signOut()
+    if (active && payload === id && sameAppleSession(cloudSession(), hosted)) void signOut('ended')
   })
   void listening.then(() => {
     if (active) return tauri.core.invoke('watch_apple_user', { user: hosted.appleUser, id })

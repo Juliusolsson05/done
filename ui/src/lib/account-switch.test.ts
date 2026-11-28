@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { focusLeaves, heldMessage, signOutQuestion, unsentCount } from '@/lib/account-switch'
+import { deletionWarning, endedMessage, focusLeaves, heldMessage, signOutQuestion, unsentCount, waitingMessage } from '@/lib/account-switch'
 import type { Session } from '@/lib/focus'
 import type { Task } from '@/lib/tasks'
 import type { Team } from '@/lib/team'
@@ -42,7 +42,7 @@ describe('what the person is told', () => {
     expect(unsent.drop).toBe('Remove them')
     const synced = heldMessage({ account: { email: '' }, rows: 4, unsent: 0 })
     expect(synced.body).toBe(
-      'This device has tasks from your other account. They are in that account. Take them off this device to use this account here?',
+      'This device has tasks from your other account that were synced with that account. Take them off this device to use this account here?',
     )
     expect(synced.drop).toBe('Continue')
     expect(heldMessage({ account: { email: 'a@b.c' }, rows: 1, unsent: 1 }).body).toMatch(/^1 change from a@b\.c was never sent/)
@@ -64,5 +64,30 @@ describe('focusLeaves', () => {
     expect(focusLeaves(focusOn(9), tasks, team)).toBe(true)
     expect(focusLeaves(focusOn(9), tasks, { ...team, spaces: [team.spaces[0]] })).toBe(false)
     expect(focusLeaves(focusOn(2), tasks, null)).toBe(false)
+  })
+})
+
+describe('after leaving', () => {
+  it('says the session ended, and what waits for it', () => {
+    expect(endedMessage({ how: 'ended', removed: 4, kept: 3 })).toBe(
+      'Your session ended. 3 changes are waiting on this device. Sign in to send them.',
+    )
+    expect(endedMessage({ how: 'ended', removed: 0, kept: 1 })).toBe('Your session ended. 1 change is waiting on this device. Sign in to send it.')
+    expect(endedMessage({ how: 'ended', removed: 0, kept: 0 })).toBe('Your session ended. Sign in to sync again.')
+    expect(endedMessage({ how: 'signed-out', removed: 2, kept: 0 })).toBeNull()
+    expect(endedMessage(null)).toBeNull()
+  })
+
+  it('names the account changes wait for where one signs in', () => {
+    expect(waitingMessage({ account: { email: 'a@hop.dev' }, rows: 9, unsent: 2 })).toBe(
+      '2 changes from a@hop.dev are waiting on this device. Sign in as a@hop.dev to send them.',
+    )
+    expect(waitingMessage({ account: { email: 'a@hop.dev' }, rows: 9, unsent: 0 })).toBeNull()
+    expect(waitingMessage(null)).toBeNull()
+  })
+
+  it('warns before deleting with changes not sent', () => {
+    expect(deletionWarning(2)).toBe('2 changes not sent yet. Your own stay on this device; changes in shared workspaces are lost.')
+    expect(deletionWarning(0)).toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 // The tasks and projects this window is showing, and keeping them saved.
 // One store for the whole interface; React reads it with useSyncExternalStore.
 import type { Held } from '@/lib/account-switch'
-import { BROWSER_INFO, canReplicate, loadInfo, loadState, replicate, sync, type Info } from '@/lib/backend'
+import { BROWSER_INFO, canReplicate, loadInfo, loadState, replicate, sync, takeOverHere, type Info } from '@/lib/backend'
 import { changeSet, picture, type Picture } from '@/lib/changes'
 import { TODAY } from '@/lib/days'
 import type { Data } from '@/lib/tasks'
@@ -102,12 +102,21 @@ export function refresh() {
 // told by an event, as they load on their own.
 export const SYNCED = 'done-synced'
 let replicating = false
-export function replicateNow(takeOver = false): Promise<void> {
-  if (!canReplicate || replicating) return Promise.resolve()
+// Off while the account leaves this device (lib/leave.ts): a round that
+// started after the clean-up would bring the account's rows back.
+let stopped = false
+export const stopSyncing = () => {
+  stopped = true
+}
+export const resumeSyncing = () => {
+  stopped = false
+}
+export function replicateNow(): Promise<void> {
+  if (!canReplicate || replicating || stopped) return Promise.resolve()
   replicating = true
   const round = pending.then(async () => {
     try {
-      const { arrived, held } = await replicate(takeOver)
+      const { arrived, held } = await replicate()
       if (JSON.stringify(held) !== JSON.stringify(snapshot.held)) set({ held })
       if (arrived) {
         await reload()
@@ -125,11 +134,18 @@ export function replicateNow(takeOver = false): Promise<void> {
 }
 
 // The person's answer to "tasks from another account": take them off this
-// device and sync this account. Waits for a round under way, which would
-// skip this one.
+// device, then sync this account. The answer is kept in the file before any
+// round (core `take_over`), and the window shows the file again whatever
+// the round does, so it never goes on showing the other account's tasks.
 export async function takeOver(): Promise<void> {
   await pending
-  await replicateNow(true)
+  try {
+    await takeOverHere()
+  } finally {
+    set({ held: null })
+    await reload().catch(() => {})
+  }
+  await replicateNow()
 }
 
 // Once every save and round queued so far is done (lib/leave.ts).

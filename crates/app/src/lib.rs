@@ -477,8 +477,14 @@ fn delete_note(store: tauri::State<Store>, id: i64) -> Result<(), String> {
 // send and take in the answer, for the account signed in (see
 // crates/core/src/account.rs: another account's tasks are held, not sent).
 #[tauri::command]
-fn outbox(store: tauri::State<Store>, account: done_core::Account, take_over: Option<bool>) -> Result<done_core::Outbox, String> {
-    store.outbox_for(&account, take_over.unwrap_or(false)).map_err(|e| e.to_string())
+fn outbox(store: tauri::State<Store>, account: done_core::Account) -> Result<done_core::Outbox, String> {
+    store.outbox_for(&account).map_err(|e| e.to_string())
+}
+
+// The person chose to take another account's tasks off this device.
+#[tauri::command]
+fn take_over(store: tauri::State<Store>, account: done_core::Account) -> Result<(), String> {
+    store.take_over(&account).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -486,10 +492,22 @@ fn inbox(store: tauri::State<Store>, reply: done_core::Reply, upto: i64, account
     store.inbox_for(&reply, upto, &account).map_err(|e| e.to_string())
 }
 
-// Signed out, or the account deleted: shared workspaces leave this device.
+// The account leaving this device: marked first, done after, and finished
+// on the next load if a reload came between (crates/core/src/account.rs).
 #[tauri::command]
-fn leave_account(store: tauri::State<Store>, deleted: bool) -> Result<usize, String> {
-    store.leave_account(deleted).map_err(|e| e.to_string())
+fn mark_leaving(store: tauri::State<Store>, how: Option<done_core::Leaving>) -> Result<(), String> {
+    store.mark_leaving(how).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn finish_leaving(store: tauri::State<Store>) -> Result<Option<done_core::Left>, String> {
+    store.finish_leaving().map_err(|e| e.to_string())
+}
+
+// Signed out with changes waiting for an account.
+#[tauri::command]
+fn waiting(store: tauri::State<Store>) -> Result<Option<done_core::Held>, String> {
+    store.waiting().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -564,7 +582,7 @@ pub fn run() {
         .manage(store)
         .manage(UpdateReady::default())
         .manage(Focus::default())
-        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, leave_account, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
+        .invoke_handler(tauri::generate_handler![state, sync, entries, record_entry, delete_entry, notes, save_note, delete_note, finished, outbox, inbox, take_over, mark_leaving, finish_leaving, waiting, info, restart, focus_set, open_in_browser, safe_area, widget_snapshot, apple_sign_in, web_sign_in, watch_apple_user]);
 
     // Haptics on a phone (ui/src/lib/haptics.ts).
     #[cfg(mobile)]

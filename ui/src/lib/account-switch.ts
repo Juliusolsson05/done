@@ -13,6 +13,14 @@ export interface Held {
   unsent: number
 }
 
+// What leaving did when a window loaded (core `Left`): 'ended' is a session
+// that ran out or was ended by the server; `kept` changes wait for it.
+export interface Left {
+  how: 'ended' | 'signed-out' | 'deleted'
+  removed: number
+  kept: number
+}
+
 // What a round would send, as the app's `outbox` gives it.
 export interface Pending {
   rows: Partial<Record<'projects' | 'tasks' | 'notes' | 'entries' | 'assignees' | 'gone', unknown[]>>
@@ -27,6 +35,28 @@ export function unsentCount(outbox: Pending): number {
 }
 
 const changes = (n: number) => (n === 1 ? '1 change' : `${n} changes`)
+
+const are = (n: number) => (n === 1 ? 'is' : 'are')
+
+// Said once when the window loads after the session ended.
+export function endedMessage(left: Left | null): string | null {
+  if (left?.how !== 'ended') return null
+  if (left.kept === 0) return 'Your session ended. Sign in to sync again.'
+  return `Your session ended. ${changes(left.kept)} ${are(left.kept)} waiting on this device. Sign in to send ${left.kept === 1 ? 'it' : 'them'}.`
+}
+
+// Shown where one signs in, while changes wait for an account.
+export function waitingMessage(held: Held | null): string | null {
+  if (!held || held.unsent === 0) return null
+  const who = held.account.email || 'your account'
+  return `${changes(held.unsent)} from ${who} ${are(held.unsent)} waiting on this device. Sign in as ${who} to send ${held.unsent === 1 ? 'it' : 'them'}.`
+}
+
+// Said with the question before deleting the account.
+export function deletionWarning(unsent: number): string | null {
+  if (unsent === 0) return null
+  return `${changes(unsent)} not sent yet. Your own stay on this device; changes in shared workspaces are lost.`
+}
 
 export function signOutQuestion(unsent: number): string {
   return `${changes(unsent)} not sent yet. Sign out anyway? Your own stay on this device and go up when you sign in again. Changes in shared workspaces are lost.`
@@ -50,7 +80,8 @@ export function heldMessage(held: Held): HeldMessage {
   }
   return {
     title: 'Tasks from another account',
-    body: `This device has tasks from ${who}. They are in that account. Take them off this device to use this account here?`,
+    // Not "they are in that account": it may have been deleted since.
+    body: `This device has tasks from ${who} that were synced with that account. Take them off this device to use this account here?`,
     drop: 'Continue',
   }
 }

@@ -32,7 +32,7 @@ export function HeldDialog() {
             <DialogDescription>{words.body}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => act(() => signOutChecked(true))}>
+            <Button variant="outline" disabled={busy} onClick={() => act(() => signOutChecked(true, 'ended'))}>
               Sign out
             </Button>
             <Button variant={held.unsent > 0 ? 'destructive' : 'default'} disabled={busy} onClick={() => act(takeOver)}>

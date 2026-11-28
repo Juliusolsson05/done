@@ -39,8 +39,9 @@ it('ends only the watched Apple session, takes shared workspaces off the device 
   expect(values.has('done-cloud-session')).toBe(false)
   // No last round and no question: Apple ended the credential. The person's
   // own tasks stay (crates/core/src/account.rs `leave_account`).
-  expect(invoke.mock.calls.map(([command]) => command)).toEqual(['watch_apple_user', 'leave_account', 'widget_snapshot'])
-  expect(invoke).toHaveBeenCalledWith('leave_account', { deleted: false })
+  // Nobody chose this, so it is a session that ended: unsent changes stay.
+  expect(invoke.mock.calls.map(([command]) => command)).toEqual(['watch_apple_user', 'mark_leaving', 'finish_leaving', 'widget_snapshot'])
+  expect(invoke).toHaveBeenCalledWith('mark_leaving', { how: 'ended' })
   dispose?.()
   await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
 })

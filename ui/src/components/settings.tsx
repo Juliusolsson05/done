@@ -1,6 +1,6 @@
 import { CLOUD_URL } from '@/lib/cloud'
 import { Avatar } from '@/components/avatars'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
@@ -9,9 +9,9 @@ import { Switch } from '@/components/ui/switch'
 import { ViewHeader } from '@/components/list-view'
 import { useAccount } from '@/components/sign-in'
 import { WorkspacePage, WorkspacesPane } from '@/components/workspaces-settings'
-import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword } from '@/lib/backend'
-import { signOutQuestion } from '@/lib/account-switch'
-import { deleteAccountHere, signOutChecked } from '@/lib/leave'
+import { canSignIn, canSignInWithApple, isDesktop, isIosApp, MAC_DOWNLOAD, needsAppleVerification, openLink, REMOTE_MCP, restart, signIn, signInWithApple, signInWithReviewPassword, waitingHere } from '@/lib/backend'
+import { deletionWarning, signOutQuestion, waitingMessage, type Held } from '@/lib/account-switch'
+import { deleteAccountHere, prepareToLeave, signOutChecked } from '@/lib/leave'
 import { useApp } from '@/lib/app-context'
 import { play, setSoundsOn, soundsOn } from '@/lib/sounds'
 
@@ -101,15 +101,24 @@ function AccountPane() {
   // Changes not sent when signing out was asked, and a sign-out under way.
   const [unsent, setUnsent] = useState<number | null>(null)
   const [leaving, setLeaving] = useState(false)
+  // Changes waiting for an account this app was signed out of (a session
+  // that ended, say), and those not sent when deleting was asked.
+  const [waiting, setWaiting] = useState<Held | null>(null)
+  const [deleteUnsent, setDeleteUnsent] = useState(0)
+  useEffect(() => {
+    if (!account) void waitingHere().then(setWaiting)
+  }, [account])
   if (!account) {
     // An app that could sign in and has not.
     if (!canSignIn) return null
+    const waits = waitingMessage(waiting)
     return (
       <Pane title="Account">
         <p className="text-muted-foreground">
           Your tasks are kept on this device. Sign in to have the same tasks here, at thedone.app and on your phone. Everything on this device
           goes up to your account, and it keeps working without a connection.
         </p>
+        {waits && <p className="font-medium">{waits}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {/* Apple's sign-in first and no smaller than Google's: the App
               Store's rule for apps that offer both (guideline 4.8), and
@@ -177,7 +186,16 @@ function AccountPane() {
             </Button>
           </>
         ) : (
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setSure(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => {
+              setSure(true)
+              // One last round, and what is still unsent is said below.
+              void prepareToLeave().then(setDeleteUnsent)
+            }}
+          >
             Delete my account
           </Button>
         )}
@@ -198,6 +216,7 @@ function AccountPane() {
       {sure && (
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>Your personal space and feedback will be deleted. Other members keep shared workspaces. This cannot be undone.</p>
+          {deletionWarning(deleteUnsent) && <p className="font-medium text-foreground">{deletionWarning(deleteUnsent)}</p>}
           {isDesktop && <p>Local copies stay on your devices.</p>}
           {account.id?.startsWith('apple') && (
             <p>Also disconnect done in your Apple Account under Sign in with Apple.{' '}

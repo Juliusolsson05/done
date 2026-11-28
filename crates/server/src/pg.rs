@@ -1825,7 +1825,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use done_core::{Account, Held, Store};
+    use done_core::{Account, Held, Leaving, Store};
     use std::path::Path;
 
     const TODAY: &str = "2026-11-23";
@@ -2443,14 +2443,17 @@ mod tests {
     }
 
     fn account(me: &Me) -> Account {
-        Account { id: Some(me.id.clone()), email: me.email.clone() }
+        Account { id: Some(me.id.clone()), email: me.email.clone(), personal: None }
     }
 
     /// One round as an app does it now: nothing is sent while the file holds
     /// another account's tasks (the person is asked instead), unless
     /// `take_over` is their answer to take them off this device.
     async fn as_app(d: &Store, db: &Db, me: &Me, take_over: bool) -> Result<Reply, Held> {
-        let out = d.outbox_for(&account(me), take_over).unwrap();
+        if take_over {
+            d.take_over(&account(me)).unwrap();
+        }
+        let out = d.outbox_for(&account(me)).unwrap();
         if let Some(held) = out.held {
             return Err(held);
         }
@@ -2491,7 +2494,7 @@ mod tests {
             c.tasks.push(task(inbox, "Inbox thing EDITED OFFLINE"));
         });
         // The last round fails; the person is told and signs out anyway.
-        phone.leave_account(false).unwrap();
+        phone.leave_account(Leaving::SignedOut).unwrap();
         let added = next(&phone);
         change(&phone, |c| c.tasks.push(Task { project_id: Some(home), ..task(added, "Added after sign-out") }));
         let ours = ["Added after sign-out", "Inbox thing EDITED OFFLINE", "Renew passport EDITED OFFLINE"];
@@ -2510,7 +2513,7 @@ mod tests {
 
         // Signed out again, Geart is told the tasks are Julius's and takes
         // them off the phone: his account gets none of them.
-        phone.leave_account(false).unwrap();
+        phone.leave_account(Leaving::SignedOut).unwrap();
         let held = as_app(&phone, &db, &geart, false).await.unwrap_err();
         assert_eq!((held.rows, held.unsent), (4, 0));
         as_app(&phone, &db, &geart, true).await.unwrap();
@@ -2581,7 +2584,7 @@ mod tests {
             if deleted {
                 db.delete_account(&geart).await.unwrap();
             }
-            phone.leave_account(deleted).unwrap();
+            phone.leave_account(if deleted { Leaving::Deleted } else { Leaving::SignedOut }).unwrap();
             let state = phone.state(TODAY).unwrap();
             // Each phone added one; the second has the first's too.
             let mine = if deleted { vec!["Geart's own", "Geart's own"] } else { vec!["Geart's own"] };
@@ -2601,5 +2604,118 @@ mod tests {
         }
         // The workspace itself is untouched for those still in it.
         assert_eq!(web(&db, &julius).await, ["Julius's private-to-Hop task"]);
+    }
+
+    /// What the app does to its file when a round is answered 401 (the
+    /// session ran out or was ended) and the window loads again signed out.
+    fn session_ended(d: &Store) {
+        d.mark_leaving(Some(Leaving::Ended)).unwrap();
+        d.finish_leaving().unwrap();
+    }
+
+    /// A window that is not signed in loads: the "done next" preview app on
+    /// the real tasks file, say.
+    fn plain_load(d: &Store) {
+        assert_eq!(d.finish_leaving().unwrap(), None);
+    }
+
+    /// Geart's phone in Hop, with Julius's project Launch and two of its tasks.
+    async fn geart_in_hop(db: &Db) -> (Me, Me, i64, Store) {
+        let (julius, geart) = people(db).await;
+        let space = hop(db, &julius, &geart).await;
+        let mac = device();
+        let launch = next(&mac);
+        change(&mac, |c| {
+            c.projects.push(Project { id: launch, name: "Launch".into(), color: 3, space_id: None });
+            c.tasks.push(Task { project_id: Some(launch), ..task(launch + 1, "Ship the site") });
+            c.tasks.push(Task { project_id: Some(launch), ..task(launch + 2, "Write the post") });
+        });
+        as_app(&mac, db, &julius, false).await.unwrap();
+        db.move_project(&julius, launch, space).await.unwrap();
+        let phone = device();
+        as_app(&phone, db, &geart, false).await.unwrap();
+        (julius, geart, space, phone)
+    }
+
+    // Review of #112, 1: a session that runs out (tokens last 30 days) must
+    // not take unsent workspace edits with it. What was already sent goes.
+    #[tokio::test]
+    async fn a_session_that_ended_keeps_unsent_workspace_edits() {
+        let db = testing::db().await;
+        let (julius, geart, space, phone) = geart_in_hop(&db).await;
+        let state = phone.state(TODAY).unwrap();
+        let ship = state.tasks.iter().find(|t| t.title == "Ship the site").unwrap().clone();
+        let added = next(&phone);
+        change(&phone, |c| {
+            c.tasks.push(Task { title: "Ship the site EDITED OFFLINE".into(), ..ship.clone() });
+            c.tasks.push(Task { project_id: ship.project_id, ..task(added, "Added offline") });
+        });
+        session_ended(&phone);
+        assert_eq!(titles(&phone), ["Added offline", "Ship the site EDITED OFFLINE"]);
+        assert!(phone.state(TODAY).unwrap().team.is_none());
+        // Signed in again: both reach Hop.
+        as_app(&phone, &db, &geart, false).await.unwrap();
+        assert_eq!(web(&db, &julius).await, ["Added offline", "Ship the site EDITED OFFLINE", "Write the post"]);
+        assert!(phone.state(TODAY).unwrap().tasks.iter().all(|t| t.space_id == Some(space)));
+    }
+
+    // Review of #112, 1: a window that is not signed in, loading, changes
+    // nothing ("done next" runs on the real file and is never signed in).
+    #[tokio::test]
+    async fn a_window_that_is_not_signed_in_changes_nothing_when_it_loads() {
+        let db = testing::db().await;
+        let (_, _, _, phone) = geart_in_hop(&db).await;
+        let ship = phone.state(TODAY).unwrap().tasks.into_iter().find(|t| t.title == "Ship the site").unwrap();
+        change(&phone, |c| c.tasks.push(Task { title: "Ship the site, edited".into(), ..ship }));
+        let before = phone.state(TODAY).unwrap();
+        plain_load(&phone);
+        let after = phone.state(TODAY).unwrap();
+        assert_eq!((after.rev, after.tasks.len(), after.team.is_some()), (before.rev, before.tasks.len(), true));
+        assert_eq!(phone.outbox().unwrap().rows.tasks.len(), 1);
+    }
+
+    // Review of #112, 2: an account deleted elsewhere and made again with the
+    // same login has the same id and a new space. The phone's own tasks must
+    // not be dropped for being in the old one.
+    #[tokio::test]
+    async fn an_account_made_again_keeps_the_phone_s_own_tasks() {
+        let db = testing::db().await;
+        let (_, geart) = people(&db).await;
+        let phone = device();
+        let own = next(&phone);
+        change(&phone, |c| c.tasks.push(task(own, "Geart's own")));
+        as_app(&phone, &db, &geart, false).await.unwrap();
+        db.delete_account(&geart).await.unwrap();
+        session_ended(&phone);
+        let again = db.me("1002", "geart@hop.dev", "Geart", "").await.unwrap();
+        assert_ne!(again.personal, geart.personal);
+        as_app(&phone, &db, &again, false).await.unwrap();
+        assert_eq!(titles(&phone), ["Geart's own"]);
+        as_app(&phone, &db, &again, false).await.unwrap();
+        assert_eq!(web(&db, &again).await, ["Geart's own"]);
+        assert!(phone.outbox().unwrap().rows.is_empty());
+    }
+
+    // Review of #112, 3: a row refused again after being sent again is not
+    // sent (or counted) for ever; it stays on the device as local data.
+    #[tokio::test]
+    async fn a_row_refused_twice_stays_on_the_device_and_is_not_sent_again() {
+        let db = testing::db().await;
+        let (julius, geart) = people(&db).await;
+        let phone = device();
+        let id = next(&phone);
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing")));
+        as_app(&phone, &db, &julius, false).await.unwrap();
+        let id = phone.state(TODAY).unwrap().tasks[0].id;
+        change(&phone, |c| c.tasks.push(task(id, "Inbox thing EDITED")));
+        // Sent, as an app from before this change would, to an account that cannot take it.
+        for _ in 0..2 {
+            let out = phone.outbox().unwrap();
+            let reply = db.exchange(&geart, &out).await.unwrap();
+            phone.inbox(&Reply { spaces: None, ..reply }, out.upto).unwrap();
+        }
+        assert!(phone.outbox().unwrap().rows.is_empty(), "still sent: {:?}", phone.outbox().unwrap().rows.tasks);
+        assert_eq!(titles(&phone), ["Inbox thing EDITED"]);
+        assert_eq!(phone.state(TODAY).unwrap().tasks[0].space_id, None);
     }
 }

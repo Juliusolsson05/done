@@ -679,16 +679,37 @@ pub(crate) fn inbox_in(tx: &Transaction, reply: &Reply, upto: i64) -> Result<boo
     }
     // Reached the server is not taken: what it refused, and this device
     // still has (a space it left is dropped above), is unsent again and goes
-    // next round. Counted by the question before signing out, too.
+    // once more next round. Refused again, it is kept here only: no longer
+    // sent, nor counted as unsent, and out of any space, so it stays in the
+    // list as this device's own (an edit of it later tries once more).
+    let before: Vec<Refused> =
+        tx.query_row("SELECT value FROM kv WHERE key = 'refused'", [], |r| r.get::<_, String>(0)).optional()?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    let mut again = Vec::new();
     for r in &reply.refused {
         if !TABLES.iter().any(|(t, _)| *t == r.kind) {
             continue;
         }
         let here: bool = tx.query_row(&format!("SELECT EXISTS (SELECT 1 FROM {} WHERE id = ?1 AND seq <= ?2)", r.kind), params![r.id, upto], |row| row.get(0))?;
-        if here {
+        if !here {
+            continue;
+        }
+        if before.contains(r) {
+            if r.kind != "entry" {
+                tx.execute("UPDATE meta SET value = 1 WHERE key IN ('quiet', 'applying')", [])?;
+                applied += tx.execute(&format!("UPDATE {} SET space_id = NULL WHERE id = ?1 AND space_id IS NOT NULL", r.kind), [r.id])?;
+                tx.execute("UPDATE meta SET value = 0 WHERE key IN ('quiet', 'applying')", [])?;
+            }
+        } else {
             tx.execute("UPDATE meta SET value = value + 1 WHERE key = 'seq'", [])?;
             tx.execute(&format!("UPDATE {} SET seq = (SELECT value FROM meta WHERE key = 'seq') WHERE id = ?1", r.kind), [r.id])?;
+            again.push(r.clone());
         }
+    }
+    if again.is_empty() {
+        tx.execute("DELETE FROM kv WHERE key = 'refused'", [])?;
+    } else {
+        let text = serde_json::to_string(&again).map_err(|e| Error::Invalid(e.to_string()))?;
+        tx.execute("INSERT INTO kv (key, value) VALUES ('refused', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [text])?;
     }
     if let Some(team) = &reply.team {
         let text = team.to_string();
