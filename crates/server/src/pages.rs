@@ -65,6 +65,23 @@ fn page(title: &str, operator: &Operator, body: &str) -> Html<String> {
         ))
 }
 
+pub async fn home(State(cloud): State<Cloud>, headers: HeaderMap) -> Response {
+    let host = headers.get("host").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<axum::http::uri::Authority>().ok());
+    if host.is_some_and(|h| h.host().eq_ignore_ascii_case("hi.thedone.app")) {
+        feedback(State(cloud)).await.into_response()
+    } else {
+        Html(crate::UI).into_response()
+    }
+}
+
+pub async fn feedback(State(cloud): State<Cloud>) -> Html<String> {
+    let app = text(&cloud.config.public_url);
+    let sign_in = if cloud.config.dev { "/auth/dev" } else { "/auth/google" };
+    Html(include_str!("feedback.html")
+        .replace("{{APP_URL}}", &app)
+        .replace("{{FEEDBACK_SIGN_IN}}", &format!("{app}{sign_in}?then=%2Ffeedback")))
+}
+
 pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
     page(
         "Privacy",
@@ -74,6 +91,7 @@ pub async fn privacy(State(cloud): State<Cloud>) -> Html<String> {
   <li><strong>Your tasks.</strong> Your tasks, projects, notes and time sheet are kept in a database, in a space that belongs to your account alone.</li>
   <li><strong>Workspaces you are in.</strong> A project you move into a workspace, its tasks and notes, and who is assigned to what are kept in that workspace, where every member can see and change them. Your time sheet and your other projects are never shared.</li>
   <li><strong>Who you are, from Google.</strong> When you sign in, Google tells this server your account's id, name, email address and picture. They are kept with your account so the server knows which tasks are yours, so people in your workspaces see your name and picture, and so an invite sent to your address can reach you. A signed cookie in your browser (or a token in the app) says who you are on each visit.</li>
+  <li><strong>Feedback.</strong> If you post to the feedback wall, signed-in users can see the category, message and date. The server keeps the account that sent it so deleting your account also deletes your posts.</li>
   <li><strong>Invites.</strong> An invite keeps the address it was sent to and who sent it. No email is sent: it waits in done for that address to sign in.</li>
 </ul>
 <p>Nothing else is asked of Google. done cannot read your mail, calendar, contacts or files.</p>
