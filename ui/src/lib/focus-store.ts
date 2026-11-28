@@ -4,6 +4,7 @@
 import { play } from '@/lib/sounds'
 import { recordEntry, showInMenuBar } from '@/lib/backend'
 import {
+  DEFAULT_MINUTES,
   dismiss,
   dueReminder,
   entryOf,
@@ -17,6 +18,7 @@ import {
   start,
   startBlock,
   toggle,
+  storedLength,
   type Block,
   type Reminder,
   type Session,
@@ -33,6 +35,25 @@ const UP_NEXT_KEY = 'done-up-next'
 // Blocks that ended but could not be written to the time sheet yet (the web
 // server was down, say). Kept until a write succeeds, so none is lost.
 const UNSAVED_KEY = 'done-unsaved-entries'
+// The length last chosen, so a length picked under "Other" is still the
+// one chosen next time, after a reload too.
+const MINUTES_KEY = 'done-focus-minutes'
+
+export function storedMinutes(): number {
+  try {
+    return storedLength(localStorage.getItem(MINUTES_KEY))
+  } catch {
+    return DEFAULT_MINUTES
+  }
+}
+
+export function rememberMinutes(minutes: number) {
+  try {
+    localStorage.setItem(MINUTES_KEY, String(minutes))
+  } catch {
+    // Storage may be full or blocked; the length is still chosen for now.
+  }
+}
 
 function stored(): Session | null {
   try {
