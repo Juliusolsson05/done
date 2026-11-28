@@ -23,7 +23,7 @@ import { feel } from '@/lib/haptics'
 import { play } from '@/lib/sounds'
 import { dragBar, isSubtask, openTasks, patchTask, timelineGroups, type DragMode, type Task } from '@/lib/tasks'
 import { placed, spanOf, type Placed } from '@/lib/timeline-layout'
-import { HOLD_MS, IDLE, press, released, type PressState } from '@/lib/timeline-press'
+import { daysDragged, HOLD_MS, IDLE, press, released, SLOP, type PressState } from '@/lib/timeline-press'
 import { dayWidth, daysToFill, parseZoom, ticks, TOUCH_ZOOMS, type TouchZoom } from '@/lib/timeline-touch'
 import { edgeOf, initialLeft, LEAD, leadFor, onScreen, paneLayout, spanFor } from '@/lib/timeline-window'
 import { isFiltering, matchesFilter } from '@/lib/view-filter'
@@ -191,15 +191,20 @@ export function Timeline() {
     setSeen(now)
     return now
   }
-  // The day at the left edge, kept when the range, the zoom or the width
-  // changes; before the first scroll, where the view opens.
-  const anchor = useRef<Day | null>(null)
+  // The day in the middle of the chart, kept when the range, the zoom or the
+  // width changes; before the first scroll, where the view opens. Only a
+  // scroll by the person (or Today) moves it, not one the view makes itself
+  // to keep it: a zoom too wide to scroll (Quarter on a phone) must not lose it.
+  const focus = useRef<Day | null>(null)
+  // The scroll position the view itself last set.
+  const placedAt = useRef(-1)
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
     const { width: viewDays } = view()
-    const left = anchor.current ? daysBetween(span.start, anchor.current) : initialLeft(span, TODAY, earliest, viewDays)
+    const left = focus.current ? daysBetween(span.start, focus.current) + 0.5 - viewDays / 2 : initialLeft(span, TODAY, earliest, viewDays)
     el.scrollLeft = Math.max(0, left) * px
+    placedAt.current = el.scrollLeft
     look()
     // Laid out anew whenever the range, the zoom or the panes change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,8 +217,11 @@ export function Timeline() {
     if (frame.current) return
     frame.current = requestAnimationFrame(() => {
       frame.current = 0
-      const { left } = look()
-      anchor.current = addDays(span.start, Math.round(left))
+      const { left, width } = look()
+      const el = scroller.current
+      if (!el || Math.abs(el.scrollLeft - placedAt.current) < 1) return
+      placedAt.current = -1
+      focus.current = addDays(span.start, Math.floor(left + width / 2))
     })
   }
   useEffect(() => () => cancelAnimationFrame(frame.current), [])
@@ -221,12 +229,9 @@ export function Timeline() {
   // when the view opens.
   const showDay = (day: Day) =>
     scroller.current?.scrollTo({ left: Math.max(0, daysBetween(span.start, day) - leadFor(view().width)) * px, behavior: 'smooth' })
+  // The day in the middle stays in the middle (`focus`): zooming out from
+  // today keeps today on screen.
   const setZoom = (next: TouchZoom) => {
-    // The day in the middle stays in the middle: zooming out from today keeps
-    // today on screen.
-    const now = view()
-    const nextDays = chartWidth / dayWidth(next, chartWidth)
-    anchor.current = addDays(span.start, Math.round(now.left + now.width / 2 - nextDays / 2))
     setZoomState(next)
     try {
       localStorage.setItem(ZOOM_KEY, next)
@@ -246,13 +251,24 @@ export function Timeline() {
   // Pressing a bar: whole days, its start or its end. A mouse takes it at
   // once; a finger has to hold it first (lib/timeline-press), or the press
   // is a scroll and is left to the browser.
-  const pressing = useRef<{ state: PressState; timer: number; task: Task; mode: DragMode; el: HTMLElement; pointer: number }>(null)
-  const daysMoved = (from: Drag, clientX: number) => {
-    const moved = Math.round((clientX - from.x) / px)
-    if (from.mode === 'end') return Math.max(moved, 1 - from.length)
-    if (from.mode === 'start') return Math.min(moved, from.length - 1)
-    return moved
-  }
+  //
+  // The rule with the window's long-press menu, as on the Board: drag on
+  // move, menu on release in place. A finger's press does not start the
+  // window's own long press; a held bar moved past the slop is a drag and no
+  // menu opens however long it is held; let go without moving, the task's
+  // menu opens there.
+  const pressing = useRef<{
+    state: PressState
+    timer: number
+    task: Task
+    mode: DragMode
+    el: HTMLElement
+    pointer: number
+    x: number
+    y: number
+    travelled: boolean
+  }>(null)
+  const daysMoved = (from: Drag, clientX: number) => daysDragged(clientX - from.x, px, from.mode, from.length)
   const take = (task: Task, mode: DragMode, x: number, held: boolean) => {
     // A task with no due date has no bar to move; a tap still opens it.
     if (!task.due) return
@@ -286,13 +302,23 @@ export function Timeline() {
     edit(task.id)
   }
   const bar = {
-    down(event: PointerEvent<HTMLElement>, task: Task) {
+    // `holdable` false: the bar is off screen (its name is pinned at the
+    // edge), so a hold would move something that cannot be seen. A tap
+    // still opens the task, and a hold let go in place its menu.
+    down(event: PointerEvent<HTMLElement>, task: Task, holdable: boolean) {
+      tapped.current = null
       if (event.button !== 0) return
+      const mouse = event.pointerType === 'mouse'
+      // The window's long press (its menu) is this view's to give, on letting
+      // go of a held bar: it is not started for a finger.
+      if (!mouse) event.stopPropagation()
       const grip = (event.target as HTMLElement).dataset.grip
       const mode: DragMode = grip === 'start' || grip === 'end' ? grip : 'move'
-      const state = press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: event.pointerType })
+      const state: PressState = holdable
+        ? press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: event.pointerType })
+        : { kind: 'waiting', x: event.clientX, y: event.clientY }
       const el = event.currentTarget
-      const now = { state, timer: 0, task, mode, el, pointer: event.pointerId }
+      const now = { state, timer: 0, task, mode, el, pointer: event.pointerId, x: event.clientX, y: event.clientY, travelled: false }
       pressing.current = now
       if (state.kind === 'dragging') {
         take(task, mode, event.clientX, false)
@@ -301,10 +327,11 @@ export function Timeline() {
         event.preventDefault()
         return
       }
+      if (mouse) return
       now.timer = window.setTimeout(() => {
         if (pressing.current !== now) return
         now.state = press(now.state, { type: 'hold' })
-        if (now.state.kind !== 'dragging') return
+        if (now.state.kind !== 'dragging' || !holdable) return
         take(task, mode, now.state.x, true)
         feel({ impact: 'light' })
         try {
@@ -319,6 +346,7 @@ export function Timeline() {
       if (!now) return
       now.state = press(now.state, { type: 'move', x: event.clientX, y: event.clientY })
       if (now.state.kind === 'scrolling') clearTimeout(now.timer)
+      if (Math.hypot(event.clientX - now.x, event.clientY - now.y) > SLOP) now.travelled = true
       if (drag && now.state.kind === 'dragging') setDrag({ ...drag, days: daysMoved(drag, event.clientX) })
     },
     up(event: PointerEvent<HTMLElement>, task: Task) {
@@ -327,7 +355,9 @@ export function Timeline() {
       const moved = drag ? daysMoved(drag, event.clientX) : 0
       const mode = drag?.mode ?? 'move'
       const outcome = released(now.state, moved)
+      const heldInPlace = now.state.kind === 'dragging' && now.state.held && !now.travelled
       stop()
+      if (heldInPlace) return openMenu(now.el, now.x, now.y)
       // Opened by the click that follows (`tap`), not here: the task's sheet
       // would come up under the finger and that click would land on its
       // backdrop and shut it again.
@@ -459,17 +489,17 @@ export function Timeline() {
     if (moved && moved.mode !== 'end') left += moved.days * px
     if (moved?.mode === 'end') barWidth += moved.days * px
     if (moved?.mode === 'start') barWidth -= moved.days * px
+    // Wholly off the days on screen (an overdue task dated before them, or
+    // one weeks ahead): a chip at that edge of the row says which way it is,
+    // and brings it into view; its name is held at the same edge above it.
+    const edge = moved ? null : edgeOf(span, first, task.due ?? first, seen.left, seen.width)
     const presses = {
-      onDown: (e: PointerEvent<HTMLElement>) => bar.down(e, task),
+      onDown: (e: PointerEvent<HTMLElement>) => bar.down(e, task, !edge),
       onMove: bar.move,
       onUp: (e: PointerEvent<HTMLElement>) => bar.up(e, task),
       onCancel: bar.cancel,
       onTap: () => tap(task),
     }
-    // Wholly off the days on screen (an overdue task dated before them, or
-    // one weeks ahead): a chip at that edge of the row says which way it is,
-    // and brings it into view; its name is held at the same edge above it.
-    const edge = moved ? null : edgeOf(span, first, task.due ?? first, seen.left, seen.width)
     return (
       <div key={task.id} className={cn('relative', ROW)} style={{ width }} {...dropTarget}>
         <NameLine task={task} left={left} room={nameRoom} showProject={!byProject} faces={!layout.narrow} {...presses} />
@@ -595,7 +625,18 @@ export function Timeline() {
             type="button"
             role="radio"
             aria-checked={zoom === z}
+            // One stop for the keyboard: the chosen zoom; arrows choose another.
+            tabIndex={zoom === z ? 0 : -1}
             onClick={() => setZoom(z)}
+            onKeyDown={(e) => {
+              const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+              if (!step) return
+              e.preventDefault()
+              const next = TOUCH_ZOOMS[(TOUCH_ZOOMS.indexOf(zoom) + step + TOUCH_ZOOMS.length) % TOUCH_ZOOMS.length]
+              setZoom(next)
+              ;(e.currentTarget.parentElement?.querySelector(`[data-zoom="${next}"]`) as HTMLElement | null)?.focus()
+            }}
+            data-zoom={z}
             className={cn(
               'relative min-w-14 flex-1 rounded-md px-2.5 text-sm text-muted-foreground after:absolute after:inset-x-0 after:-inset-y-1',
               zoom === z && 'bg-background font-medium text-foreground shadow-sm',
@@ -714,6 +755,18 @@ export function Timeline() {
   )
 }
 
+// Set while the Timeline itself opens a task's menu (a held bar let go in
+// place), so that one contextmenu is let through to the window's menu.
+let openingMenu = false
+function openMenu(el: HTMLElement, x: number, y: number) {
+  openingMenu = true
+  try {
+    el.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }))
+  } finally {
+    openingMenu = false
+  }
+}
+
 interface Presses {
   onDown: (e: PointerEvent<HTMLElement>) => void
   onMove: (e: PointerEvent<HTMLElement>) => void
@@ -736,7 +789,7 @@ function pressHandlers({ onDown, onMove, onUp, onCancel, onTap }: Presses, point
     onPointerCancel: onCancel,
     onClick: onTap,
     onContextMenu: (e: MouseEvent<HTMLElement>) => {
-      if (pointer.current === 'mouse') return
+      if (pointer.current === 'mouse' || openingMenu) return
       e.preventDefault()
       e.stopPropagation()
     },
@@ -779,7 +832,9 @@ function NameLine({
           task={task}
           checked={leaving}
           onChange={finish}
-          className="relative size-5.5 shrink-0 after:absolute after:-inset-x-3 after:-top-[9px] after:-bottom-[5px]"
+          // The same variant as TaskCheck's own phone hit area (max-md:), or
+          // that one wins and reaches into the bar below.
+          className="relative size-5.5 shrink-0 after:absolute after:-inset-x-3 after:-top-[9px] after:-bottom-[5px] max-md:after:-inset-x-3 max-md:after:-top-[9px] max-md:after:-bottom-[5px]"
         />
         {showProject && <ProjectDot id={task.projectId} className="shrink-0" />}
         <button
@@ -804,24 +859,20 @@ function NameLine({
 // line to the row's end (34 px), and the name line presses the same task, so
 // a finger has the row's 64 px to aim at.
 function TimelineBar({ task, left, width, range, lifted, ...presses }: { task: Task; left: number; width: number; range: boolean; lifted: boolean } & Presses) {
-  const { data, noticed, edit } = useApp()
+  const { data, noticed } = useApp()
   const pointer = useRef('mouse')
   const grips = width >= GRIPS_FROM
   return (
     <div
       data-task={task.id}
       data-timeline-bar
-      // A control, to the keyboard and to the browser's touch targeting
-      // alike: without it a finger on the bar can be steered to the check
-      // above it.
+      // A control to the browser's touch targeting (without it a finger on
+      // the bar can be steered to the check above it) and to a screen
+      // reader, which hears its dates. Not a second tab stop: the name above
+      // it opens the same task.
       role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          edit(task.id)
-        }
-      }}
+      tabIndex={-1}
+      aria-label={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
       title={`${task.title}${task.due ? `, ${task.start ? `${fullDay(task.start)} to ` : ''}${fullDay(task.due)}` : ''}`}
       style={{ ...projectStyle(data.projects, task.projectId), left, width }}
       className={cn(
