@@ -39,6 +39,26 @@ touch emulation on a copy of seeded notes:
   current one, so moving a note is two taps (⋯, then the folder), as it is
   with the pickers today. Delete note is last, red, under a separator, and kept
   outside the scrolling part so a long list of projects never hides it.
+- **Ruling (review): a labelled dialog of plain buttons, not an ARIA menu** —
+  the popover keeps Radix's `role="dialog"` (the trigger says
+  `aria-haspopup="dialog"`), named "Note actions"; the folder and project rows
+  are buttons with `aria-pressed` on the current one, in groups named Folder and
+  Project. Tab and Shift+Tab move through it, Escape closes it and returns the
+  focus to ⋯. A `role="menu"` would promise arrow keys and typeahead for a
+  handful of rows; plain buttons need nothing extra and say the truth. Cost if
+  wrong: a VoiceOver user hears "dialog" instead of "menu", nothing breaks.
+- **Focus**: opened with a finger (a pointerdown on ⋯ just before), the focus
+  stays where it was, so a note being written keeps the iPad keyboard (⋯ also
+  keeps the focus off itself on mousedown); and focus moving elsewhere then
+  (a toast handing it back) does not close the menu. Opened from the keyboard
+  or by VoiceOver (no pointer), the focus goes to the current folder's row.
+  On closing, the note's text gets the focus back if it had it (with
+  `preventScroll`, as Read/Edit does); otherwise a keyboard user is returned to
+  ⋯. After Delete the menu and note are gone, so the focus goes to New note
+  rather than being left on the page body.
+- **The keyboard**: the menu's height is capped at what is left above the
+  on-screen keyboard (`keyboardInset` from `lib/live-preview.ts`, followed on
+  `visualViewport` resize while open), so Delete at its foot is never under it.
 - **Sizes**: on a tablet the header's controls are 44 px tall (`h-11`), the ⋯
   is 44x44 (the iPhone's `MoreButton`), and menu rows are 44 px.
 - **Which layout**: `useLayout() === 'tablet'` (`hooks/use-mobile.ts`): a
@@ -50,7 +70,12 @@ touch emulation on a copy of seeded notes:
 - **iPhone folder list**: Rename and Delete move into a ⋯ in the bar (an action
   sheet with Rename folder and Delete folder, Delete red and last). The bar then
   has back and ⋯, the page the compose button: three controls, all 44 px or
-  more. Rename still edits the name in place under the title.
+  more. Rename still edits the name in place under the title, and a rename
+  under way is dropped when the open folder changes. The sheet is a modal
+  dialog ("Folder actions", `aria-modal`): the focus goes to its first action,
+  Escape closes it, and the focus goes back to ⋯. Its card is opaque, so the
+  compose button under it no longer shows through beside Delete folder. ⋯ has
+  a focus ring for the keyboard.
 - **Tab hints**: the Lists menu inside the writing bar (only there on touch
   screens) leaves out the Tab and ⇧ Tab hints; "1." and "-" stay, since they
   are typed and work on a touch keyboard too.
@@ -67,11 +92,14 @@ links", opened with +, remembered per note for the session. Nothing to add.
 
 ## Checks
 
-- `ui/checks/notes-header-menu.cjs`: Chromium with touch at 820x1180, on the
-  built UI with the API faked. Counts at most three visible controls in the note
-  header, each at least 44 px tall; opens ⋯ by tap; moves the note to a folder
-  through it and sees the save; deletes it through the menu, then undoes, and
-  sees it back. Fails on origin/main.
+- `ui/checks/notes-header-menu.cjs`: Chromium with touch, on the built UI
+  with the API faked. At 820x1180 (side by side) and 1024x1366 (one note at a
+  time, a separate render path): counts at most three visible controls in the
+  note header, each at least 44 px tall; opens ⋯ by tap; moves the note to a
+  folder through it and sees the save; deletes it and undoes with the toast,
+  then deletes it again and undoes with Cmd+Z, seeing it saved back each time.
+  At 390x844: a folder's ⋯ renames it (in place) and deletes it (its note
+  is taken out of the folder, never deleted). Fails on origin/main.
 - typecheck, unit tests, build.
 - Before and after screenshots at iPhone 390x844, iPad 820x1180, 1024x1366,
   1366x1024 and desktop 1440x900.
@@ -96,8 +124,20 @@ header, measured:
 - iPhone: Rename folder through the ⋯ renames in place; opening Folder and
   Project in the note sheet logs no console error; the Lists menu in the
   writing bar shows "1." and "-" and no Tab hints.
-- typecheck, 639 unit tests, build.
+- typecheck, 639 unit tests, build. (Under full parallel load
+  `live-preview.test.ts`, which this branch does not touch, failed one test in
+  two of four runs and passed four of four alone.)
+- After review, in Chromium: a keyboard Enter on ⋯ puts the focus on the
+  current folder, Tab moves on, Escape returns it to ⋯, and the dialog has no
+  menu roles; with the note's text focused, tapping ⋯ and choosing a folder
+  leaves the focus in the text; after Delete at 1024x1366 the focus is on New
+  note; the iPhone folder sheet is `aria-modal`, takes the focus to Rename
+  folder, and Escape returns it to ⋯.
 
 ## Not verified
 
 - A real iPad and WebKit: checked in Chromium with touch emulation only.
+- The height cap above the on-screen keyboard: Chromium cannot raise the iOS
+  keyboard, so only the formula is in place, not seen working.
+- VoiceOver itself: the roles and focus were checked from the page, not with a
+  screen reader.

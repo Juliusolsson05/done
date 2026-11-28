@@ -129,6 +129,8 @@ export function Notes() {
   const [fresh, setFresh] = useState<number | null>(null)
   // The folder chosen; null is All notes.
   const [folder, setFolder] = useState<string | null>(null)
+  // A rename under way belongs to the folder it was started in.
+  useEffect(() => setRenaming(false), [folder])
   const [kept, setKeptState] = useState<string[]>(storedKept)
   // On a phone the folders come first; a tap on one goes on to its notes.
   const [atFolders, setAtFolders] = useState(true)
@@ -541,7 +543,15 @@ export function Notes() {
       project={current.projectId ?? null}
       projects={data.projects}
       onProject={(id) => refileOpen({ projectId: id })}
-      onDelete={() => remove(current)}
+      onDelete={() => {
+        remove(current)
+        // The menu and the note are gone; the focus goes to New note rather
+        // than being left nowhere.
+        requestAnimationFrame(() => {
+          if (document.activeElement === null || document.activeElement === document.body)
+            document.querySelector<HTMLElement>('[data-new-note]')?.focus({ preventScroll: true })
+        })
+      }}
     />
   )
 
@@ -693,6 +703,7 @@ export function Notes() {
             <ComposeButton onClick={() => void create(null)} />
             {folderSheet && folder !== null && (
               <ActionSheet
+                label="Folder actions"
                 onClose={() => setFolderSheet(false)}
                 actions={[
                   { label: 'Rename folder', onClick: () => setRenaming(true) },
@@ -719,7 +730,7 @@ export function Notes() {
                 <Trash2Icon />
               </Button>
             )}
-            <Button variant="ghost" size="sm" className={cn('text-muted-foreground', tablet && 'h-11')} onClick={() => void create(null)}>
+            <Button data-new-note variant="ghost" size="sm" className={cn('text-muted-foreground', tablet && 'h-11')} onClick={() => void create(null)}>
               <PlusIcon />
               New note
             </Button>

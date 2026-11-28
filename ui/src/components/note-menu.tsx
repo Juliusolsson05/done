@@ -3,11 +3,17 @@
 // right in the menu, so moving a note is two taps, as with the pickers a Mac
 // has. Delete is last, red, and outside the part that scrolls, so a long list
 // of projects never hides it.
-import { useState, type ReactNode } from 'react'
+//
+// A small dialog of plain buttons, not an ARIA menu: Tab moves through it,
+// Escape closes it. Opened with a finger it leaves the focus where it was, so
+// the note being written keeps the keyboard; opened from the keyboard or by
+// VoiceOver, the focus goes to the current folder.
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CheckIcon, FolderIcon, Trash2Icon } from 'lucide-react'
 import { ProjectDot } from '@/components/marks'
 import { MoreButton } from '@/components/notes-phone'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { keyboardInset } from '@/lib/live-preview'
 import { cn } from '@/lib/utils'
 
 export function NoteMenu({
@@ -28,6 +34,36 @@ export function NoteMenu({
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
+  // When a finger or a pointer last pressed ⋯, and whether that is what opened
+  // the menu (rather than a key or VoiceOver, which press nothing).
+  const pressedAt = useRef(0)
+  const byPointer = useRef(false)
+  const content = useRef<HTMLDivElement>(null)
+  // The note's text, when it had the focus as the menu opened: it gets it back.
+  const editing = useRef<HTMLElement | null>(null)
+  // How much of the screen's bottom the on-screen keyboard covers, so the
+  // menu, and Delete at its foot, end above it.
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!open || !viewport) return
+    const measure = () => setInset(keyboardInset(window.innerHeight, viewport))
+    measure()
+    viewport.addEventListener('resize', measure)
+    viewport.addEventListener('scroll', measure)
+    return () => {
+      viewport.removeEventListener('resize', measure)
+      viewport.removeEventListener('scroll', measure)
+    }
+  }, [open])
+  const change = (next: boolean) => {
+    if (next) {
+      byPointer.current = Date.now() - pressedAt.current < 1000
+      const active = document.activeElement
+      editing.current = active instanceof HTMLElement && active.isContentEditable ? active : null
+    }
+    setOpen(next)
+  }
   const pick = (act: () => void) => () => {
     setOpen(false)
     act()
@@ -36,10 +72,10 @@ export function NoteMenu({
     <button
       key={key}
       type="button"
-      role="menuitemradio"
-      aria-checked={on}
+      aria-pressed={on}
+      data-current={on || undefined}
       onClick={pick(act)}
-      className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[15px] active:bg-accent"
+      className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[15px] outline-none focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 active:bg-accent"
     >
       {content}
       <CheckIcon className={cn('ml-auto size-4 shrink-0 text-primary', !on && 'invisible')} />
@@ -47,16 +83,40 @@ export function NoteMenu({
   )
   const heading = (text: string) => <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">{text}</div>
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={change}>
       <PopoverTrigger asChild>
-        <MoreButton />
+        <MoreButton
+          onPointerDown={(event) => {
+            if (event.pointerType) pressedAt.current = Date.now()
+          }}
+          // A tap here must not take the focus from the note: on an iPad that
+          // would put the keyboard away.
+          onMouseDown={(event) => event.preventDefault()}
+        />
       </PopoverTrigger>
       <PopoverContent
-        role="menu"
+        ref={content}
         aria-label="Note actions"
         align="end"
-        className="flex max-h-[min(70svh,var(--radix-popover-content-available-height))] w-64 flex-col p-1"
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        style={{ maxHeight: `min(70svh, calc(var(--radix-popover-content-available-height) - ${inset}px))` }}
+        className="flex w-64 flex-col p-1"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          if (!byPointer.current) content.current?.querySelector<HTMLElement>('[data-current]')?.focus()
+        }}
+        // Opened by a finger, the focus never went in, so the focus moving
+        // elsewhere (the note's text, a toast handing it back) does not close it.
+        onFocusOutside={(event) => {
+          if (byPointer.current) event.preventDefault()
+        }}
+        onCloseAutoFocus={(event) => {
+          const note = editing.current
+          editing.current = null
+          if (note?.isConnected) {
+            event.preventDefault()
+            note.focus({ preventScroll: true })
+          } else if (byPointer.current) event.preventDefault()
+        }}
       >
         <div className="min-h-0 overflow-y-auto">
           {heading('Folder')}
@@ -101,9 +161,8 @@ export function NoteMenu({
         <div className="mt-1 border-t border-border pt-1">
           <button
             type="button"
-            role="menuitem"
             onClick={pick(onDelete)}
-            className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[15px] text-destructive active:bg-destructive/10"
+            className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[15px] text-destructive outline-none focus-visible:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-destructive/40 active:bg-destructive/10"
           >
             <Trash2Icon className="size-4 shrink-0" />
             Delete note
