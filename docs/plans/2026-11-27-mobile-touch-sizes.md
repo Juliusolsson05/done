@@ -163,7 +163,7 @@ behind developer.apple.com/design/human-interface-guidelines/layout and
 All in Chromium's touch emulation (`isMobile`, `hasTouch`) with the safe areas
 an iPhone reports injected, on the built UI with stubbed `/api`:
 
-- `ui/checks/touch-sizes.cjs` fails on `origin/main` (22 failures: Today inset
+- `ui/checks/touch-sizes.cjs` fails on `origin/main` (22 failures, also after rebasing on main at 1eef78e: Today inset
   12, pushed screen at scrollY 727, back 63x28, Time sheet page 587 wide,
   remove 28x28 at x=451, Cancel/Done 52x22 / 42x22, iPad checks 41x33,
   toggle at x=-8 and 28x28, day arrows and Timeline Today/Filter 28 tall) and
@@ -179,7 +179,7 @@ an iPhone reports injected, on the built UI with stubbed `/api`:
   16/81; Settings 16/58; task sheet in landscape 16 → 67 from the edge.
 - Desktop 1440x900 with a mouse: every measurement equal and the five
   screenshots byte-identical before and after.
-- `npm run typecheck`, `npm test` (639), `npm run build` green.
+- `npm run typecheck`, `npm test` (689, after rebasing on main), `npm run build` green.
 
 Not verified: WebKit and a real iPhone or iPad (safe areas there come from
 the device, not injected values), and anything with the on-screen keyboard up.
