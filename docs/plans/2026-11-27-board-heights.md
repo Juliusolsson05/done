@@ -64,14 +64,37 @@ Done empty. Chrome through Playwright, sidebar open and closed.
   that moves first is a scroll). After the hold the card lifts, a copy follows
   the finger, the column under it is lit, and letting go moves it there
   through the same code as a mouse drop (`update`/`complete`, so `change()`
-  and undo). A non-passive `touchmove` listener stops the page scrolling while
-  a card is held, as on the Timeline.
+  and undo). A non-passive `touchmove` listener, set up once when the Board
+  mounts, stops the page scrolling while a card is held, as on the Timeline:
+  iOS ignores `preventDefault` from a listener added after the touch began.
+  Move, release and cancel are heard on the window for the press's own
+  pointer id, so a second finger, a release off the card, a mouse button
+  that came up unheard (`buttons === 0`) or a card whose task leaves its
+  column mid-drag all end the hold cleanly. The copy under the finger is
+  portalled to `body` (the page's slide-in transform would carry a fixed box
+  off the finger) and moved through a ref; cards are memoised, so a move
+  redraws nothing but the lit column.
 - **Auto-scroll while dragging by touch:** near the top or bottom of the column
   under the finger it scrolls that column; near the left or right edge on a
   phone it scrolls the columns sideways. The speed rule is plain data in
   `lib/board-drag.ts`, with a test.
-- **The long-press menu stays.** A held card that is let go where it was does
-  nothing; a hold that does not move still lets the menu open.
+- **The rule with the long-press menu: drag on move, menu on release in
+  place.** A finger's press on a card does not start the window's own long
+  press. After the hold the card lifts; if it moves (past `SLOP`) it is a
+  drag and no menu opens however long it is held; if it is let go without
+  moving, the card's menu opens there (the Board sends the `contextmenu`).
+  The click the browser sends after a lifted card is let go is swallowed
+  once, so a hold on the check never completes the task and a hold on the
+  title never opens it. A tap still opens the task; a right click still
+  opens the menu.
+- **The phone's bars are CSS variables** (`--phone-nav`, `--tab-bar`,
+  `--phone-page-end` in `index.css`), used by the page padding (`App.tsx`),
+  the tab bar (`phone.tsx`) and the Board's height, so the Board cannot
+  quietly drift from them. The Timeline and New task still write the numbers
+  out; left for their own change.
+- **A phone held sideways** (phone layout, under 500 px tall) hides the
+  Board's large title and hint, keeping the back button and Filter: the
+  columns get 205 px instead of 144.
 
 ## Checks
 
@@ -81,7 +104,15 @@ Done empty. Chrome through Playwright, sidebar open and closed.
   the board's bottom and above the tab bar; mouse: the 45th To do card onto
   In progress, a card low into empty Done; touch: To do onto In progress,
   To do into off-screen Done by holding at the edge (phone), To do into Done
-  (iPad), and 844x390 by touch. On origin/main: 22 failures.
+  (iPad), and 844x390 by touch. Review round (#116), at 820x1180 and 390x844
+  by touch: the scroll blocker listens before any hold; the iPad hint says to
+  hold; a tap opens the task; held 500 ms on the check, 500 ms and 1000 ms on
+  the title and let go: nothing moves, completes, opens or sounds, the menu
+  opens, no copy is left; held past the long press and dragged: no menu, the
+  copy within 2 px of where it was taken, the card lands, a sound, Cmd+Z puts
+  it back; a second finger let go keeps the card held; a task finished
+  mid-drag leaves no copy and the next drag works. A mouse at 700x800 stops
+  dragging when no button is held. 844x390 gives the columns at least 190 px.
 - `npm run typecheck && npm test && npm run build`.
 
 ## Rulings made while building
@@ -94,10 +125,9 @@ Done empty. Chrome through Playwright, sidebar open and closed.
   feel slightly different from the Mac's (a copy follows instead of the
   system's drag image).
 - Ruling: on a phone the board has no minimum height (`max-md:min-h-0`).
-  Sideways (844x390) the 160 px minimum pushed Add task under the tab bar;
-  without it the columns are 144 px tall there, and still scroll and take
-  drops. Cost if wrong: short columns in landscape, which is a rare way to
-  use the Board.
+  Sideways (844x390) the 160 px minimum pushed Add task under the tab bar.
+  With the title and hint hidden sideways (review round) the columns are
+  205 px tall there.
 - Ruling: phone columns are 85% wide but at most 384 px (`max-w-sm`), so a
   phone held sideways shows two columns instead of one 690 px wide.
 - Ruling: the check runs phones with `hasTouch` but without Chromium's
@@ -105,8 +135,10 @@ Done empty. Chrome through Playwright, sidebar open and closed.
 
 ## Verified (local preview, Chrome via Playwright, seeded board)
 
-- `ui/checks/board-heights.cjs`: all pass on this branch; 22 failures on
-  origin/main with the same check (every drag case and every height case).
+- `ui/checks/board-heights.cjs`: 85 assertions, all pass on this branch. The
+  same check fails 35 at 6c02dc4 (the first PR head: every review finding it
+  could reproduce) and 29 on origin/main (several cases stop at their first
+  failure there).
 - Every viewport, sidebar open and closed: the document and the page do not
   scroll; all three columns end at the board's bottom (1440x900: 804 px,
   1280x600: 504, 1024x500: 404, iPad 1084 / 724, iPhone 743 / 289); a drop
@@ -126,6 +158,9 @@ Done empty. Chrome through Playwright, sidebar open and closed.
 - A real iPhone or iPad, and the Mac app's WebKit view: only Chrome's touch
   emulation. iOS's own long-press timing against the 380 ms hold, haptics
   on lift, and `100svh` with the real safe areas need a device.
+- The iPad scroll blocker (review finding 1) is WebKit behaviour; Chrome
+  honours a late listener, so the check asserts the listener is there before
+  the touch, not the scroll itself.
 - Auto-scroll near an edge with a mouse on the Mac uses the browser's own
   drag auto-scroll; Playwright's emulated drag cannot show it. With
   full-height columns it is no longer needed to reach a column.

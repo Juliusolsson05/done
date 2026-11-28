@@ -2,7 +2,8 @@
 // because they are drop targets; the cards and their controls are shadcn's.
 // The board takes the height its view has and each column scrolls on its
 // own, so every column is a drop target down to the board's bottom (#110).
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ViewHeader } from '@/components/list-view'
@@ -28,15 +29,25 @@ const LANES: { key: LaneKey; name: string; hint: string; dot: string }[] = [
   { key: 'done', name: 'Done today', hint: 'Drag a task here to finish it', dot: 'bg-done' },
 ]
 
-// What a card does with a pointer on a touch layout (Board's `hold`).
-interface Holding {
-  down: (event: PointerEvent<HTMLElement>, task: Task) => void
-  move: (event: PointerEvent<HTMLElement>) => void
-  up: () => void
-  cancel: () => void
-}
+// What a card hands the Board on a touch layout: a press, and a menu asked for.
+type Press = (event: PointerEvent<HTMLElement>, task: Task) => void
+type Menu = (event: MouseEvent<HTMLElement>) => void
 
-function BoardCard({ task, dragged, onDrag, hold }: { task: Task; dragged: boolean; onDrag: (id: number | null) => void; hold: Holding }) {
+// Memoised: while a card is held only the column under it changes, and
+// fifty cards need not be drawn again for that.
+const BoardCard = memo(function BoardCard({
+  task,
+  dragged,
+  onDrag,
+  onPress,
+  onMenu,
+}: {
+  task: Task
+  dragged: boolean
+  onDrag: (id: number | null) => void
+  onPress: Press
+  onMenu: Menu
+}) {
   const { data, noticed, edit, reopen } = useApp()
   // A mouse drags a card the browser's way. A finger cannot start that, so
   // on an iPhone or iPad every pointer goes through `hold` instead.
@@ -55,10 +66,8 @@ function BoardCard({ task, dragged, onDrag, hold }: { task: Task; dragged: boole
       data-task={task.id}
       onDragStart={start}
       onDragEnd={() => onDrag(null)}
-      onPointerDown={touch ? (event) => hold.down(event, task) : undefined}
-      onPointerMove={touch ? hold.move : undefined}
-      onPointerUp={touch ? hold.up : undefined}
-      onPointerCancel={touch ? hold.cancel : undefined}
+      onPointerDown={touch ? (event) => onPress(event, task) : undefined}
+      onContextMenu={touch ? onMenu : undefined}
       className={cn(
         'mb-1 flex-row items-start gap-2.5 rounded-lg p-2 pr-3 shadow-xs',
         // A pan that starts on a card still scrolls; a held card stops it
@@ -100,17 +109,50 @@ function BoardCard({ task, dragged, onDrag, hold }: { task: Task; dragged: boole
       </div>
     </Card>
   )
-}
+})
 
 // The card held by a finger, drawn under it while it moves.
 interface Lifted {
   task: Task
+  // The column it was taken from.
+  from: LaneKey
+  // Where the finger was, and where in the card it took it, and the card's
+  // width, so the copy sits as the card did.
   x: number
   y: number
-  // Where in the card it was taken, and its width, so the copy sits as the card did.
   dx: number
   dy: number
   width: number
+}
+
+// A press on a card, from pointerdown to release (Board's `onPress`).
+interface Pressing {
+  state: PressState
+  timer: number
+  task: Task
+  el: HTMLElement
+  pointer: number
+  mouse: boolean
+  // Where it went down, and whether it has moved since the card lifted.
+  x: number
+  y: number
+  travelled: boolean
+}
+
+// Eats the one click the browser sends after a held card is let go, so the
+// release is not also a tap on the check or the title under the finger.
+function swallowClick() {
+  const eat = (event: Event) => {
+    event.stopPropagation()
+    event.preventDefault()
+    done()
+  }
+  const done = () => {
+    window.removeEventListener('click', eat, true)
+    clearTimeout(timer)
+  }
+  window.addEventListener('click', eat, true)
+  const timer = window.setTimeout(done, 400)
 }
 
 // Which column is under a point, from the columns' own marks.
@@ -120,6 +162,7 @@ const laneAt = (x: number, y: number): LaneKey | null =>
 export function Board() {
   const { data, dragging, update, complete } = useApp()
   const isMobile = useIsMobile()
+  const touch = useIsTouch()
   const [card, setCard] = useState<number | null>(null)
   const [over, setOver] = useState<LaneKey | null>(null)
   const [lifted, setLifted] = useState<Lifted | null>(null)
@@ -136,11 +179,14 @@ export function Board() {
   const shown = count(columns)
   const total = count(lanes(shownTasks, TODAY))
 
-  const onDrag = (id: number | null) => {
-    setCard(id)
-    if (id === null) setOver(null)
-    dragging.current = id !== null
-  }
+  const onDrag = useCallback(
+    (id: number | null) => {
+      setCard(id)
+      if (id === null) setOver(null)
+      dragging.current = id !== null
+    },
+    [dragging],
+  )
   const moveTo = (id: number, lane: LaneKey) => {
     // Dropping in Done finishes the task; anywhere else reopens it if needed.
     // Set down where it was picked up: nothing happened, so nothing is heard.
@@ -155,80 +201,147 @@ export function Board() {
     moveTo(card, lane)
     onDrag(null)
   }
+  // The listeners below are set up once; they reach what is current through this.
+  const latest = useRef({ moveTo })
+  latest.current = { moveTo }
 
   // A press on a card on a touch layout. A finger has to hold the card still
   // first (lib/timeline-press, as on the Timeline), or the press is a scroll
   // and is left to the browser. A mouse or trackpad (an iPad's) takes it
   // once it moves, so a click still opens the task.
-  const pressing = useRef<{ state: PressState; timer: number; task: Task; el: HTMLElement; pointer: number; mouse: boolean; x: number; y: number }>(null)
+  // The rule with the card's menu: a held card that is let go without moving
+  // opens the menu there; one that moves is dragged, and no menu opens.
+  const pressing = useRef<Pressing | null>(null)
   const point = useRef({ x: 0, y: 0 })
-  const lift = (now: NonNullable<typeof pressing.current>) => {
-    const box = now.el.getBoundingClientRect()
-    setLifted({ task: now.task, x: point.current.x, y: point.current.y, dx: now.x - box.left, dy: now.y - box.top, width: box.width })
-    onDrag(now.task.id)
-    try {
-      now.el.setPointerCapture(now.pointer)
-    } catch {
-      // The finger has already gone; its release ends the press.
-    }
-  }
-  const letGo = () => {
-    if (pressing.current) clearTimeout(pressing.current.timer)
-    pressing.current = null
-    setLifted(null)
-    onDrag(null)
-  }
-  const hold: Holding = {
-    down(event, task) {
+  const copy = useRef<HTMLDivElement>(null)
+  // Set while this Board itself opens a card's menu, so the menu is let through.
+  const opening = useRef(false)
+  // The pointer that last pressed a card: a finger's long press must not open
+  // the menu by itself (the Board decides), a right click still does.
+  const lastPointer = useRef('mouse')
+
+  const stop = useRef<() => void>(() => {})
+  const letGo = useCallback(() => stop.current(), [])
+
+  const onPress = useCallback<Press>(
+    (event, task) => {
+      lastPointer.current = event.pointerType
       if (event.button !== 0 || pressing.current) return
       const mouse = event.pointerType === 'mouse'
-      const now = { state: press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: 'touch' }), timer: 0, task, el: event.currentTarget, pointer: event.pointerId, mouse, x: event.clientX, y: event.clientY }
+      // The window's long press (the menu) is the Board's to give: it is not
+      // started for a finger here, and comes on letting go of a held card.
+      if (!mouse) event.stopPropagation()
+      const now: Pressing = {
+        state: press(IDLE, { type: 'down', x: event.clientX, y: event.clientY, pointer: 'touch' }),
+        timer: 0,
+        task,
+        el: event.currentTarget,
+        pointer: event.pointerId,
+        mouse,
+        x: event.clientX,
+        y: event.clientY,
+        travelled: false,
+      }
       pressing.current = now
       point.current = { x: event.clientX, y: event.clientY }
+      const from = laneOf(task)
+
+      const lift = () => {
+        const box = now.el.getBoundingClientRect()
+        setLifted({ task, from, x: point.current.x, y: point.current.y, dx: now.x - box.left, dy: now.y - box.top, width: box.width })
+        onDrag(task.id)
+      }
+      const move = (e: globalThis.PointerEvent) => {
+        if (e.pointerId !== now.pointer) return
+        // A mouse whose button came up where the page did not hear it.
+        if (now.mouse && e.buttons === 0) return stop.current()
+        point.current = { x: e.clientX, y: e.clientY }
+        if (now.mouse && now.state.kind === 'waiting') {
+          if (Math.hypot(e.clientX - now.x, e.clientY - now.y) <= SLOP) return
+          now.state = { kind: 'dragging', x: now.x, held: false }
+          now.travelled = true
+          lift()
+        } else if (!now.mouse) {
+          now.state = press(now.state, { type: 'move', x: e.clientX, y: e.clientY })
+          if (now.state.kind === 'scrolling') return stop.current()
+        }
+        if (now.state.kind !== 'dragging') return
+        if (!now.travelled && Math.hypot(e.clientX - now.x, e.clientY - now.y) > SLOP) now.travelled = true
+        // Moved by hand, not drawn again: only the column under it is state.
+        if (copy.current) copy.current.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`
+        setOver(laneAt(e.clientX, e.clientY))
+      }
+      const up = (e: globalThis.PointerEvent) => {
+        if (e.pointerId !== now.pointer) return
+        const held = now.state.kind === 'dragging'
+        const lane = held ? laneAt(point.current.x, point.current.y) : null
+        stop.current()
+        if (!held) return
+        // The click that follows a lifted card's release is not a tap on
+        // whatever is under the finger (its check, its title).
+        swallowClick()
+        if (!now.travelled && !now.mouse) {
+          // Held and let go in place: the card's menu, where the finger is.
+          opening.current = true
+          now.el.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: now.x, clientY: now.y }))
+          opening.current = false
+          return
+        }
+        if (lane && lane !== from) latest.current.moveTo(task.id, lane)
+      }
+      const cancel = (e: globalThis.PointerEvent) => {
+        if (e.pointerId === now.pointer) stop.current()
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+      window.addEventListener('pointercancel', cancel)
+      stop.current = () => {
+        clearTimeout(now.timer)
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        window.removeEventListener('pointercancel', cancel)
+        stop.current = () => {}
+        if (pressing.current !== now) return
+        pressing.current = null
+        setLifted(null)
+        onDrag(null)
+      }
       if (mouse) return
       now.timer = window.setTimeout(() => {
         if (pressing.current !== now) return
         now.state = press(now.state, { type: 'hold' })
         if (now.state.kind !== 'dragging') return
         feel({ impact: 'light' })
-        lift(now)
+        lift()
       }, HOLD_MS)
     },
-    move(event) {
-      const now = pressing.current
-      if (!now || event.pointerId !== now.pointer) return
-      point.current = { x: event.clientX, y: event.clientY }
-      if (now.mouse && now.state.kind === 'waiting' && Math.hypot(event.clientX - now.x, event.clientY - now.y) > SLOP) {
-        now.state = { kind: 'dragging', x: now.x, held: false }
-        lift(now)
-      } else if (!now.mouse) {
-        now.state = press(now.state, { type: 'move', x: event.clientX, y: event.clientY })
-        if (now.state.kind === 'scrolling') clearTimeout(now.timer)
-      }
-      if (now.state.kind !== 'dragging') return
-      setLifted((l) => l && { ...l, x: event.clientX, y: event.clientY })
-      setOver(laneAt(event.clientX, event.clientY))
-    },
-    up() {
-      const now = pressing.current
-      if (!now) return
-      const lane = now.state.kind === 'dragging' ? laneAt(point.current.x, point.current.y) : null
-      letGo()
-      // A held card let go where it was taken was a change of mind.
-      if (lane && lane !== laneOf(now.task)) moveTo(now.task.id, lane)
-    },
-    cancel: letGo,
-  }
+    [onDrag],
+  )
+  const onMenu = useCallback<Menu>((event) => {
+    if (opening.current || lastPointer.current === 'mouse') return
+    event.preventDefault()
+    event.stopPropagation()
+  }, [])
 
-  // While a card is held: the finger's moves must not scroll the page (only
-  // a listener that is not passive may say so, and on iOS only on
-  // touchmove), and near an edge the column under it, or on a phone the
-  // columns themselves, scroll toward that edge.
+  // While a card is held the finger's moves must not scroll. Only a listener
+  // that is not passive may say so, on iOS only one on touchmove, and only
+  // one that was there when the touch began: so it is set up once, here.
+  useEffect(() => {
+    const still = (event: TouchEvent) => {
+      if (pressing.current?.state.kind === 'dragging') event.preventDefault()
+    }
+    window.addEventListener('touchmove', still, { passive: false })
+    return () => {
+      window.removeEventListener('touchmove', still)
+      stop.current()
+    }
+  }, [])
+
+  // Near an edge the column under a held card, or on a phone the columns
+  // themselves, scroll toward that edge.
   const held = lifted !== null
   useEffect(() => {
     if (!held) return
-    const still = (event: TouchEvent) => event.preventDefault()
-    window.addEventListener('touchmove', still, { passive: false })
     let frame = 0
     const step = () => {
       const { x, y } = point.current
@@ -249,14 +362,15 @@ export function Board() {
       frame = requestAnimationFrame(step)
     }
     frame = requestAnimationFrame(step)
-    return () => {
-      window.removeEventListener('touchmove', still)
-      cancelAnimationFrame(frame)
-    }
+    return () => cancelAnimationFrame(frame)
   }, [held])
-  useEffect(() => () => {
-    if (pressing.current) clearTimeout(pressing.current.timer)
-  }, [])
+
+  // The held card's task left its column under the finger (finished on
+  // another device, by an agent): there is nothing left to drag.
+  const stillThere = lifted === null || columns[lifted.from].some((t) => t.id === lifted.task.id)
+  useEffect(() => {
+    if (!stillThere) letGo()
+  }, [stillThere, letGo])
 
   return (
     <div
@@ -269,15 +383,19 @@ export function Board() {
               // tab bar, as the Timeline is (timeline.tsx), and the page's
               // bottom padding for the tab bar is given back.
               flex: 'none',
-              height: 'calc(100svh - var(--safe-top) - 2.75rem - 3.0625rem - var(--safe-bottom))',
-              marginBottom: 'calc(3.0625rem - 8rem)',
+              height: 'calc(100svh - var(--safe-top) - var(--phone-nav) - var(--tab-bar) - var(--safe-bottom))',
+              marginBottom: 'calc(var(--tab-bar) - var(--phone-page-end))',
             }
           : undefined
       }
     >
-      <ViewHeader title="Board" sub={isMobile ? 'Press and hold a card, then drag it' : 'Drag a card between columns'}>
-        <FilterButton />
-      </ViewHeader>
+      {/* A phone held sideways has little height: its large title and hint
+          give way to the columns, and the Filter stays. */}
+      <div className="contents phone:[@media(max-height:500px)]:[&_header>h1]:hidden phone:[@media(max-height:500px)]:[&_header>span]:hidden">
+        <ViewHeader title="Board" sub={touch ? 'Press and hold a card, then drag it' : 'Drag a card between columns'}>
+          <FilterButton />
+        </ViewHeader>
+      </div>
       <FilterBar shown={shown} total={total} />
       {isFiltering(filter) && shown === 0 ? (
         <NothingMatches />
@@ -319,7 +437,7 @@ export function Board() {
             {/* The cards scroll inside the column, its heading held above them. */}
             <div data-lane-scroll className="-mx-2 -mb-2 min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-2 pb-2">
               {columns[lane.key].map((task) => (
-                <BoardCard key={task.id} task={task} dragged={card === task.id} onDrag={onDrag} hold={hold} />
+                <BoardCard key={task.id} task={task} dragged={card === task.id} onDrag={onDrag} onPress={onPress} onMenu={onMenu} />
               ))}
               {columns[lane.key].length === 0 && <div className="px-2 py-4 text-center text-xs text-faint">{lane.hint}</div>}
             </div>
@@ -330,17 +448,23 @@ export function Board() {
       <div className="-mx-2 mt-7 shrink-0 max-md:mt-2">
         <AddRow />
       </div>
-      {lifted && (
+      {lifted &&
         // A copy of the held card, under the finger. The card itself stays
-        // in its column, faded, until it is let go.
-        <div
-          aria-hidden
-          className="pointer-events-none fixed z-50 rounded-lg border bg-card p-2 pl-9 text-sm shadow-lg ring-2 ring-primary/40"
-          style={{ left: lifted.x - lifted.dx, top: lifted.y - lifted.dy, width: lifted.width }}
-        >
-          <span className="line-clamp-2 wrap-anywhere">{lifted.task.title}</span>
-        </div>
-      )}
+        // in its column, faded, until it is let go. Drawn on the body: the
+        // page slides in with a transform, which would carry a fixed box
+        // inside it off the finger.
+        createPortal(
+          <div
+            ref={copy}
+            aria-hidden
+            data-board-copy
+            className="pointer-events-none fixed top-0 left-0 z-50 rounded-lg border bg-card p-2 pl-9 text-sm shadow-lg ring-2 ring-primary/40"
+            style={{ width: lifted.width, marginLeft: -lifted.dx, marginTop: -lifted.dy, transform: `translate(${lifted.x}px, ${lifted.y}px)` }}
+          >
+            <span className="line-clamp-2 wrap-anywhere">{lifted.task.title}</span>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

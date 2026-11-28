@@ -44,6 +44,22 @@ async function open(browser, viewport, touch) {
   const context = await browser.newContext({ viewport, hasTouch: touch })
   const page = await context.newPage()
   page.setDefaultTimeout(5000)
+  // Counted from before the app starts: sounds made (oscillators started),
+  // and the window's touchmove listeners that may stop a scroll.
+  await page.addInitScript(() => {
+    window.__sounds = 0
+    window.__blockers = 0
+    const start = OscillatorNode.prototype.start
+    OscillatorNode.prototype.start = function (...args) {
+      window.__sounds += 1
+      return start.apply(this, args)
+    }
+    const listen = window.addEventListener
+    window.addEventListener = function (type, fn, options) {
+      if (type === 'touchmove' && options && options.passive === false) window.__blockers += 1
+      return listen.call(this, type, fn, options)
+    }
+  })
   const state = seed()
   await page.route('http://done.test/**', async (route) => {
     const request = route.request()
@@ -200,10 +216,179 @@ async function tablet(browser) {
   }
 }
 
+// What a finger does, through Chrome's touch input: points by finger id.
+async function fingers(page) {
+  const cdp = await page.context().newCDPSession(page)
+  return (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id = 0]) => ({ x, y, id })) })
+}
+const counts = (page) => page.evaluate(() => [...document.querySelectorAll('[data-lane]')].map((c) => c.querySelectorAll('[data-task]').length))
+const sounds = (page) => page.evaluate(() => window.__sounds)
+const menuShown = (page) => page.evaluate(() => !!document.querySelector('[role="menu"]'))
+const editorShown = (page) => page.evaluate(() => !!document.querySelector('[role="dialog"]'))
+const copyBox = (page) =>
+  page.evaluate(() => {
+    const copy = document.querySelector('[data-board-copy], div[aria-hidden].pointer-events-none.fixed.z-50')
+    if (!copy) return null
+    const box = copy.getBoundingClientRect()
+    return { left: box.left, top: box.top }
+  })
+const cardIn = (page, lane, i) => page.locator(`[data-lane="${lane}"] [data-task]`).nth(i)
+const settle = async (page) => {
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+}
+
+// Pressing a card with a finger, on an iPad and on a phone.
+async function touchRules(browser, viewport) {
+  const where = `${viewport.width}x${viewport.height}`
+  const { context, page } = await open(browser, viewport, true)
+  try {
+    const t = await fingers(page)
+    // iOS only lets a touchmove listener stop a scroll if it was there when the touch began.
+    expect((await page.evaluate(() => window.__blockers)) >= 1, `${where}: the scroll blocker is listening before any card is held`)
+    if (viewport.width >= 768) expect((await page.locator('main header').innerText()).includes('hold'), `${where}: the hint says to press and hold`)
+
+    // A tap on the title opens the task, as before.
+    await cardIn(page, 'todo', 0).locator('[data-findable]').tap()
+    await page.waitForTimeout(400)
+    expect(await editorShown(page), `${where}: a tap on a card opens it`)
+    await settle(page)
+
+    // Held still on the check, then let go: the menu, and nothing else.
+    for (const [part, hold] of [
+      ['[role="checkbox"]', 500],
+      ['[data-findable]', 500],
+      ['[data-findable]', 1000],
+    ]) {
+      const box = await cardIn(page, 'todo', 0).locator(part).boundingBox()
+      const at = [box.x + Math.min(box.width / 2, 20), box.y + box.height / 2]
+      const before = await sounds(page)
+      await t('touchStart', [at])
+      await page.waitForTimeout(hold)
+      await t('touchEnd', [])
+      await page.waitForTimeout(500)
+      const name = `${part === '[data-findable]' ? 'title' : 'check'} for ${hold} ms`
+      expect((await counts(page)).join() === '50,5,0', `${where}: held still on the ${name} and let go, nothing moves or completes`)
+      expect(!(await editorShown(page)), `${where}: held still on the ${name} and let go, the task does not open`)
+      expect((await sounds(page)) === before, `${where}: held still on the ${name} and let go, nothing is heard`)
+      expect(await menuShown(page), `${where}: held still on the ${name} and let go, the card's menu opens`)
+      expect(!(await copyBox(page)), `${where}: held still on the ${name} and let go, no copy is left behind`)
+      await settle(page)
+    }
+
+    // Held past the menu's long press, then dragged: the drag wins, and the copy is under the finger.
+    const from = await center(cardIn(page, 'todo', 1))
+    const card = await cardIn(page, 'todo', 1).boundingBox()
+    const doing = await page.locator('[data-lane="doing"]').boundingBox()
+    const before = await sounds(page)
+    await t('touchStart', [from])
+    await page.waitForTimeout(1000)
+    const to = [Math.min(doing.x + 60, viewport.width - 40), from[1] + 40]
+    for (let i = 1; i <= 8; i++) {
+      await t('touchMove', [[from[0] + ((to[0] - from[0]) * i) / 8, from[1] + ((to[1] - from[1]) * i) / 8]])
+      await page.waitForTimeout(16)
+    }
+    const copy = await copyBox(page)
+    expect(
+      copy && Math.abs(copy.left - (to[0] - (from[0] - card.x))) <= 2 && Math.abs(copy.top - (to[1] - (from[1] - card.y))) <= 2,
+      `${where}: the held copy is under the finger (${copy && [Math.round(copy.left), Math.round(copy.top)]} vs ${[Math.round(to[0] - (from[0] - card.x)), Math.round(to[1] - (from[1] - card.y))]})`,
+    )
+    expect(!(await menuShown(page)), `${where}: a held card being dragged does not open the menu`)
+    await t('touchEnd', [])
+    await page.waitForTimeout(400)
+    expect((await counts(page)).join() === '49,6,0', `${where}: held past the long press and dragged, the card lands in In progress`)
+    expect(!(await menuShown(page)) && !(await editorShown(page)), `${where}: after a drag, no menu and no task open`)
+    expect((await sounds(page)) > before, `${where}: a drop is heard`)
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(400)
+    expect((await counts(page)).join() === '50,5,0', `${where}: undo puts the dropped card back`)
+
+    // A second finger let go does not drop the card the first one holds.
+    const one = await center(cardIn(page, 'todo', 2))
+    const two = await center(cardIn(page, 'todo', 4))
+    await t('touchStart', [one])
+    await page.waitForTimeout(500)
+    await t('touchMove', [[one[0] + 20, one[1] + 20]])
+    await t('touchStart', [
+      [one[0] + 20, one[1] + 20],
+      [...two, 1],
+    ])
+    await page.waitForTimeout(50)
+    // Chrome's touchEnd names the fingers that come up: the second.
+    await t('touchEnd', [[...two, 1]])
+    await page.waitForTimeout(100)
+    expect(!!(await copyBox(page)), `${where}: a second finger let go leaves the card held`)
+    await t('touchEnd', [])
+    await page.waitForTimeout(400)
+    await settle(page)
+
+    // The held card's task finishes elsewhere mid-drag: the hold ends, and the next drag works.
+    const gone = cardIn(page, 'todo', 3)
+    const id = await gone.getAttribute('data-task')
+    const g = await center(gone)
+    await t('touchStart', [g])
+    await page.waitForTimeout(500)
+    await t('touchMove', [[g[0] + 20, g[1] + 20]])
+    await page.evaluate((id) => document.querySelector(`[data-task="${id}"] [role="checkbox"]`).click(), id)
+    await page.waitForTimeout(600)
+    const empty = await page.locator('[data-lane="done"]').boundingBox()
+    await t('touchMove', [[Math.min(empty.x + 40, viewport.width - 40), empty.y + empty.height - 100]])
+    await page.waitForTimeout(50)
+    await t('touchEnd', [])
+    await page.waitForTimeout(400)
+    expect(!(await copyBox(page)), `${where}: a card finished mid-drag leaves no copy behind`)
+    const ready = await counts(page)
+    const n = await center(cardIn(page, 'todo', 0))
+    await touchDrag(page, n, [Math.min(doing.x + 60, viewport.width - 40), n[1]])
+    const after = await counts(page)
+    expect(after[1] === ready[1] + 1, `${where}: after that, the next drag works`)
+  } finally {
+    await context.close()
+  }
+}
+
+// A mouse on a touch layout (a Mac window under 768 wide; an iPad's trackpad).
+async function narrowMouse(browser) {
+  const { context, page } = await open(browser, { width: 700, height: 800 }, false)
+  try {
+    const from = await center(cardIn(page, 'todo', 0))
+    await page.mouse.move(...from)
+    await page.mouse.down()
+    await page.mouse.move(from[0] + 30, from[1] + 30, { steps: 4 })
+    // The button comes up where the page never hears it: the next move has no button held.
+    await page.evaluate(
+      ([x, y]) => {
+        const at = document.elementFromPoint(x, y)
+        at.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', buttons: 0 }))
+      },
+      [from[0] + 40, from[1] + 40],
+    )
+    await page.waitForTimeout(100)
+    expect(!(await copyBox(page)), '700x800 mouse: a card no longer follows the pointer once no button is held')
+    await page.mouse.up()
+  } finally {
+    await context.close()
+  }
+}
+
+// A phone held sideways gives the columns more than a sliver.
+async function sidewaysRoom(browser) {
+  const { context, page } = await open(browser, { width: 844, height: 390 }, true)
+  try {
+    const board = await page.locator('[data-board]').boundingBox()
+    expect(board.height >= 190, `844x390: the columns get room (${Math.round(board.height)} px tall)`)
+  } finally {
+    await context.close()
+  }
+}
+
+const ipadRules = (browser) => touchRules(browser, { width: 820, height: 1180 })
+const phoneRules = (browser) => touchRules(browser, { width: 390, height: 844 })
+
 async function check() {
   const browser = await chromium.launch({ channel: 'chrome' })
   try {
-    for (const run of [desktop, phone, phoneSideways, tablet]) {
+    for (const run of [desktop, phone, phoneSideways, tablet, ipadRules, phoneRules, narrowMouse, sidewaysRoom]) {
       try {
         await run(browser)
       } catch (error) {

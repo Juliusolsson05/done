@@ -213,7 +213,7 @@ export function TabBar() {
     // Edge to edge, with its tabs inside the safe area on every side.
     <nav
       aria-label="Views"
-      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(3.0625rem+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
+      className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(var(--tab-bar)+var(--safe-bottom))] items-start border-t border-border bg-background/80 pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl backdrop-saturate-150"
     >
       {tab('today', 'Today', CalendarIcon, late)}
       {tab('inbox', 'Inbox', InboxIcon)}
